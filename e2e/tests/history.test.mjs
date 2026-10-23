@@ -242,6 +242,32 @@ for (const browserName of BROWSERS) describe(browserName, () => {
     }
   });
 
+  test("a transaction whose input of the wallet's issues an asset is labelled an issuance, or a reissuance, not to yourself", async () => {
+    const coin = { scriptpubkey: addressScript(RECEIVE_0), value: 100000, asset: POLICY_ASSET };
+    const issuing = (seed, issuance) => ({
+      txid: seed.repeat(32),
+      vin: [{ txid: "a1".repeat(32), vout: 0, prevout: coin, is_coinbase: false, issuance }],
+      vout: [
+        { scriptpubkey: addressScript(RECEIVE_0), value: 1000, asset: OTHER_ASSET },
+        { scriptpubkey: addressScript(CHANGE_0), value: 99966, asset: POLICY_ASSET },
+        { scriptpubkey: "", value: 34, asset: POLICY_ASSET },
+      ],
+      status: { confirmed: false },
+    });
+    const issuance = issuing("e3", { asset_id: OTHER_ASSET, is_reissuance: false, assetamount: 1000 });
+    const reissuance = issuing("e4", { asset_id: OTHER_ASSET, is_reissuance: true, assetamount: 1000 });
+    ESPLORA.addressTxs = { [RECEIVE_0]: [issuance, reissuance], [CHANGE_0]: [issuance, reissuance] };
+    try {
+      const shown = await readHistory(session, "24");
+      assert.deepEqual(shown.entries.map((e) => [e.txid, e.label]).sort(), [
+        [issuance.txid, "Asset issuance"],
+        [reissuance.txid, "Asset reissuance"],
+      ]);
+    } finally {
+      delete ESPLORA.addressTxs;
+    }
+  });
+
   test("a Deposit's credit on Slot 24 (an input with is_pegin) is labelled as one, names the main-chain Deposit, and says the operator credited it", async () => {
     const depositTxid = "9d".repeat(32);
     const credit = {

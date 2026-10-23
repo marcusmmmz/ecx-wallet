@@ -81,6 +81,7 @@ export {
 export {
   SidechainServerError,
   type HistoryEntry,
+  type Issuance,
   type ReportedHistory,
   type ReportedState,
   type SidechainServer,

@@ -50,14 +50,18 @@
     toSelf: "Fee, to yourself",
     deposit: "Deposit",
     depositCredit: "Deposit from the main chain",
+    issuance: "Asset issuance",
+    reissuance: "Asset reissuance",
     confidential: "Confidential transaction",
   };
-  const ICONS: Record<ActivityKind, "receive" | "send" | "refresh" | "deposit" | "eye_off"> = {
+  const ICONS: Record<ActivityKind, "receive" | "send" | "refresh" | "deposit" | "plus" | "eye_off"> = {
     received: "receive",
     sent: "send",
     toSelf: "refresh",
     deposit: "deposit",
     depositCredit: "deposit",
+    issuance: "plus",
+    reissuance: "plus",
     confidential: "eye_off",
   };
   function label(entry: HistoryEntry): string {

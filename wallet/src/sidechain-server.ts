@@ -42,7 +42,12 @@ export interface HistoryEntry {
   depositTo?: number;
   /** A Deposit's credit on a Slot (an input claims the Deposit): the Deposit's parent-chain txid. */
   depositFrom?: string;
+  /** An input of the wallet's issues an asset (Elements): a new one, or more of one it has the token for. */
+  issuance?: Issuance;
 }
+
+/** What an Elements input issues: a new asset, or more of one through its reissuance token. */
+export type Issuance = "new" | "reissuance";
 
 /** A Slot's Treasury script on eCash, by which a server's client recognizes the wallet's Deposits. */
 export interface TreasuryScript {

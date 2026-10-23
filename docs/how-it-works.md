@@ -93,7 +93,7 @@ The API this project defines, for a sidechain with no indexer. Its protocol draf
 **What the user sees** (#33): the Activity tabs. Home's merges every chain that's on, with a chip per chain to filter. Each chain's screen has its own.
 
 - **Order:** Deposits in progress first, then "Not yet confirmed", then one section per day (`activityDays`).
-- **Each row** says what the transaction did (`activityKind`: Received, Sent, "Fee, to yourself", "Deposit to <chain>", "Deposit from the main chain"), and the wallet's net change per asset, fee included. Then its time, or a badge:
+- **Each row** says what the transaction did (`activityKind`: Received, Sent, "Fee, to yourself", "Deposit to <chain>", "Deposit from the main chain", "Asset issuance", "Asset reissuance"), and the wallet's net change per asset, fee included. Then its time, or a badge:
   - **Pending:** trusted. It spends only the wallet's own coins, each confirmed or from a trusted transaction.
   - **Unconfirmed:** anything else, with a warning (for a Deposit's credit: the operator credited it, not in a block yet).
 - **Tapping a row** shows its status, when it was mined, the chain and its id, the txid with Copy, a Deposit's credit's main-chain txid, and who reported it.
@@ -102,6 +102,7 @@ The API this project defines, for a sidechain with no indexer. Its protocol draf
 
 - History is read only when a tab is first opened: `history.reported` per chain, in parallel. This session's last one (`history.cached`) shows while it refreshes. A chain that fails says so with Retry; the others still show.
 - **Over Esplora** (`SidechainServer.history`), the wallet reads `/address/:a/txs` for its 40 watched addresses, merges them by txid and works the rest out itself:
+  - "Asset issuance" (or "Asset reissuance") when an input of the wallet's issues an asset (Esplora's `issuance` on Elements), ahead of "Fee, to yourself";
   - "Fee, to yourself" when every output is the wallet's;
   - "Deposit to Slot N" for an M5 it funded to the Treasury script of a Slot it supports;
   - "Deposit from the main chain" for a transaction with an input claiming a Deposit (Esplora's `is_pegin`), whose `txid` is that Deposit's;

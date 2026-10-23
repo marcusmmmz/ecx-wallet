@@ -3,11 +3,12 @@
 import type { HistoryEntry } from "./sidechain-server";
 
 /** What a transaction did for the wallet. */
-export type ActivityKind = "received" | "sent" | "toSelf" | "deposit" | "depositCredit" | "confidential";
+export type ActivityKind = "received" | "sent" | "toSelf" | "deposit" | "depositCredit" | "issuance" | "reissuance" | "confidential";
 
 export function activityKind(entry: HistoryEntry): ActivityKind {
   if (entry.depositTo !== undefined) return "deposit";
   if (entry.depositFrom !== undefined) return "depositCredit";
+  if (entry.issuance !== undefined) return entry.issuance === "new" ? "issuance" : "reissuance";
   if (entry.toSelf) return "toSelf";
   if (entry.amounts.length === 0 && entry.hidden) return "confidential";
   return entry.amounts.some((a) => a.amount.startsWith("-")) ? "sent" : "received";
