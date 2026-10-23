@@ -191,7 +191,7 @@ The handler checks a request in this order:
 1. **The envelope:** unknown MAJOR version → 4200, unknown fields are ignored, expired → -32602.
 2. **The Grant:** Slot and method → 4100.
 3. **The Slot's Chain Module's `check`:** a wrong ELIP-101 genesis, any confidential input or output, or inputs without `witness_utxo` → -32602. This needs no Starter, so it runs before any unlock prompt.
-4. **`decode`**, after unlocking: an input without `bip32_derivation` that doesn't spend the address `getAddresses` gives out, or a PSET with no input of the wallet's, → -32602 (ADR 0007). Otherwise a Clear View, or Blind with the facts the module can verify. Blind needs the Grant's Blind Signing opt-in (4100 without it).
+4. **`decode`**, after unlocking: an input without `bip32_derivation` that doesn't spend the address `getAddresses` gives out, or a PSET with no input of the wallet's, → -32602 (ADR 0007). Otherwise a Clear View, or Blind with the facts the module can verify. Blind needs the Grant's Blind Signing opt-in (4100 without it). A new issuance is Clear: the window shows the asset and token ids the Decoder derives, in base units, and the contract hash. A reissuance stays Blind (ADR 0008). Blind facts list what leaves the wallet and, separately, what comes into it.
 
 There is one approval window per request. It asks to unlock first if the wallet is locked, then shows the request. `sign` returns the same PSET with signatures on the inputs that re-derive to the Starter, and nothing else added: an input spending the given-out address gets no `bip32_derivation` entry written back.
 

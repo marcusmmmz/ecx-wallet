@@ -53,6 +53,7 @@ function readClearView(approval) {
       })),
       fee: text(document.querySelector("[data-fee]")),
       summary: text(document.querySelector("[data-hint-summary]")),
+      issuance: text(document.querySelector("[data-issuance]")),
     };
   });
 }
@@ -100,6 +101,24 @@ for (const browserName of BROWSERS) describe(browserName, () => {
 
     await approval.click("[data-approve]");
     assert.deepEqual(await signing, { result: PSETS.clear.signed });
+  });
+
+  test("a new issuance is a Clear View, signed without the Blind opt-in, naming the asset and token the wallet derives", async () => {
+    const signing = signTransaction(page, signingRequest(PSETS.issuance.payload));
+    const approval = await session.waitForApprovalWindow();
+    const shown = await readClearView(approval);
+
+    assert.equal(shown.clearView, true);
+    assert.deepEqual(shown.dangerous, [], "issuing costs only the fee");
+    assert.match(shown.issuance, /^Creates a new asset 1,000,000 base units of new asset \S+ 1 base units of its reissuance token \S+\. .*can't issue more.* Contract hash [0-9a-f]{64} /);
+    const [asset, token, change] = shown.outputs;
+    assert.match(asset.text, /^1,000,000 New asset /);
+    assert.match(token.text, /^1 Reissuance token /);
+    assert.match(change.text, /^0\.00099 ECX\b/);
+    assert.ok(asset.yours && token.yours && change.yours, "all back to the address getAddresses gave out");
+
+    await approval.click("[data-approve]");
+    assert.deepEqual(await signing, { result: PSETS.issuance.signed });
   });
 
   test("dangerous modes come above everything else; a withdrawal is described as irreversible and slow", async () => {

@@ -228,6 +228,8 @@
   {@const view = prompt.decoded.view}
   {@const labels = prompt.hints?.outputLabels ?? {}}
   {@const dangerous = view.dangerousModes.length > 0}
+  {@const issuances = view.inputs.flatMap((i) => (i.issuance ? [i.issuance] : []))}
+  {@const issued = new Map(issuances.flatMap((i): [string, string][] => [[i.asset.asset, "New asset"], ...(i.token ? [[i.token.asset, "Reissuance token"] as [string, string]] : [])]))}
   <main class="screen" data-approval-ready data-clear-view>
     {#if dangerous}
       <section class="danger-box" role="alert">
@@ -244,6 +246,27 @@
     </div>
     {@render requester(prompt.origin, prompt.chain)}
 
+    {#each issuances as issuance (issuance.asset.asset)}
+      <section class="card stack" data-issuance>
+        <h2>Creates a new asset</h2>
+        <div data-issued-asset>
+          {amountText(issuance.asset.amount, issuance.asset.asset, assets)} base units of new asset
+          <code title={issuance.asset.asset}>{shortAsset(issuance.asset.asset)}</code>
+        </div>
+        {#if issuance.token}
+          <div data-issued-token>
+            {amountText(issuance.token.amount, issuance.token.asset, assets)} base units of its reissuance token
+            <code title={issuance.token.asset}>{shortAsset(issuance.token.asset)}</code>.
+            <span class="muted small">This wallet's tokens are unblinded, so they can't issue more of the asset.</span>
+          </div>
+        {/if}
+        <div class="small" data-contract-hash>
+          {#if issuance.contractHash}Contract hash <code>{issuance.contractHash}</code>{:else}No contract{/if}
+        </div>
+        <p class="muted small">The amount is in base units: the asset's precision is in its contract, which this wallet doesn't read.</p>
+      </section>
+    {/each}
+
     <section class="stack">
       <h2>Outputs</h2>
       <ol class="stack">
@@ -256,7 +279,7 @@
                 {@const named = assets.some((n) => n.id === output.asset)}
                 <span class="amount">{amountText(output.amount, output.asset, assets)}</span>
                 {#if !named}
-                  <span class="muted small">Unknown asset <code title={output.asset}>{shortAsset(output.asset)}</code></span>
+                  <span class="muted small">{issued.get(output.asset) ?? "Unknown asset"} <code title={output.asset}>{shortAsset(output.asset)}</code></span>
                 {/if}
               {/if}
               <span class="index muted small">Output {output.index}</span>
@@ -338,6 +361,8 @@
   </main>
 {:else if prompt.kind === "sign" && prompt.decoded.kind === "blind"}
   {@const facts = prompt.decoded.verifiableFacts}
+  {@const leaving = facts.totalLeaving.filter((a) => BigInt(a.amount) > 0n)}
+  {@const comingIn = facts.totalLeaving.filter((a) => BigInt(a.amount) < 0n).map((a) => ({ ...a, amount: a.amount.slice(1) }))}
   <main class="screen" data-approval-ready data-blind>
     <div class="blind-banner" role="alert">
       <h1><Icon name="eye_off" size={24} /> Blind Signing</h1>
@@ -367,8 +392,12 @@
         </dd>
         <dt>Total leaving your wallet</dt>
         <dd>
-          {#each facts.totalLeaving as a (a.asset)}<div data-total-leaving>{amount(a)}</div>{:else}<div>Nothing</div>{/each}
+          {#each leaving as a (a.asset)}<div data-total-leaving>{amount(a)}</div>{:else}<div>Nothing</div>{/each}
         </dd>
+        {#if comingIn.length > 0}
+          <dt>Coming into your wallet</dt>
+          <dd>{#each comingIn as a (a.asset)}<div data-coming-in>{amount(a)}</div>{/each}</dd>
+        {/if}
         <dt>Fee</dt>
         <dd>{#each facts.fee as a (a.asset)}<div data-fee>{amount(a)}</div>{:else}<div>None stated</div>{/each}</dd>
         {#if facts.unknownFields.length > 0}

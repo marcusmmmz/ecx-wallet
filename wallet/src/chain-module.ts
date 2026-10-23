@@ -188,10 +188,22 @@ export type DangerousMode =
   | { kind: "firstDeposit"; output: number };
 
 /** What a request the Decoder fully understands does. Data only: `app` renders it. */
+/**
+ * A new asset an input issues, its ids derived by the Decoder. Amounts in base units: the precision
+ * is in the contract, which the wallet doesn't see.
+ */
+export interface ClearIssuance {
+  asset: AssetAmount;
+  /** The reissuance token, if any. Explicit, so it can never reissue (docs/adr/0008). */
+  token?: AssetAmount;
+  /** The committed contract's hash, display hex, if any. */
+  contractHash?: string;
+}
+
 export interface ClearView {
   dangerousModes: DangerousMode[];
-  /** `treasury`: the Slot whose Treasury the input spends (L1 only). */
-  inputs: (AssetAmount & { index: number; yours: boolean; treasury?: number })[];
+  /** `treasury`: the Slot whose Treasury the input spends (L1 only). `issuance`: Elements only. */
+  inputs: (AssetAmount & { index: number; yours: boolean; treasury?: number; issuance?: ClearIssuance })[];
   /** Every output except the fee. */
   outputs: (AssetAmount & { index: number; destination: Destination })[];
   fee: AssetAmount;

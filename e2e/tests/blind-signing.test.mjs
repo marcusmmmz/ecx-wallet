@@ -41,6 +41,7 @@ function readSigningApproval(approval) {
       chain: document.querySelector("[data-chain]")?.textContent.trim(),
       ownedInputs: texts("[data-owned-input]"),
       totalLeaving: texts("[data-total-leaving]"),
+      comingIn: texts("[data-coming-in]"),
       fee: texts("[data-fee]"),
       unknownFields: texts("[data-unknown-field]"),
     };
@@ -104,6 +105,18 @@ for (const browserName of BROWSERS) describe(browserName, () => {
 
     await approval.click("[data-approve]");
     assert.deepEqual(await signing, { result: PSETS.blind.signed });
+  });
+
+  test("what comes into the wallet is shown as coming in, not as a negative amount leaving", async () => {
+    const signing = signTransaction(blindApp, signingRequest(PSETS.blindSwap.payload));
+    const approval = await session.waitForApprovalWindow();
+    const shown = await readSigningApproval(approval);
+    assert.equal(shown.blind, true);
+    assert.deepEqual(shown.totalLeaving, ["0.00071 ECX"]);
+    assert.equal(shown.comingIn.length, 1);
+    assert.match(shown.comingIn[0], /^500 \(Unknown asset 7777/);
+    await approval.click("[data-approve]");
+    assert.deepEqual(await signing, { result: PSETS.blindSwap.signed });
   });
 
   test("rejecting in the window returns 4001", async () => {

@@ -59,8 +59,11 @@ fn a_foreign_input_without_bip32_derivation_passes_check_since_only_the_starter_
 
 #[test]
 fn an_input_spending_the_address_get_addresses_gives_out_needs_no_bip32_derivation() {
-    let Decoded::Blind { verifiable_facts: facts, .. } = decode(&b64(&dex_issuance()), STARTER).unwrap() else {
-        panic!("expected Blind: an issuance")
+    // An unknown field keeps it Blind, so the facts are what the user sees.
+    let mut pset = dex_issuance();
+    pset.global.unknown.insert(elements_miniscript::elements::pset::raw::Key { type_value: 0xf0, key: vec![] }, vec![1]);
+    let Decoded::Blind { verifiable_facts: facts, .. } = decode(&b64(&pset), STARTER).unwrap() else {
+        panic!("expected Blind: an unknown field")
     };
     assert_eq!(facts.owned_inputs.iter().map(|i| (i.index, i.amount.as_str())).collect::<Vec<_>>(), vec![(0, "100000")]);
     // Asset, token and change all come back to `0/0`: only the fee leaves.

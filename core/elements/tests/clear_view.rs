@@ -5,7 +5,7 @@ mod common;
 use common::*;
 use elements_miniscript::elements::pset::Output;
 use elements_miniscript::elements::Script;
-use ecx_elements::{decode, network, ClearView, DangerousMode, Decoded, Destination};
+use ecx_elements::{decode, network, AssetAmount, ClearIssuance, ClearView, DangerousMode, Decoded, Destination};
 
 fn clear(pset: &Pset) -> ClearView {
     match decode(&b64(pset), STARTER).unwrap() {
@@ -47,6 +47,59 @@ fn an_output_is_yours_only_if_it_re_derives_not_because_it_claims_our_key() {
     pset.outputs_mut()[0].bip32_derivation.insert(ours.pk, (ours.fingerprint, ours.path.clone()));
     let view = clear(&pset);
     assert_eq!(view.outputs[0].destination, Destination::Address { address: address(FOREIGN, 0, 1), yours: false });
+}
+
+#[test]
+fn a_new_issuance_is_a_clear_view_with_the_asset_and_token_the_wallet_derives_itself() {
+    use elements_miniscript::elements::{AssetId, ContractHash, OutPoint};
+    use elements_miniscript::elements::hashes::Hash;
+    let pset = dex_issuance();
+    let input = &pset.inputs()[0];
+    let entropy = AssetId::generate_asset_entropy(
+        OutPoint::new(input.previous_txid, input.previous_output_index),
+        ContractHash::from_byte_array([0x5c; 32]),
+    );
+    let (asset, token) = (AssetId::from_entropy(entropy), AssetId::reissuance_token_from_entropy(entropy, false));
+
+    let view = clear(&pset);
+    assert!(view.dangerous_modes.is_empty(), "issuance costs only the fee: {:?}", view.dangerous_modes);
+    assert_eq!(
+        view.inputs[0].issuance,
+        Some(ClearIssuance {
+            asset: AssetAmount { asset: asset.to_string(), amount: "1000000".into() },
+            token: Some(AssetAmount { asset: token.to_string(), amount: "1".into() }),
+            contract_hash: Some(ContractHash::from_byte_array([0x5c; 32]).to_string()),
+        })
+    );
+    // The new asset and the token go back to the address getAddresses gave out.
+    let to = |i: usize| (view.outputs[i].asset.clone(), view.outputs[i].destination.clone());
+    let ours = Destination::Address { address: address(STARTER, 0, 0), yours: true };
+    assert_eq!(to(0), (asset.to_string(), ours.clone()));
+    assert_eq!(to(1), (token.to_string(), ours));
+}
+
+#[test]
+fn an_issuance_without_a_token_or_a_contract_says_so() {
+    let mut pset = dex_issuance();
+    pset.inputs_mut()[0].issuance_inflation_keys = None;
+    pset.inputs_mut()[0].issuance_asset_entropy = None;
+    pset.remove_output(1); // the token
+    let issuance = clear(&pset).inputs[0].issuance.clone().unwrap();
+    assert_eq!((issuance.token, issuance.contract_hash), (None, None));
+}
+
+#[test]
+fn a_reissuance_stays_blind_since_an_explicit_token_can_never_reissue() {
+    use elements_miniscript::elements::secp256k1_zkp::Tweak;
+    let mut pset = dex_issuance();
+    pset.inputs_mut()[0].issuance_blinding_nonce = Some(Tweak::from_inner([1; 32]).unwrap());
+    let reason = blind_reason(&pset);
+    assert!(reason.contains("reissues"), "{reason}");
+}
+
+#[test]
+fn an_ordinary_input_has_no_issuance() {
+    assert!(clear(&transfer()).inputs.iter().all(|i| i.issuance.is_none()));
 }
 
 #[test]
@@ -165,7 +218,6 @@ fn other_asset() -> elements_miniscript::elements::AssetId {
 fn a_known_field_the_decoder_does_not_explain_makes_the_request_blind_not_a_partial_clear_view() {
     use elements_miniscript::elements::locktime::Height;
     let cases: Vec<(&str, fn(&mut Pset))> = vec![
-        ("an issuance", |p| p.inputs_mut()[0].issuance_value_amount = Some(1)),
         ("a peg-in", |p| p.inputs_mut()[1].pegin_value = Some(1)),
         ("a final scriptSig", |p| p.inputs_mut()[1].final_script_sig = Some(Script::from(vec![0x51]))),
         ("a required height locktime", |p| p.inputs_mut()[1].required_height_locktime = Some(Height::from_consensus(5).unwrap())),

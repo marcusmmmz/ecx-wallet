@@ -149,6 +149,21 @@ pub fn transfer_with_unknown_fields() -> Pset {
     pset
 }
 
+/// `transfer_with_unknown_fields()` that is also a swap: a third, foreign input brings 500 of
+/// another asset, paid to our change key. Blind, with something coming in.
+pub fn blind_swap() -> Pset {
+    let other = AssetId::from_slice(&[0x77; 32]).unwrap();
+    let mut pset = transfer_with_unknown_fields();
+    let mut theirs = input(&key(FOREIGN, 0, 2), 500, 3);
+    theirs.witness_utxo.as_mut().unwrap().asset = Asset::Explicit(other);
+    pset.add_input(theirs);
+    let ours = key(STARTER, 1, 1);
+    let mut incoming = Output::new_explicit(ours.script_pubkey.clone(), 500, other, None);
+    incoming.bip32_derivation.insert(ours.pk, (ours.fingerprint, ours.path.clone()));
+    pset.add_output(incoming);
+    pset
+}
+
 /// `transfer()` whose foreign input's UTXO has a confidential (committed) value.
 pub fn with_confidential_input() -> Pset {
     use elements_miniscript::elements::secp256k1_zkp::{Generator, PedersenCommitment, Secp256k1};
