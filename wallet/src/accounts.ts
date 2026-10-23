@@ -56,6 +56,8 @@ export interface SlotAddress {
   chain: string;
   /** In the chain's own encoding. */
   address: string;
+  /** The key the address pays: 33-byte compressed, hex. */
+  publicKey: string;
 }
 
 /** The module's Chain Entry and the network in it the module serves. */
@@ -170,10 +172,16 @@ export function createKeyRouting(deps: Keys & ChainModules) {
 
 export type KeyRouting = ReturnType<typeof createKeyRouting>;
 
+/**
+ * How many receive addresses, from index 0, the wallet gives out. Must equal the Elements module's
+ * `APP_RECEIVE_ADDRESSES`: a request may spend those without a `bip32_derivation` entry (docs/adr/0007).
+ */
+export const APP_RECEIVE_ADDRESSES = 1;
+
 /** The receive address(es) a chain's module derives from its key alone. */
 async function receive<K extends ChainKey>({ module, chain, key }: KeyedChain<K>): Promise<SlotAddress[]> {
-  const account = module.deriveAccount(await key(), { receive: 1 });
-  return account.receive.map(({ address }) => ({ chain, address }));
+  const account = module.deriveAccount(await key(), { receive: APP_RECEIVE_ADDRESSES });
+  return account.receive.map(({ address, publicKey }) => ({ chain, address, publicKey }));
 }
 
 export function createAccounts(deps: Keys & ChainModules) {

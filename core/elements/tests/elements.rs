@@ -3,6 +3,9 @@
 //! Address fixtures were computed independently of this crate, in the LWK 0.19.0 probe used for
 //! the spec's research notes, from the Slot 24 Starter of "abandon … about" with no passphrase
 //! (itself a BitWindow `DeriveStarter` vector, see core/vault/tests/vault.rs).
+mod common;
+
+use common::hex_bytes;
 use ecx_elements::chain_entry::{check_chain_entry, CHAIN_ENTRY_JSON};
 use ecx_elements::{chain_entry, declare, derive_account, ChainEntry, ServerApi};
 
@@ -45,6 +48,18 @@ fn the_watch_data_is_the_explicit_wpkh_descriptor_on_lwks_non_mainnet_default_pa
         account.descriptor,
         "elwpkh([3b27f87d/84h/1h/0h]tpubDDL3PFxTGwYoTxQHpMfqnwzdZoPHtAxpSnXWkQAfV1eQutNJss45qjiXwTYwzNfmi1a63E4M3Q4v4FPw2xzf4ztGDanQJqndsAAYVRnYixi/<0;1>/*)"
     );
+}
+
+#[test]
+fn each_address_carries_the_compressed_public_key_its_script_pays() {
+    use elements_miniscript::elements::hashes::{hash160, Hash};
+    let account = derive_account(STARTER, 2, 1).unwrap();
+    for entry in account.receive.iter().chain(&account.change) {
+        let pk = hex_bytes(&entry.public_key);
+        assert_eq!(pk.len(), 33, "compressed");
+        let script = [&[0x00, 0x14][..], hash160::Hash::hash(&pk).as_byte_array()].concat();
+        assert_eq!(entry.script_pubkey, script.iter().map(|b| format!("{b:02x}")).collect::<String>());
+    }
 }
 
 #[test]

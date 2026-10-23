@@ -61,7 +61,7 @@ fn rows(view: &ClearView) -> Vec<(String, u64, String, bool)> {
 
 fn signed_tx(payload: &str) -> (Transaction, String) {
     let finalized = finalize(&sign(payload, STARTER).unwrap()).unwrap();
-    let bytes: Vec<u8> = (0..finalized.tx.len()).step_by(2).map(|i| u8::from_str_radix(&finalized.tx[i..i + 2], 16).unwrap()).collect();
+    let bytes = hex_bytes(&finalized.tx);
     (deserialize(&bytes).unwrap(), finalized.txid)
 }
 

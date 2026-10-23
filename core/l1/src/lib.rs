@@ -87,6 +87,8 @@ pub struct AddressEntry {
     pub address: String,
     /// Hex.
     pub script_pubkey: String,
+    /// The key the script pays: 33-byte compressed, hex.
+    pub public_key: String,
 }
 
 /// The L1 Account Key → its account's descriptor, its first `receive_count` receive addresses and
@@ -99,7 +101,8 @@ pub fn derive_account(account_key: &str, receive_count: u32, change_count: u32) 
             .map(|index| {
                 let script = keys.script(chain, index)?;
                 let address = address(&script).ok_or("P2WPKH has an address")?;
-                Ok(AddressEntry { index, address, script_pubkey: hex(script.as_bytes()) })
+                let public_key = hex(&keys.public_key(chain, index)?.serialize());
+                Ok(AddressEntry { index, address, script_pubkey: hex(script.as_bytes()), public_key })
             })
             .collect::<Result<Vec<_>, String>>()
     };

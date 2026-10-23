@@ -184,7 +184,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
       [PSETS.wrongGenesis.payload, /genesis/i],
       [PSETS.confidentialInput.payload, /confidential/i],
       [PSETS.confidentialOutput.payload, /confidential/i],
-      [PSETS.missingDerivation.payload, /bip32_derivation/],
+      // Not a missing bip32_derivation: only the Starter can tell it from the address it gave out.
     ];
     for (const [payload, message] of starterFree) {
       const answer = await answeredWithoutWindow(signTransaction(blindApp, signingRequest(payload)));

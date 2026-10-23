@@ -8,6 +8,9 @@ import { after, before, describe, test } from "node:test";
 import { BROWSERS, homeSettled, launchWallet, openTestApp, openWalletPage, serveTestApp, setUpWallet, WALLET_PASSWORD } from "../harness.mjs";
 
 const SLOT_24_ADDRESS = "elements1qew44aehkjstjm56ng2rjrz57vwxh5g9su6dlpm";
+/** The key that address pays (its p2wpkh is checked in core/elements/tests/elements.rs). */
+const SLOT_24_PUBLIC_KEY = "03cb6668b63d283f844f58387399eec95413928b545118ff4c57e5bac2f1562603";
+const SLOT_24_ENTRY = { chain: "ecash:betanet-s24", address: SLOT_24_ADDRESS, publicKey: SLOT_24_PUBLIC_KEY };
 /** BIP84's own vector for "abandon … about", m/84'/0'/0'/0/0 (bip-0084.mediawiki). */
 const L1_ADDRESS = "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu";
 
@@ -92,10 +95,10 @@ for (const browserName of BROWSERS) describe(browserName, () => {
     await page.close();
   });
 
-  test("getAddresses returns the Slot 24 address to an origin whose Grant covers Slot 24", async () => {
+  test("getAddresses returns the Slot 24 address and its public key to an origin whose Grant covers Slot 24", async () => {
     const page = await connect(session, app, "addresses.localhost", { slots: [24], methods: ["getAddresses"] });
     const answer = await page.evaluate(() => window.testApp.request("getAddresses", { slot: 24 }));
-    assert.deepEqual(answer, { result: [{ chain: "ecash:betanet-s24", address: SLOT_24_ADDRESS }] });
+    assert.deepEqual(answer, { result: [SLOT_24_ENTRY] });
     await page.close();
   });
 
@@ -129,7 +132,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
     await approval.waitForSelector("[data-unlock-required]");
     await typeInto(approval, "[data-password]", WALLET_PASSWORD);
     await approval.click("[data-unlock]");
-    const expected = { result: [{ chain: "ecash:betanet-s24", address: SLOT_24_ADDRESS }] };
+    const expected = { result: [SLOT_24_ENTRY] };
     assert.deepEqual(await asking, [expected, expected]);
     assert.equal((await page.evaluate(() => window.testApp.request("getGrant"))).result?.unlocked, true);
     await page.close();

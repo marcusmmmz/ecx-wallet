@@ -83,8 +83,11 @@ pub enum RefusalCode {
     WrongGenesis,
     /// A confidential input or output: v0 is explicit-only (rule 6).
     Confidential,
-    /// An input without `witness_utxo` or `bip32_derivation` (rule 7).
+    /// An input without `witness_utxo`, or without `bip32_derivation` and not spending an address
+    /// the wallet gives apps (rule 7).
     MissingInputFields,
+    /// No input in the PSET is this Starter's: signing would change nothing.
+    NothingToSign,
     /// The Starter handed in isn't one (a wallet bug, not the requester's).
     InvalidStarter,
     /// `build_transfer`: the coins don't cover the amounts and the fee.
@@ -102,7 +105,8 @@ fn genesis_key() -> ProprietaryKey {
     ProprietaryKey::from_pset_pair(0x02, vec![])
 }
 
-/// Parses `payload` and applies rules 5-7, in order. `sign` runs the same checks.
+/// Parses `payload` and applies rules 5-7, in order, as far as they need no Starter: the rest of
+/// rule 7 is [`ownership_rules`]. `sign` runs the same checks.
 pub(crate) fn validated(payload: &str) -> Result<PartiallySignedTransaction, Refusal> {
     let pset = PartiallySignedTransaction::from_str(payload)
         .map_err(|e| refuse(RefusalCode::Malformed, format!("The payload is not a PSET: {e}")))?;
@@ -128,16 +132,28 @@ pub(crate) fn validated(payload: &str) -> Result<PartiallySignedTransaction, Ref
         return Err(refuse(RefusalCode::Confidential, format!("Output {i} is confidential; this wallet is explicit-only.")));
     }
 
-    // 7. Every input says what it spends and whose key it needs.
-    for (i, input) in pset.inputs().iter().enumerate() {
-        if input.witness_utxo.is_none() {
-            return Err(refuse(RefusalCode::MissingInputFields, format!("Input {i} has no witness_utxo.")));
-        }
-        if input.bip32_derivation.is_empty() {
-            return Err(refuse(RefusalCode::MissingInputFields, format!("Input {i} has no bip32_derivation.")));
-        }
+    // 7. Every input says what it spends.
+    if let Some(i) = pset.inputs().iter().position(|input| input.witness_utxo.is_none()) {
+        return Err(refuse(RefusalCode::MissingInputFields, format!("Input {i} has no witness_utxo.")));
     }
     Ok(pset)
+}
+
+/// The rest of rule 7, which needs the Starter: every input says whose key it needs, unless it spends
+/// an address the wallet gave apps. Then, at least one input must be this Starter's.
+pub(crate) fn ownership_rules(pset: &PartiallySignedTransaction, wallet: &Wallet) -> Result<(), Refusal> {
+    let mut owns_any = false;
+    for (i, input) in pset.inputs().iter().enumerate() {
+        let owned = wallet.owned_input_key(input).is_some();
+        if input.bip32_derivation.is_empty() && !owned {
+            return Err(refuse(RefusalCode::MissingInputFields, format!("Input {i} has no bip32_derivation.")));
+        }
+        owns_any |= owned;
+    }
+    if !owns_any {
+        return Err(refuse(RefusalCode::NothingToSign, "No input in this PSET is this wallet's: there is nothing to sign."));
+    }
+    Ok(())
 }
 
 fn input_is_confidential(input: &Input) -> bool {
@@ -168,8 +184,8 @@ fn output_is_confidential(output: &Output) -> bool {
         || output.blind_asset_proof.is_some()
 }
 
-/// The refusals that need no Starter (rules 5-7), so the wallet can refuse before asking the user
-/// to unlock. `decode` and `sign` run them again.
+/// The refusals that need no Starter (rules 5, 6 and the first half of 7), so the wallet can refuse
+/// before asking the user to unlock. `decode` and `sign` run them again.
 pub fn check(payload: &str) -> Result<(), Refusal> {
     validated(payload).map(|_| ())
 }
@@ -177,6 +193,7 @@ pub fn check(payload: &str) -> Result<(), Refusal> {
 pub fn decode(payload: &str, starter: &str) -> Result<Decoded, Refusal> {
     let pset = validated(payload)?;
     let wallet = Wallet::new(starter).map_err(|e| refuse(RefusalCode::InvalidStarter, e))?;
+    ownership_rules(&pset, &wallet)?;
     let classified = classify(&pset, &wallet);
     let facts = verifiable_facts(&pset, &classified);
     if !facts.unknown_fields.is_empty() {

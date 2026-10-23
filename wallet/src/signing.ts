@@ -61,8 +61,9 @@ export async function chainModuleFor(deps: SigningDeps, request: SigningRequest)
 }
 
 /**
- * Validation steps 5-7 (the Chain Module's, before any unlock prompt: they need no Starter), then
- * unlock if needed, Blind vs `blindRefusal` (needs the Starter to decode), the user's approval and
+ * Validation steps 5-7 as far as they need no Starter (the Chain Module's `check`, before any unlock
+ * prompt), then unlock if needed, the rest of step 7 and Blind vs `blindRefusal` (both need the
+ * Starter to decode), the user's approval and
  * the signature. `blindRefusal` is why a Blind request must be refused, or undefined if the
  * requester may Blind-sign. The request only ever reaches its own Slot's Chain Module, with that
  * Slot's Starter. Returns the signed payload. `approval` is a window the caller already opened (to

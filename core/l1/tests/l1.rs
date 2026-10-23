@@ -16,6 +16,13 @@ fn derives_bip84s_receive_and_change_addresses() {
 }
 
 #[test]
+fn each_address_carries_its_compressed_public_key() {
+    // BIP84's vector for m/84'/0'/0'/0/0.
+    let account = derive_account(&account_key(), 1, 0).unwrap();
+    assert_eq!(account.receive[0].public_key, "0330d54fd0dd420a6e5f8d3624f5f3482cae350f79d5f0753bf5beef9c2d91af3c");
+}
+
+#[test]
 fn the_descriptor_carries_the_fingerprint_and_account_path() {
     let account = derive_account(&account_key(), 0, 0).unwrap();
     assert!(account.descriptor.starts_with(&format!("wpkh([{FINGERPRINT}/84h/0h/0h]xpub")), "{}", account.descriptor);

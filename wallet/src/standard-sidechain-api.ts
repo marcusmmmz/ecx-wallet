@@ -50,7 +50,8 @@ export function standardSidechainServer(baseUrl: string, fetchFn: Fetch): Sidech
 
   /** Registers the watch (its descriptor and receive addresses); returns the path of its resources. */
   async function register({ chain, descriptor, receive }: WatchData): Promise<string> {
-    const { watchId } = await call<{ watchId?: unknown }>("POST", "/v1/watch", { chain, descriptor, addresses: receive });
+    const addresses = receive.map(({ index, address, scriptPubkey }) => ({ index, address, scriptPubkey }));
+    const { watchId } = await call<{ watchId?: unknown }>("POST", "/v1/watch", { chain, descriptor, addresses });
     if (typeof watchId !== "string" || watchId === "") throw malformed("registration answer");
     return `/v1/watch/${encodeURIComponent(watchId)}`;
   }

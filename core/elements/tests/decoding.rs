@@ -4,7 +4,7 @@
 mod common;
 
 use common::*;
-use ecx_elements::{decode, sign, Decoded, RefusalCode};
+use ecx_elements::{check, decode, sign, Decoded, RefusalCode};
 
 fn refusal(pset: &Pset) -> RefusalCode {
     decode(&b64(pset), STARTER).expect_err("refused").code
@@ -53,8 +53,43 @@ fn an_input_without_bip32_derivation_is_refused() {
 }
 
 #[test]
+fn a_foreign_input_without_bip32_derivation_passes_check_since_only_the_starter_can_tell_it_apart() {
+    assert_eq!(check(&b64(&with_missing_derivation())), Ok(()));
+}
+
+#[test]
+fn an_input_spending_the_address_get_addresses_gives_out_needs_no_bip32_derivation() {
+    let Decoded::Blind { verifiable_facts: facts, .. } = decode(&b64(&dex_issuance()), STARTER).unwrap() else {
+        panic!("expected Blind: an issuance")
+    };
+    assert_eq!(facts.owned_inputs.iter().map(|i| (i.index, i.amount.as_str())).collect::<Vec<_>>(), vec![(0, "100000")]);
+    // Asset, token and change all come back to `0/0`: only the fee leaves.
+    let asset = network_policy_asset();
+    let ecx = facts.total_leaving.iter().find(|a| a.asset == asset).unwrap();
+    assert_eq!(ecx.amount, "1000");
+    // The new asset and its token come in from the issuance: 1 000 000 and 1, negative as leaving.
+    let mut issued: Vec<_> = facts.total_leaving.iter().filter(|a| a.asset != asset).map(|a| a.amount.as_str()).collect();
+    issued.sort();
+    assert_eq!(issued, ["-1", "-1000000"]);
+}
+
+#[test]
+fn an_input_at_another_of_our_addresses_still_needs_bip32_derivation() {
+    // `1/0` is ours, but `getAddresses` never gave it out.
+    let mut pset = transfer();
+    pset.inputs_mut()[0] = input(&key(STARTER, 1, 0), 100_000, 1);
+    pset.inputs_mut()[0].bip32_derivation.clear();
+    assert_eq!(refusal(&pset), RefusalCode::MissingInputFields);
+}
+
+#[test]
+fn a_pset_with_no_input_of_ours_is_refused_as_nothing_to_sign() {
+    assert_eq!(refusal(&foreign_only()), RefusalCode::NothingToSign);
+}
+
+#[test]
 fn sign_refuses_exactly_what_decode_refuses() {
-    for pset in [with_confidential_input(), with_missing_derivation()] {
+    for pset in [with_confidential_input(), with_missing_derivation(), foreign_only()] {
         assert_eq!(sign(&b64(&pset), STARTER).unwrap_err().code, refusal(&pset));
     }
 }

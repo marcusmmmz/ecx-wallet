@@ -12,7 +12,7 @@ use elements_miniscript::elements::confidential::{Asset, Nonce, Value};
 use elements_miniscript::elements::hashes::Hash;
 use elements_miniscript::elements::pset::raw::ProprietaryKey;
 use elements_miniscript::elements::pset::{Input, Output, PartiallySignedTransaction};
-use elements_miniscript::elements::{AssetId, BlockHash, OutPoint, Script, TxOut, TxOutWitness, Txid};
+use elements_miniscript::elements::{AssetId, BlockHash, ContractHash, OutPoint, Script, TxOut, TxOutWitness, Txid};
 use elements_miniscript::{Descriptor, DescriptorPublicKey, ForEachKey, ToPublicKey};
 
 /// The Slot 24 Starter of "abandon … about", no passphrase (the e2e wallet).
@@ -111,6 +111,11 @@ pub fn transfer() -> Pset {
     pset
 }
 
+/// Hex → bytes.
+pub fn hex_bytes(hex: &str) -> Vec<u8> {
+    (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap()).collect()
+}
+
 pub fn b64(pset: &Pset) -> String {
     pset.to_string()
 }
@@ -167,6 +172,51 @@ pub fn with_confidential_output() -> Pset {
 pub fn with_missing_derivation() -> Pset {
     let mut pset = transfer();
     pset.inputs_mut()[1].bip32_derivation.clear();
+    pset
+}
+
+/// What the DEX builds for an issuance (#45): one 100 000 coin at our `0/0`, issuing 1 000 000 of a
+/// new asset and 1 reissuance token, both back to `0/0` with 99 000 change and a 1 000 fee. No
+/// `bip32_derivation` anywhere: the DEX knows only the address.
+pub fn dex_issuance() -> Pset {
+    let ours = key(STARTER, 0, 0);
+    let mut inp = input(&ours, 100_000, 1);
+    inp.bip32_derivation.clear();
+    let contract_hash = [0x5c; 32];
+    let entropy = AssetId::generate_asset_entropy(OutPoint::new(inp.previous_txid, inp.previous_output_index),ContractHash::from_byte_array(contract_hash));
+    inp.issuance_value_amount = Some(1_000_000);
+    inp.issuance_inflation_keys = Some(1);
+    inp.issuance_asset_entropy = Some(contract_hash);
+    let mut pset = new_pset();
+    pset.add_input(inp);
+    pset.add_output(Output::new_explicit(ours.script_pubkey.clone(), 1_000_000, AssetId::from_entropy(entropy), None));
+    pset.add_output(Output::new_explicit(ours.script_pubkey.clone(), 1, AssetId::reissuance_token_from_entropy(entropy, false), None));
+    pset.add_output(pay(ours.script_pubkey.clone(), 99_000));
+    pset.add_output(fee(1_000));
+    pset
+}
+
+/// `pset` with `key`'s derivation on every input and output that pays its script.
+pub fn with_derivations(mut pset: Pset, key: &Key) -> Pset {
+    for inp in pset.inputs_mut() {
+        if inp.witness_utxo.as_ref().is_some_and(|u| u.script_pubkey == key.script_pubkey) {
+            inp.bip32_derivation.insert(key.pk, (key.fingerprint, key.path.clone()));
+        }
+    }
+    for out in pset.outputs_mut() {
+        if out.script_pubkey == key.script_pubkey {
+            out.bip32_derivation.insert(key.pk, (key.fingerprint, key.path.clone()));
+        }
+    }
+    pset
+}
+
+/// `transfer()` without our input: nothing in it is ours to sign.
+pub fn foreign_only() -> Pset {
+    let mut pset = new_pset();
+    pset.add_input(input(&key(FOREIGN, 0, 0), 50_000, 2));
+    pset.add_output(pay(key(FOREIGN, 0, 1).script_pubkey, 49_000));
+    pset.add_output(fee(1_000));
     pset
 }
 

@@ -160,7 +160,7 @@ What a Sidechain App calls (`wallet/src/provider.ts`). It finds the Provider wit
 | `connect({ slots, methods })` | no | Asks the user for a Grant: these methods on these Slots. |
 | `disconnect()` | no | Removes the caller's own Grant. |
 | `getGrant()` | no | The caller's own Grant (`connect`'s answer) plus `unlocked`, or `null` without one. Never opens a window. |
-| `getAddresses({ slot })` | yes | `[{ chain, address }]`: the Slot's receive address and its CAIP-2 chain id. While locked, it opens a window to unlock first. |
+| `getAddresses({ slot })` | yes | `[{ chain, address, publicKey }]`: the Slot's receive address, its CAIP-2 chain id, and the 33-byte compressed key the address pays, in hex. Older wallets don't send `publicKey`. While locked, it opens a window to unlock first. |
 | `signTransaction(request)` | yes | Signs a Signing Request (a PSET) after approval and returns it signed. It doesn't broadcast. |
 | `sendTransfer({ slot, outputs })` | yes | The wallet makes a Send for the app and returns `{ txid }`. |
 
@@ -190,10 +190,10 @@ The handler checks a request in this order:
 
 1. **The envelope:** unknown MAJOR version → 4200, unknown fields are ignored, expired → -32602.
 2. **The Grant:** Slot and method → 4100.
-3. **The Slot's Chain Module's `check`:** a wrong ELIP-101 genesis, any confidential input or output, or inputs without `witness_utxo` or `bip32_derivation` → -32602. This needs no Starter, so it runs before any unlock prompt.
-4. **`decode`:** a Clear View, or Blind with the facts the module can verify. Blind needs the Grant's Blind Signing opt-in (4100 without it).
+3. **The Slot's Chain Module's `check`:** a wrong ELIP-101 genesis, any confidential input or output, or inputs without `witness_utxo` → -32602. This needs no Starter, so it runs before any unlock prompt.
+4. **`decode`**, after unlocking: an input without `bip32_derivation` that doesn't spend the address `getAddresses` gives out, or a PSET with no input of the wallet's, → -32602 (ADR 0007). Otherwise a Clear View, or Blind with the facts the module can verify. Blind needs the Grant's Blind Signing opt-in (4100 without it).
 
-There is one approval window per request. It asks to unlock first if the wallet is locked, then shows the request. `sign` returns the same PSET with signatures on the inputs that re-derive to the Starter.
+There is one approval window per request. It asks to unlock first if the wallet is locked, then shows the request. `sign` returns the same PSET with signatures on the inputs that re-derive to the Starter, and nothing else added: an input spending the given-out address gets no `bip32_derivation` entry written back.
 
 ### sendTransfer
 

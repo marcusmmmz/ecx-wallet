@@ -13,7 +13,7 @@ use std::sync::OnceLock;
 
 use elements_miniscript::bitcoin::bip32::DerivationPath;
 use elements_miniscript::elements::AddressParams;
-use elements_miniscript::{Descriptor, DescriptorPublicKey};
+use elements_miniscript::{Descriptor, DescriptorPublicKey, ForEachKey, ToPublicKey};
 use lwk_common::Signer;
 use lwk_signer::SwSigner;
 use serde::Serialize;
@@ -22,6 +22,10 @@ use crate::network;
 
 /// LWK's single-sig account path off mainnet (`lwk_common::singlesig_desc`, coin type 1).
 pub(crate) const ACCOUNT_PATH: &str = "84h/1h/0h";
+
+/// How many receive addresses, from index 0, the wallet gives apps (`getAddresses`). An input or
+/// output paying one of them is the wallet's without a `bip32_derivation` entry (`ownership.rs`).
+pub const APP_RECEIVE_ADDRESSES: u32 = 1;
 
 /// Addresses and watch data for one Starter.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -42,6 +46,8 @@ pub struct AddressEntry {
     pub address: String,
     /// Hex.
     pub script_pubkey: String,
+    /// The key the script pays: 33-byte compressed, hex.
+    pub public_key: String,
 }
 
 /// The Starter → its account's descriptor, its first `receive_count` receive addresses and its
@@ -63,10 +69,17 @@ pub fn derive_account(starter: &str, receive_count: u32, change_count: u32) -> R
             .map(|index| {
                 let at = chain.at_derivation_index(index).map_err(|e| e.to_string())?;
                 let address = at.address(address_params()).map_err(|e| e.to_string())?;
+                let mut public_key = None;
+                at.for_each_key(|k| {
+                    public_key = Some(k.to_public_key());
+                    true
+                });
+                let public_key = public_key.ok_or("a wpkh descriptor has a key")?;
                 Ok(AddressEntry {
                     index,
                     address: address.to_string(),
                     script_pubkey: hex(at.script_pubkey().as_bytes()),
+                    public_key: hex(&public_key.inner.serialize()),
                 })
             })
             .collect::<Result<Vec<_>, String>>()

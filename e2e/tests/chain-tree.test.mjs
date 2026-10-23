@@ -90,7 +90,9 @@ describe("key routing", () => {
 
   test("eCash's module gets the L1 Account Key and nothing else; no Starter is given out", async () => {
     const { accounts, calls } = spied();
-    assert.deepEqual(await accounts.l1ReceiveAddresses(), [{ chain: "ecash:betanet", address: L1_RECEIVE_0 }]);
+    // BIP84's vector for m/84'/0'/0'/0/0.
+    const publicKey = "0330d54fd0dd420a6e5f8d3624f5f3482cae350f79d5f0753bf5beef9c2d91af3c";
+    assert.deepEqual(await accounts.l1ReceiveAddresses(), [{ chain: "ecash:betanet", address: L1_RECEIVE_0, publicKey }]);
     assert.deepEqual(calls, ["L1 Account Key given out", "l1 got the L1 Account Key"]);
   });
 

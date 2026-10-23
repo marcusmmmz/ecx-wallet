@@ -106,6 +106,8 @@ export interface DerivedAddress {
   /** In the chain's own encoding (`elements1…` for Slot 24). */
   address: string;
   scriptPubkey: string;
+  /** The key the script pays: 33-byte compressed, hex. */
+  publicKey: string;
 }
 
 /** Addresses and the watch data a Sidechain Server needs. */
@@ -206,6 +208,8 @@ export type RefusalCode =
   | "wrongGenesis"
   | "confidential"
   | "missingInputFields"
+  /** No input in the request is the Starter's: signing would change nothing. */
+  | "nothingToSign"
   | "invalidStarter"
   /** L1: the spend isn't replay-marked (docs/adr/0004). */
   | "noReplayMarker"

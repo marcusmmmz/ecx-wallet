@@ -60,6 +60,31 @@ fn a_foreign_starter_signs_nothing_of_ours() {
 }
 
 #[test]
+fn an_issuance_input_gets_a_valid_signature_that_commits_to_the_issuance() {
+    let ours = key(STARTER, 0, 0);
+    let signed = parse(&sign(&b64(&with_derivations(dex_issuance(), &ours)), STARTER).unwrap());
+    assert!(has_valid_signature(&signed, 0, &ours, 100_000));
+
+    // The sighash covers the issuance: change the amount and the signature no longer verifies.
+    let mut tampered = signed.clone();
+    tampered.inputs_mut()[0].issuance_value_amount = Some(2_000_000);
+    assert!(!has_valid_signature(&tampered, 0, &ours, 100_000));
+}
+
+#[test]
+fn the_dex_issuance_is_signed_from_the_address_alone_and_only_gains_the_signature() {
+    use elements_miniscript::elements::encode::serialize;
+    let unsigned = dex_issuance();
+    let mut signed = parse(&sign(&b64(&unsigned), STARTER).unwrap());
+    assert!(has_valid_signature(&signed, 0, &key(STARTER, 0, 0), 100_000));
+    assert_eq!(signed.inputs()[0].partial_sigs.len(), 1);
+
+    // The derivation the wallet worked out isn't written back.
+    signed.inputs_mut()[0].partial_sigs.clear();
+    assert_eq!(serialize(&signed), serialize(&unsigned));
+}
+
+#[test]
 fn signing_keeps_unknown_pset_fields_byte_identical_and_only_adds_signatures() {
     use elements_miniscript::elements::encode::serialize;
     let unsigned = transfer_with_unknown_fields();
