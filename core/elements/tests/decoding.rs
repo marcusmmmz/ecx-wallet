@@ -4,15 +4,15 @@
 mod common;
 
 use common::*;
-use ecx_elements::{check, decode, sign, Decoded, RefusalCode};
+use ecx_elements::{check, decode, sign, Decoded, Evidence, RefusalCode};
 
 fn refusal(pset: &Pset) -> RefusalCode {
-    decode(&b64(pset), STARTER).expect_err("refused").code
+    decode(&b64(pset), STARTER, &Evidence::default()).expect_err("refused").code
 }
 
 #[test]
 fn a_payload_that_is_not_a_pset_is_refused_as_malformed() {
-    assert_eq!(decode("bm90IGEgcHNldA==", STARTER).unwrap_err().code, RefusalCode::Malformed);
+    assert_eq!(decode("bm90IGEgcHNldA==", STARTER, &Evidence::default()).unwrap_err().code, RefusalCode::Malformed);
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn an_input_spending_the_address_get_addresses_gives_out_needs_no_bip32_derivati
     // An unknown field keeps it Blind, so the facts are what the user sees.
     let mut pset = dex_issuance();
     pset.global.unknown.insert(elements_miniscript::elements::pset::raw::Key { type_value: 0xf0, key: vec![] }, vec![1]);
-    let Decoded::Blind { verifiable_facts: facts, .. } = decode(&b64(&pset), STARTER).unwrap() else {
+    let Decoded::Blind { verifiable_facts: facts, .. } = decode(&b64(&pset), STARTER, &Evidence::default()).unwrap() else {
         panic!("expected Blind: an unknown field")
     };
     assert_eq!(facts.owned_inputs.iter().map(|i| (i.index, i.amount.as_str())).collect::<Vec<_>>(), vec![(0, "100000")]);
@@ -99,7 +99,7 @@ fn sign_refuses_exactly_what_decode_refuses() {
 
 #[test]
 fn an_unknown_field_makes_the_request_blind_with_the_facts_the_wallet_can_prove() {
-    let Decoded::Blind { reason, verifiable_facts: facts } = decode(&b64(&transfer_with_unknown_fields()), STARTER).unwrap() else {
+    let Decoded::Blind { reason, verifiable_facts: facts } = decode(&b64(&transfer_with_unknown_fields()), STARTER, &Evidence::default()).unwrap() else {
         panic!("expected Blind")
     };
     assert!(reason.contains("doesn't understand"), "{reason}");
@@ -123,7 +123,7 @@ fn in_a_blind_request_a_non_default_sighash_and_a_withdrawal_burn_are_dangerous_
     let mut pset = transfer_with_unknown_fields();
     pset.inputs_mut()[0].sighash_type = Some(PsbtSighashType::from_u32(0x83));
     pset.add_output(pay(withdrawal_burn_script(), 5_000));
-    let Decoded::Blind { verifiable_facts: facts, .. } = decode(&b64(&pset), STARTER).unwrap() else { panic!("expected Blind") };
+    let Decoded::Blind { verifiable_facts: facts, .. } = decode(&b64(&pset), STARTER, &Evidence::default()).unwrap() else { panic!("expected Blind") };
     let flags = facts.dangerous_flags.join("\n");
     assert!(flags.contains("sighash"), "{flags}");
     assert!(flags.contains("withdrawal"), "{flags}");
@@ -134,7 +134,7 @@ fn an_input_claiming_our_key_without_proof_is_a_dangerous_flag_and_not_counted_a
     let mut pset = transfer();
     let ours = key(STARTER, 0, 0);
     pset.inputs_mut()[1].bip32_derivation.insert(ours.pk, (ours.fingerprint, ours.path.clone()));
-    let Decoded::Blind { verifiable_facts: facts, .. } = decode(&b64(&pset), STARTER).unwrap() else { panic!("expected Blind") };
+    let Decoded::Blind { verifiable_facts: facts, .. } = decode(&b64(&pset), STARTER, &Evidence::default()).unwrap() else { panic!("expected Blind") };
     assert_eq!(facts.owned_inputs.iter().map(|i| i.index).collect::<Vec<_>>(), vec![0]);
     assert!(facts.dangerous_flags.join("\n").contains("input 1"), "{:?}", facts.dangerous_flags);
 }

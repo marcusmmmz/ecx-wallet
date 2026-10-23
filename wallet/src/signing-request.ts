@@ -22,6 +22,11 @@ export interface SigningRequest {
   expiresAt: number;
   /** Requester-supplied, shown only tagged "Reported by <origin>". */
   hints?: { summary?: string; outputLabels?: Record<string, string> };
+  /**
+   * Requester-supplied, `{ [kind]: … }`: passed as is to the Slot's Chain Module, which checks each
+   * kind it knows against the payload and refuses the request if one doesn't check out (docs/adr/0009).
+   */
+  evidence?: unknown;
 }
 
 const invalid = (message: string) => new ProviderRpcError(ErrorCode.InvalidParams, message);
@@ -41,7 +46,7 @@ export function parseSigningRequest(params: unknown, nowSeconds: number): Signin
   }
 
   // 2. Only known fields are read; anything else is ignored.
-  const { id, chain, method, format, payload, expiresAt, hints } = p;
+  const { id, chain, method, format, payload, expiresAt, hints, evidence } = p;
   if (typeof id !== "string" || id === "") throw invalid("A Signing Request needs `id`.");
   const slot = typeof chain === "string" ? /^ecash:[a-z0-9-]+-s(\d{1,3})$/.exec(chain) : null;
   if (slot === null || Number(slot[1]) < 1 || Number(slot[1]) > 255) {
@@ -65,6 +70,7 @@ export function parseSigningRequest(params: unknown, nowSeconds: number): Signin
     payload,
     expiresAt,
     ...(parseHints(hints) ?? {}),
+    ...(evidence === undefined ? {} : { evidence }),
   };
 }
 

@@ -6,13 +6,22 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { importWallet } from "../harness.mjs";
 
-const { formatAmount, parseAmount, totalAcrossChains, createSettings } = await importWallet();
+const { formatAllDecimals, formatAmount, parseAmount, totalAcrossChains, createSettings } = await importWallet();
 
 const ECX_L1 = { id: "", ticker: "ECX", name: "eCash", decimals: 8, ecx: true };
 const POLICY_ASSET = "5836dcc06130dcf6a65b6ac493813fd65559955283e44cc3f07966294eccb2c8";
 const ECX_S24 = { id: POLICY_ASSET, ticker: "ECX", name: "eCash on Elements+", decimals: 8, ecx: true };
 const TOKEN = { id: "22".repeat(32), ticker: "TOK", name: "A token", decimals: 2 };
 const UNKNOWN = "11".repeat(32);
+
+describe("formatAllDecimals", () => {
+  test("keeps every decimal place, so a new asset's precision shows", () => {
+    assert.equal(formatAllDecimals("1000000", 8, "EXA"), "0.01000000 EXA");
+    assert.equal(formatAllDecimals("6942000000000", 8, "EXA"), "69,420.00000000 EXA");
+    assert.equal(formatAllDecimals("0", 2, "USD"), "0.00 USD");
+    assert.equal(formatAllDecimals("1234567", 0, "PTS"), "1,234,567 PTS");
+  });
+});
 
 describe("formatAmount", () => {
   test("ECX in whole coins, trailing zeros dropped and thousands grouped", () => {

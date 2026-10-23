@@ -130,6 +130,10 @@ _Avoid_: Signer module, plugin, adapter
 The structured, chain-neutral account of a Signing Request that a Decoder produces and the Wallet Base renders for Clear Signing.
 _Avoid_: Preview, summary, decoded transaction
 
+**Evidence**:
+Data a Signing Request carries, keyed by kind, that its Chain Module checks against the payload before the Clear View shows anything from it, refusing the request if it doesn't check out (e.g. an asset's contract, against the hash its issuance commits to). Unlike hints, it can change the outcome.
+_Avoid_: Proof, attachment, metadata
+
 **Decoder**:
 The part of a Chain Module that turns its chain's Signing Requests into a Clear View.
 _Avoid_: Parser, interpreter, renderer

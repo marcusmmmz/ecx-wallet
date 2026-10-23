@@ -65,10 +65,17 @@ pub unsafe extern "C" fn check(payload: *const u8, payload_len: usize) -> i32 {
     ret_text(text(payload, payload_len).and_then(|p| ecx_l1::check(p).map_err(refusal).map(|()| "null".into())))
 }
 
-/// Base64 PSBT + L1 Account Key → `{ kind: "clear", view }` or
-/// `{ kind: "blind", reason, verifiableFacts }` as JSON, or a refusal.
+/// Base64 PSBT + L1 Account Key (+ the request's evidence, which no L1 kind uses yet: ignored) →
+/// `{ kind: "clear", view }` or `{ kind: "blind", reason, verifiableFacts }` as JSON, or a refusal.
 #[no_mangle]
-pub unsafe extern "C" fn decode(payload: *const u8, payload_len: usize, key: *const u8, key_len: usize) -> i32 {
+pub unsafe extern "C" fn decode(
+    payload: *const u8,
+    payload_len: usize,
+    key: *const u8,
+    key_len: usize,
+    _evidence: *const u8,
+    _evidence_len: usize,
+) -> i32 {
     ret_text(text(payload, payload_len).and_then(|p| {
         let k = text(key, key_len)?;
         ecx_l1::decode(p, k).map_err(refusal).and_then(|d| json(&d))

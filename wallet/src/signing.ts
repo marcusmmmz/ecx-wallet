@@ -95,7 +95,7 @@ export async function reviewAndSign(
     await refusing(async () => module.check(request.payload));
     if (!(await deps.isUnlocked()) && !(await approval.unlock())) throw rejected();
 
-    const decoded = await refusing(async () => module.decode(request.payload, await deps.starter(request.slot)));
+    const decoded = await refusing(async () => module.decode(request.payload, await deps.starter(request.slot), request.evidence));
     if (decoded.kind === "blind" && blindRefusal !== undefined) {
       throw new ProviderRpcError(ErrorCode.Unauthorized, blindRefusal);
     }

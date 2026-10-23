@@ -187,10 +187,9 @@ export type DangerousMode =
   /** A Deposit that spends no Treasury: the wallet can't confirm the Slot is active and empty. */
   | { kind: "firstDeposit"; output: number };
 
-/** What a request the Decoder fully understands does. Data only: `app` renders it. */
 /**
  * A new asset an input issues, its ids derived by the Decoder. Amounts in base units: the precision
- * is in the contract, which the wallet doesn't see.
+ * is in the contract, which the module sees only if the request's evidence supplies it.
  */
 export interface ClearIssuance {
   asset: AssetAmount;
@@ -198,8 +197,22 @@ export interface ClearIssuance {
   token?: AssetAmount;
   /** The committed contract's hash, display hex, if any. */
   contractHash?: string;
+  /** The contract, if the request's evidence supplied it and it checked out (docs/adr/0009). */
+  contract?: ClearContract;
 }
 
+/** A contract that hashes to the committed hash and follows the registry's rules. The issuer chose it. */
+export interface ClearContract {
+  name: string;
+  ticker: string;
+  precision: number;
+  /** Claimed, not checked by this wallet. */
+  domain: string;
+  /** The issuer key is the key of the address this wallet gives out. */
+  issuerYours: boolean;
+}
+
+/** What a request the Decoder fully understands does. Data only: `app` renders it. */
 export interface ClearView {
   dangerousModes: DangerousMode[];
   /** `treasury`: the Slot whose Treasury the input spends (L1 only). `issuance`: Elements only. */
@@ -222,6 +235,8 @@ export type RefusalCode =
   | "missingInputFields"
   /** No input in the request is the Starter's: signing would change nothing. */
   | "nothingToSign"
+  /** The request's evidence doesn't check out against the payload (docs/adr/0009). */
+  | "invalidEvidence"
   | "invalidStarter"
   /** L1: the spend isn't replay-marked (docs/adr/0004). */
   | "noReplayMarker"
@@ -263,7 +278,8 @@ export interface ChainModule<K extends ChainKey = Starter> {
   /** Refuses (throws ChainModuleRefusal) what the module would refuse anyway, without the key. */
   check(payload: string): void;
   /** A request's payload → a Clear View or Blind. Throws ChainModuleRefusal. */
-  decode(payload: string, key: K): Decoded;
+  /** `evidence`: the Signing Request's, as the requester sent it; a module ignores kinds it doesn't know. */
+  decode(payload: string, key: K, evidence?: unknown): Decoded;
   /** The payload with signatures on the inputs the key owns; nothing else changes. Throws ChainModuleRefusal. */
   sign(payload: string, key: K): string;
   /** Only if `declare()` lists `depositDestination` (throws otherwise). */
@@ -359,7 +375,7 @@ function chainModuleOf<K extends ChainKey>(m: CoreModule): ChainModule<K> {
     chainEntry: () => json<ChainEntry>("chain_entry"),
     deriveAccount: (key, { receive, change = 0 }) => json<Account>("derive_account", key, receive, change),
     check: (payload) => refusals(() => void m.callText("check", payload)),
-    decode: (payload, key) => refusals(() => json<Decoded>("decode", payload, key)),
+    decode: (payload, key, evidence) => refusals(() => json<Decoded>("decode", payload, key, JSON.stringify(evidence ?? {}))),
     sign: (payload, key) => refusals(() => m.callText("sign", payload, key)),
     depositDestination: (key) => json<DepositDestination>("deposit_destination", key),
     buildTransfer: (order, key) => refusals(() => json<BuiltTransfer>("build_transfer", JSON.stringify(order), key)),

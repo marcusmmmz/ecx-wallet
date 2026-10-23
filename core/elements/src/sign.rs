@@ -5,7 +5,8 @@ use lwk_common::Signer;
 use crate::decode::{ownership_rules, validated, Refusal, RefusalCode};
 use crate::ownership::Wallet;
 
-/// Refuses exactly what `decode` refuses.
+/// Refuses exactly what `decode` refuses without evidence: evidence only adds to what the user is
+/// shown, so `sign` never needs it.
 pub fn sign(payload: &str, starter: &str) -> Result<String, Refusal> {
     let mut pset = validated(payload)?;
     let wallet = Wallet::new(starter).map_err(|message| Refusal { code: RefusalCode::InvalidStarter, message })?;

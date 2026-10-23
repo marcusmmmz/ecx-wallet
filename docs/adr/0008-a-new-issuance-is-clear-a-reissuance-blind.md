@@ -1,4 +1,4 @@
-# A new issuance is Clear-Signed; a reissuance stays Blind
+# A new issuance gets a Clear View; a reissuance stays Blind
 
 An app's issuance PSET (#45) was always Blind: the Decoder didn't explain an input's issuance fields, so the user saw "input 0 issues or reissues an asset" and had to trust the site. The Decoder now explains a **new** issuance, and the request is Clear. That also means the Grant no longer needs the Blind Signing opt-in for it.
 
@@ -15,7 +15,7 @@ An app's issuance PSET (#45) was always Blind: the Decoder didn't explain an inp
 
 ## Considered Options
 
-- **Show the contract (name, ticker, precision), checked against the committed hash:** later. The Signing Request would carry the contract JSON, and the module would canonicalise it and compare the hashes. That means an envelope change and JSON canonicalisation in the module, and it is a separate decision.
+- **Show the contract (name, ticker, precision), checked against the committed hash:** a separate decision, made in ADR 0009. The Signing Request carries the contract's exact JSON as `evidence`, and the module hashes those bytes and compares them with the committed hash, so it needs no canonicalisation.
 - **Explain reissuance too:** rejected for now. The Decoder would need to prove that the spent input is the token for the stated entropy, for a transaction that can't be valid while tokens are explicit.
 - **Mark issuance as a dangerous mode:** rejected. A red warning should mean the user could lose funds or control, and issuing does neither.
 

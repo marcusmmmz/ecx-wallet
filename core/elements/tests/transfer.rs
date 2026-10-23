@@ -3,7 +3,7 @@
 mod common;
 
 use common::*;
-use ecx_elements::{build_transfer, decode, finalize, network, sign, ClearView, Decoded, Destination, RefusalCode};
+use ecx_elements::{build_transfer, decode, finalize, network, sign, ClearView, Decoded, Destination, Evidence, RefusalCode};
 use elements_miniscript::elements::encode::deserialize;
 use elements_miniscript::elements::{Address, AddressParams, AssetId, Transaction};
 use serde_json::{json, Value};
@@ -37,7 +37,7 @@ fn build(order: &str) -> String {
 }
 
 fn clear(payload: &str) -> ClearView {
-    match decode(payload, STARTER).unwrap() {
+    match decode(payload, STARTER, &Evidence::default()).unwrap() {
         Decoded::Clear { view } => view,
         blind => panic!("expected a Clear View, got {blind:?}"),
     }

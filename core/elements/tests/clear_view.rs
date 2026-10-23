@@ -5,17 +5,17 @@ mod common;
 use common::*;
 use elements_miniscript::elements::pset::Output;
 use elements_miniscript::elements::Script;
-use ecx_elements::{decode, network, AssetAmount, ClearIssuance, ClearView, DangerousMode, Decoded, Destination};
+use ecx_elements::{decode, network, AssetAmount, ClearIssuance, ClearView, DangerousMode, Decoded, Destination, Evidence};
 
 fn clear(pset: &Pset) -> ClearView {
-    match decode(&b64(pset), STARTER).unwrap() {
+    match decode(&b64(pset), STARTER, &Evidence::default()).unwrap() {
         Decoded::Clear { view } => view,
         blind => panic!("expected a Clear View, got {blind:?}"),
     }
 }
 
 fn blind_reason(pset: &Pset) -> String {
-    match decode(&b64(pset), STARTER).unwrap() {
+    match decode(&b64(pset), STARTER, &Evidence::default()).unwrap() {
         Decoded::Blind { reason, .. } => reason,
         clear => panic!("expected Blind, got {clear:?}"),
     }
@@ -69,6 +69,7 @@ fn a_new_issuance_is_a_clear_view_with_the_asset_and_token_the_wallet_derives_it
             asset: AssetAmount { asset: asset.to_string(), amount: "1000000".into() },
             token: Some(AssetAmount { asset: token.to_string(), amount: "1".into() }),
             contract_hash: Some(ContractHash::from_byte_array([0x5c; 32]).to_string()),
+            contract: None,
         })
     );
     // The new asset and the token go back to the address getAddresses gave out.
@@ -249,9 +250,9 @@ fn the_decoder_is_never_applied_outside_its_binding() {
     // Another chain's PSET (Liquid mainnet's genesis), otherwise a plain transfer.
     let mut other_chain = transfer();
     set_genesis(&mut other_chain, "1466275836220db2944ca059a3a10ef6fd2ea684b0688d2c379296888a206003");
-    assert_eq!(decode(&b64(&other_chain), STARTER).unwrap_err().code, RefusalCode::WrongGenesis);
+    assert_eq!(decode(&b64(&other_chain), STARTER, &Evidence::default()).unwrap_err().code, RefusalCode::WrongGenesis);
     // Another format: a Bitcoin PSBT ("psbt\xff" magic).
-    assert_eq!(decode("cHNidP8BAAoCAAAAAAAAAAAAAA==", STARTER).unwrap_err().code, RefusalCode::Malformed);
+    assert_eq!(decode("cHNidP8BAAoCAAAAAAAAAAAAAA==", STARTER, &Evidence::default()).unwrap_err().code, RefusalCode::Malformed);
 }
 
 #[test]

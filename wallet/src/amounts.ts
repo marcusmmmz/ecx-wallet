@@ -10,6 +10,17 @@ function grouped(digits: string): string {
   return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
+/**
+ * Base units in whole units with every decimal place, for an asset whose precision is the point
+ * (a new issuance's contract): "1000000" at 8 decimals is "0.01000000 EXA".
+ */
+export function formatAllDecimals(amount: string, decimals: number, ticker: string): string {
+  const digits = amount.replace(/^0+(?=\d)/, "");
+  if (decimals === 0) return `${grouped(digits)} ${ticker}`;
+  const padded = digits.padStart(decimals + 1, "0");
+  return `${grouped(padded.slice(0, -decimals))}.${padded.slice(-decimals)} ${ticker}`;
+}
+
 /** Base units in whole units: "102500" at 8 decimals is "0.001025". */
 function whole(digits: string, decimals: number): string {
   if (decimals === 0) return grouped(digits);

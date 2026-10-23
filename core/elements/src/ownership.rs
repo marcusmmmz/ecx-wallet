@@ -71,6 +71,11 @@ impl Wallet {
         }
     }
 
+    /// True if `pk` is the key of a receive address apps are given.
+    pub(crate) fn gives_out(&self, pk: &PublicKey) -> bool {
+        self.given_out.iter().any(|(given, _)| given == pk)
+    }
+
     fn given_out_key(&self, script: &Script) -> Option<(PublicKey, KeySource)> {
         self.given_out.iter().find(|(pk, _)| *script == p2wpkh(pk)).cloned()
     }

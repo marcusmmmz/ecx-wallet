@@ -16,6 +16,7 @@ use serde::Serialize;
 
 use crate::classify::{classify, Classified, OutputKind, Sighash};
 use crate::clear::{clear_view, ClearView};
+use crate::evidence::{checked_contracts, Evidence};
 use crate::network;
 use crate::ownership::Wallet;
 
@@ -88,6 +89,8 @@ pub enum RefusalCode {
     MissingInputFields,
     /// No input in the PSET is this Starter's: signing would change nothing.
     NothingToSign,
+    /// The request's `evidence` doesn't check out against the payload (docs/adr/0009).
+    InvalidEvidence,
     /// The Starter handed in isn't one (a wallet bug, not the requester's).
     InvalidStarter,
     /// `build_transfer`: the coins don't cover the amounts and the fee.
@@ -190,17 +193,19 @@ pub fn check(payload: &str) -> Result<(), Refusal> {
     validated(payload).map(|_| ())
 }
 
-pub fn decode(payload: &str, starter: &str) -> Result<Decoded, Refusal> {
+/// `evidence` is checked whether the request is Clear or Blind; only a Clear View shows it.
+pub fn decode(payload: &str, starter: &str, evidence: &Evidence) -> Result<Decoded, Refusal> {
     let pset = validated(payload)?;
     let wallet = Wallet::new(starter).map_err(|e| refuse(RefusalCode::InvalidStarter, e))?;
     ownership_rules(&pset, &wallet)?;
+    let contracts = checked_contracts(&pset, evidence, &wallet)?;
     let classified = classify(&pset, &wallet);
     let facts = verifiable_facts(&pset, &classified);
     if !facts.unknown_fields.is_empty() {
         let reason = "The request contains fields the Elements Decoder doesn't understand.";
         return Ok(Decoded::Blind { reason: reason.into(), verifiable_facts: facts });
     }
-    match clear_view(&pset, &classified) {
+    match clear_view(&pset, &classified, &contracts) {
         Ok(view) => Ok(Decoded::Clear { view }),
         Err(why) => Ok(Decoded::Blind { reason: format!("The Elements Decoder can't fully explain this request: {why}"), verifiable_facts: facts }),
     }

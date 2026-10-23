@@ -194,10 +194,14 @@ pub fn with_missing_derivation() -> Pset {
 /// new asset and 1 reissuance token, both back to `0/0` with 99 000 change and a 1 000 fee. No
 /// `bip32_derivation` anywhere: the DEX knows only the address.
 pub fn dex_issuance() -> Pset {
+    issuance_committing_to([0x5c; 32])
+}
+
+/// `dex_issuance()`, committing to the contract whose SHA-256 is `contract_hash` (its raw bytes).
+pub fn issuance_committing_to(contract_hash: [u8; 32]) -> Pset {
     let ours = key(STARTER, 0, 0);
     let mut inp = input(&ours, 100_000, 1);
     inp.bip32_derivation.clear();
-    let contract_hash = [0x5c; 32];
     let entropy = AssetId::generate_asset_entropy(OutPoint::new(inp.previous_txid, inp.previous_output_index),ContractHash::from_byte_array(contract_hash));
     inp.issuance_value_amount = Some(1_000_000);
     inp.issuance_inflation_keys = Some(1);
@@ -209,6 +213,19 @@ pub fn dex_issuance() -> Pset {
     pset.add_output(pay(ours.script_pubkey.clone(), 99_000));
     pset.add_output(fee(1_000));
     pset
+}
+
+/// A Liquid-registry contract for an asset issued by `issuer`, as the DEX writes it: sorted keys,
+/// compact.
+pub fn contract(issuer: &Key, ticker: &str) -> String {
+    let pk: String = issuer.pk.inner.serialize().iter().map(|b| format!("{b:02x}")).collect();
+    format!(r#"{{"entity":{{"domain":"dex.example"}},"issuer_pubkey":"{pk}","name":"Example Asset","precision":8,"ticker":"{ticker}","version":0}}"#)
+}
+
+/// The issuance PSET committing to exactly `contract`'s bytes.
+pub fn issuance_of(contract: &str) -> Pset {
+    use elements_miniscript::elements::hashes::sha256;
+    issuance_committing_to(sha256::Hash::hash(contract.as_bytes()).to_byte_array())
 }
 
 /// `pset` with `key`'s derivation on every input and output that pays its script.

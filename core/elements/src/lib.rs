@@ -22,6 +22,7 @@ mod classify;
 mod clear;
 mod decode;
 mod deposit;
+mod evidence;
 pub mod chain_entry;
 mod ownership;
 mod sign;
@@ -29,7 +30,8 @@ mod transfer;
 
 pub use account::{derive_account, Account, AddressEntry};
 pub use chain_entry::{chain_entry, ChainEntry, NetworkEntry, ServerApi, SidechainServerEntry};
-pub use clear::{ClearInput, ClearIssuance, ClearOutput, ClearView, DangerousMode, Destination};
+pub use clear::{ClearContract, ClearInput, ClearIssuance, ClearOutput, ClearView, DangerousMode, Destination};
+pub use evidence::Evidence;
 pub use deposit::{deposit_destination, DepositDestination};
 pub use decode::{check, decode, AssetAmount, Decoded, OwnedInput, Refusal, RefusalCode, VerifiableFacts};
 pub use sign::sign;
