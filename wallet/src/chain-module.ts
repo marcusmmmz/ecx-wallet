@@ -123,7 +123,7 @@ export const NATIVE_COIN = "";
 export interface AssetAmount {
   /** Display hex, or NATIVE_COIN on a chain without assets. */
   asset: string;
-  /** Base units, as a decimal string (may be negative for `totalLeaving`). */
+  /** Base units, as a decimal string (negative only in `totalLeaving`, where it means coming in). */
   amount: string;
 }
 
@@ -131,7 +131,11 @@ export interface AssetAmount {
 export interface VerifiableFacts {
   /** Inputs that re-derive to the Starter's keys: the only ones `sign` signs. */
   ownedInputs: (AssetAmount & { index: number })[];
-  /** Per asset: owned inputs minus outputs back to the wallet. */
+  /**
+   * Per asset: owned inputs minus outputs back to the wallet. Negative means more comes into the
+   * wallet than leaves it, as with an asset the request issues to the wallet; the approval window
+   * lists those as "Coming into your wallet" without the sign.
+   */
   totalLeaving: AssetAmount[];
   fee: AssetAmount[];
   /** PSET fields the module doesn't know (kept byte-for-byte when signing). */

@@ -38,7 +38,8 @@ pub struct VerifiableFacts {
     /// Inputs that re-derive to this Starter's keys (the only ones `sign` will sign).
     pub owned_inputs: Vec<OwnedInput>,
     /// Per asset: owned inputs minus outputs that re-derive to this Starter. Negative means more
-    /// comes back than goes in.
+    /// comes back than goes in, as with an asset issued to the wallet; the approval window shows
+    /// those amounts as coming into the wallet.
     pub total_leaving: Vec<AssetAmount>,
     /// Per asset, the fee outputs (empty script).
     pub fee: Vec<AssetAmount>,
