@@ -79,6 +79,24 @@ pub unsafe extern "C" fn sign(payload: *const u8, payload_len: usize, starter: *
     }))
 }
 
+/// Asset id + its issuance's outpoint (txid, vout) + contract JSON → `{ asset, name, ticker,
+/// precision, domain }` as JSON, or a refusal (`invalidContract`). Needs no Starter.
+#[no_mangle]
+pub unsafe extern "C" fn asset_contract(
+    asset: *const u8,
+    asset_len: usize,
+    txid: *const u8,
+    txid_len: usize,
+    vout: u32,
+    contract: *const u8,
+    contract_len: usize,
+) -> i32 {
+    ret_text(text(asset, asset_len).and_then(|a| {
+        let (t, c) = (text(txid, txid_len)?, text(contract, contract_len)?);
+        ecx_elements::asset_contract(a, t, vout, c).map_err(refusal).and_then(|checked| json(&checked))
+    }))
+}
+
 /// Transfer order (JSON) + Slot 24 Starter → `{ pset }` (base64, unsigned) as JSON, or a refusal
 /// (`insufficientFunds`, `dust`, `confidential`, …).
 #[no_mangle]

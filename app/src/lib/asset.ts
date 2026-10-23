@@ -1,5 +1,24 @@
+import type { AssetSource } from "@ecx/wallet";
+
 /**
  * An asset id shortened for display: its first and last 8 hex digits. Both ends, so two assets
  * can't pass for each other by sharing a prefix; show the full id alongside wherever it matters.
  */
 export const shortAsset = (asset: string) => (asset.length > 20 ? `${asset.slice(0, 8)}…${asset.slice(-8)}` : asset);
+
+/**
+ * Where a name the asset store gave comes from, as screens mark it (docs/adr/0010); undefined for
+ * one its Chain Entry names, which needs no mark. A name an app suggested says which app.
+ */
+export function assetSource(entry: { source?: AssetSource; origin?: string } | undefined): string | undefined {
+  switch (entry?.source) {
+    case undefined:
+      return undefined;
+    case "label":
+      return "your label";
+    case "app":
+      return `named by ${entry.origin ?? "an app"}`;
+    default:
+      return "from its contract";
+  }
+}

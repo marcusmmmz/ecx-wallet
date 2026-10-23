@@ -22,7 +22,7 @@ export interface Binding {
 
 export interface Declaration {
   binding: Binding;
-  /** Optional capabilities: `depositDestination` and `buildTransfer` (a Slot's), `buildDeposit` (L1's). */
+  /** Optional capabilities: `depositDestination`, `buildTransfer` and `assetContract` (a Slot's), `buildDeposit` (L1's). */
   capabilities: string[];
 }
 
@@ -241,6 +241,8 @@ export type RefusalCode =
   | "nothingToSign"
   /** The request's evidence doesn't check out against the payload (docs/adr/0009). */
   | "invalidEvidence"
+  /** `assetContract`: the contract isn't the asset's, or breaks the registry's rules (docs/adr/0010). */
+  | "invalidContract"
   | "invalidStarter"
   /** L1: the spend isn't replay-marked (docs/adr/0004). */
   | "noReplayMarker"
@@ -259,6 +261,17 @@ export class ChainModuleRefusal extends Error {
     super(message);
     this.name = "ChainModuleRefusal";
   }
+}
+
+/** A contract `assetContract` checked: the one the asset was issued with, following the registry's rules. The issuer chose it. */
+export interface CheckedContract {
+  /** Display hex. */
+  asset: string;
+  name: string;
+  ticker: string;
+  precision: number;
+  /** Claimed, not checked by this wallet. */
+  domain: string;
 }
 
 /** A Slot's `depositDestination`: what a Deposit to it is credited to, and its rules. */
@@ -295,6 +308,12 @@ export interface ChainModule<K extends ChainKey = Starter> {
   buildTransfer(order: ModuleTransferOrder, key: K): BuiltTransfer;
   /** A signed payload → the raw transaction (hex) and its txid. Throws ChainModuleRefusal. */
   finalize(payload: string): { tx: string; txid: string };
+  /**
+   * Only if `declare()` lists `assetContract`: `contract` (its exact JSON), if it is the one `asset`
+   * was issued with by a new issuance spending `issuance` (display hex txid). Needs no key. Throws
+   * ChainModuleRefusal (`invalidContract`).
+   */
+  assetContract(asset: string, issuance: { txid: string; vout: number }, contract: string): CheckedContract;
 }
 
 /** What to send, and what to build it from (a Chain Module's `TransferOrder`). */
@@ -384,6 +403,7 @@ function chainModuleOf<K extends ChainKey>(m: CoreModule): ChainModule<K> {
     depositDestination: (key) => json<DepositDestination>("deposit_destination", key),
     buildTransfer: (order, key) => refusals(() => json<BuiltTransfer>("build_transfer", JSON.stringify(order), key)),
     finalize: (payload) => refusals(() => json<{ tx: string; txid: string }>("finalize", payload)),
+    assetContract: (asset, { txid, vout }, contract) => refusals(() => json<CheckedContract>("asset_contract", asset, txid, vout, contract)),
   };
 }
 

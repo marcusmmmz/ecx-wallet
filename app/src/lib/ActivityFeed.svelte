@@ -1,6 +1,6 @@
 <script lang="ts">
   import { activityDays, activityKind, localDay, type ActivityKind } from "@ecx/wallet";
-  import { shortAsset } from "$lib/asset";
+  import { assetSource, shortAsset } from "$lib/asset";
   import type { ChainId, HistoryEntry } from "$lib/background";
   import type { Chains, ChainView } from "$lib/chains.svelte";
   import Deposits from "$lib/Deposits.svelte";
@@ -96,12 +96,20 @@
 
 {#snippet amounts(view: ChainView, entry: HistoryEntry, size: "in-row" | "in-sheet")}
   {#each entry.amounts as { asset, amount } (asset)}
-    {@const named = view.info.assets.some((a) => a.id === asset)}
+    {@const entry = view.info.assets.find((a) => a.id === asset)}
+    {@const named = entry !== undefined}
     <span class="amount {size}" class:in={!amount.startsWith("-")} data-history-amount data-asset={asset}>
       {signed(amount, amountText(amount, asset, view.info.assets))}
       {#if !named}
         <!-- A row has room for the words only; the details sheet shows which asset. -->
-        <span class="muted tiny unknown" title={asset}>Unknown asset{#if size === "in-sheet"} <code>{shortAsset(asset)}</code>{/if}</span>
+        <span class="muted tiny unknown" title={asset}>
+          Unknown asset{#if size === "in-sheet"}
+            <code>{shortAsset(asset)}</code>
+            {#if view.info.id !== "l1"}<a class="link" href="#/assets/{view.info.id}/{asset}" data-name-asset>Name it</a>{/if}
+          {/if}
+        </span>
+      {:else if size === "in-sheet" && assetSource(entry)}
+        <span class="muted tiny" title={asset} data-asset-source>{assetSource(entry)} <code>{shortAsset(asset)}</code></span>
       {/if}
     </span>
   {/each}

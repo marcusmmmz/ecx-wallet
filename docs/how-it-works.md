@@ -8,6 +8,7 @@ One section per feature: what the user sees, then how the wallet does it, with t
 - [Sidechain Servers](#sidechain-servers)
 - [Home: balances and chains](#home-balances-and-chains)
 - [History](#history)
+- [Assets](#assets)
 - [Send](#send)
 - [Deposit](#deposit)
 - [The Provider](#the-provider)
@@ -26,7 +27,7 @@ website → client discovery → injected Provider (inpage.ts, main world)
 
 ## Vault
 
-**What the user sees:** onboarding creates or imports a wallet (`#/create`, `#/import`). The wallet then locks after 15 minutes without use, and the home header counts down ("Locks in 15 min"). Settings (`#/settings`) has Grants, the ECX/sats unit, the auto-lock delay (shown only) and Lock now.
+**What the user sees:** onboarding creates or imports a wallet (`#/create`, `#/import`). The wallet then locks after 15 minutes without use, and the home header counts down ("Locks in 15 min"). Settings (`#/settings`) has Grants, Chains, Assets, the ECX/sats unit, the auto-lock delay (shown only) and Lock now.
 
 **How:**
 
@@ -82,7 +83,8 @@ The API this project defines, for a sidechain with no indexer. Its protocol draf
 
 - **One total** at the top adds up each chain's ECX: the asset its Chain Entry marks `ecx` (`totalAcrossChains`, ADR 0005). Deposits on the way show apart, never in the total.
 - **One section per chain** below (`l1.reported`, `accounts.reported`), each with the confirmed balance per asset and "+N unconfirmed" beside it when there is any. Unconfirmed coins are only shown: a Deposit spends confirmed coins only.
-- **Names** come from the Chain Entry: the chain ("Main chain", "Elements+") and its assets (`chains.list`). Any other asset is "Unknown asset".
+- **Names** come from the Chain Entry: the chain ("Main chain", "Elements+") and its assets (`chains.list`).
+- **The asset store** (`wallet/src/assets.ts`, ADR 0010) names other assets, one store per network in plain `storage.local` (`assets:<chain>`). It holds an asset the wallet signed a new issuance of, with a checked contract (`signed`), one the user added by its contract (`assets.addByContract`, `contract`), or one the user labelled (`label`). Adding by contract reads the issuance's outpoint from Esplora's `/asset/:id`, and `elements.wasm`'s `asset_contract` derives the asset id from it and the contract's hash. A ticker of the Chain Entry's, in any case, is refused. Where it matters (the Assets screen, Activity details, the approval window), a stored name is marked "from its contract" or "your label", with the asset's id. Home's balance rows show only its ticker and name. Any other asset is "Unknown asset". The [Assets](#assets) screen manages the store.
 - **A chain's own screen** (`#/chain/<l1|slot>`) says "Reported by <server URL>".
 - **Units:** every ECX amount follows one unit, ECX or sats (`formatAmount`; `settings.unit`, kept in `storage.local`). Tapping the total switches it.
 
@@ -109,6 +111,18 @@ The API this project defines, for a sidechain with no indexer. Its protocol draf
   - "+ confidential amounts not shown" for its outputs with no explicit value.
 - **No paging yet** (#36): History reads only each address's first page (only finding a Deposit's credit pages back, under Deposit). When an address's list is full (25 confirmed or 50 unconfirmed), the screen says older transactions may not be shown.
 - **Trust needs each input's parent.** Over Esplora the wallet assumes a parent missing from the lists is confirmed. It paid a watched address, whose list has every one of its mempool transactions (up to 50), so only an older confirmed one can be missing.
+
+## Assets
+
+**What the user sees** (#51): Settings → Assets (`#/assets`) lists the asset store's entries for each sidechain that's on, each with its ticker, name, source ("from its contract" or "your label"), full id and decimal places. From there the user can:
+
+- **Add by contract:** paste an asset id and its contract JSON (`assets.addByContract`). The wallet checks it against the chain as under [Home](#home-balances-and-chains) and refuses a mismatch, saying why.
+- **Add a label** for an asset with no contract: a name, ticker and decimal places (`assets.label`), held to the registry's rules for a contract's name and ticker. It can't replace a name from the asset's contract: remove that first.
+- **Rename a label** or a name an app suggested ([`suggestAsset`](#suggestasset), marked "named by <origin>"), which makes it the user's label. **Remove** any entry (`assets.remove`). Removing only forgets the name, and the asset shows as "Unknown asset" again.
+
+A ticker of the Chain Entry's, in any case, is refused, with the reason shown. An "Unknown asset" on Home's rows or in an Activity transaction's details has "Name it", which opens `#/assets/<slot>/<asset>` with the form ready for that asset. The approval window has no such link, since leaving it would abandon the request.
+
+**How:** `assets.list`, `assets.label` and `assets.remove` take a Slot and work on its network's store (`wallet/src/assets.ts`). Only `assets.addByContract` reads the chain, so it needs the chain on and an Esplora server.
 
 ## Send
 
@@ -164,10 +178,11 @@ What a Sidechain App calls (`wallet/src/provider.ts`). It finds the Provider wit
 | `getAddresses({ slot })` | yes | `[{ chain, address, publicKey }]`: the Slot's receive address, its CAIP-2 chain id, and the 33-byte compressed key the address pays, in hex. Older wallets don't send `publicKey`. While locked, it opens a window to unlock first. |
 | `signTransaction(request)` | yes | Signs a Signing Request (a PSET) after approval and returns it signed. It doesn't broadcast. |
 | `sendTransfer({ slot, outputs })` | yes | The wallet makes a Send for the app and returns `{ txid }`. |
+| `suggestAsset({ slot, asset, contract \| label })` | yes | Suggests a name for an asset; once the user approves, returns what the wallet stored. See below. |
 
 **Grants** are per origin, stored in `storage.local`, and listed on the Grants screen (`#/grants`), where they can be revoked. The connect prompt also has the **Blind Signing opt-in**, a checkbox that is off by default.
 
-**While locked,** every granted method opens the approval window to unlock first; closing it is 4001. An origin's `getAddresses` calls share its one unlock window (a signing request or Send unlocks in its own approval window). `connect` and `getGrant` need no key, so they work locked. A page can check `getGrant().unlocked` on load and ask for addresses only after a click, so a reload never opens a window. The wallet sends no lock or unlock events: they would tell sites when the user is away.
+**While locked,** every granted method that needs a key opens the approval window to unlock first; closing it is 4001. `suggestAsset` needs none. An origin's `getAddresses` calls share its one unlock window (a signing request or Send unlocks in its own approval window). `connect` and `getGrant` need no key, so they work locked. A page can check `getGrant().unlocked` on load and ask for addresses only after a click, so a reload never opens a window. The wallet sends no lock or unlock events: they would tell sites when the user is away.
 
 **Events:** `provider.on("grantChanged", listener)` (and `removeListener`). The listener gets the origin's Grant scope, or `null` once it has none. It fires in every open tab of that origin when the Grant is widened by `connect`, revoked on the Grants screen, or removed by `disconnect`. The background sends it to every tab's top frame (`chrome.tabs.sendMessage`, no tab permission needed), and each content script passes it to its page only if the origin is the page's own.
 
@@ -184,6 +199,7 @@ What a Sidechain App calls (`wallet/src/provider.ts`). It finds the Provider wit
 | -32602 | Invalid params, or a request the wallet won't sign or build. |
 | -32001 | The Sidechain Server failed or refused. |
 | -32603 | Internal wallet error. |
+| -32002 | The origin already has a request of this kind waiting for the user (`suggestAsset`). |
 
 ### signTransaction
 
@@ -192,7 +208,7 @@ The handler checks a request in this order:
 1. **The envelope:** unknown MAJOR version → 4200, unknown fields are ignored, expired → -32602.
 2. **The Grant:** Slot and method → 4100.
 3. **The Slot's Chain Module's `check`:** a wrong ELIP-101 genesis, any confidential input or output, or inputs without `witness_utxo` → -32602. This needs no Starter, so it runs before any unlock prompt.
-4. **`decode`**, after unlocking: an input without `bip32_derivation` that doesn't spend the address `getAddresses` gives out, or a PSET with no input of the wallet's, → -32602 (ADR 0007). Otherwise a Clear View, or Blind with the facts the module can verify. Blind needs the Grant's Blind Signing opt-in (4100 without it). A new issuance is Clear: the window shows the asset and token ids the Decoder derives, in base units, and the contract hash. With the contract in the request's `evidence` (`{ assetContract: { "<input>": "<contract JSON>" } }`), the module checks it against the committed hash and the registry's rules, and the window shows the amount in its ticker and precision; evidence that doesn't check out → -32602 (ADR 0009). A reissuance stays Blind (ADR 0008). Blind facts list what leaves the wallet and, separately, what comes into it: the module returns a single per-asset `totalLeaving`, and the window shows its negative amounts, without the sign, under "Coming into your wallet".
+4. **`decode`**, after unlocking: an input without `bip32_derivation` that doesn't spend the address `getAddresses` gives out, or a PSET with no input of the wallet's, → -32602 (ADR 0007). Otherwise a Clear View, or Blind with the facts the module can verify. Blind needs the Grant's Blind Signing opt-in (4100 without it). A new issuance is Clear: the window shows the asset and token ids the Decoder derives, in base units, and the contract hash. With the contract in the request's `evidence` (`{ assetContract: { "<input>": "<contract JSON>" } }`), the module checks it against the committed hash and the registry's rules, and the window shows the amount in its ticker and precision; evidence that doesn't check out → -32602 (ADR 0009). Once signed, such an asset goes into the asset store, unless its ticker is one of the Chain Entry's (ADR 0010). A reissuance stays Blind (ADR 0008). Blind facts list what leaves the wallet and, separately, what comes into it: the module returns a single per-asset `totalLeaving`, and the window shows its negative amounts, without the sign, under "Coming into your wallet".
 
 There is one approval window per request. It asks to unlock first if the wallet is locked, then shows the request. `sign` returns the same PSET with signatures on the inputs that re-derive to the Starter, and nothing else added: an input spending the given-out address gets no `bip32_derivation` entry written back.
 
@@ -208,6 +224,16 @@ The wallet's own [Send](#send), for an app (#39, ADR 0006): the app names the ou
 - **Errors go to the app**, not into Activity:
   - not enough spendable, dust, a confidential address → -32602 over Esplora;
   - over `/v1`, the server's refusals and anything wrong with what it built → -32001.
+
+### suggestAsset
+
+An app suggests the name the wallet shows for an asset on a Slot (ADR 0010), like Ethereum's `wallet_watchAsset`. It needs its own Grant.
+
+- **By its contract** (`contract`, its exact JSON): checked against the chain as Add by contract is (Esplora's `/asset/:id` and `elements.wasm`'s `asset_contract`). Approved, it's stored as `contract`, marked "from its contract", with the app's origin kept.
+- **As a plain name** (`label: { name, ticker, precision }`): held to a label's rules. Approved, it's stored as `app`, marked "named by <origin>". It can't replace a name from the asset's contract. The user can rename it on the Assets screen, which makes it their own label.
+- **Refused before any window** (-32602): a contract that isn't the asset's, a ticker of the Chain Entry's in any case, a plain name for an asset its contract already names, or neither or both of `contract` and `label`. No Grant → 4100.
+- **The window** shows the origin, the ticker, name, decimal places and full id, whether the contract was checked, and what the name replaces, if anything. It also shows how much of the asset the wallet holds, confirmed and unconfirmed, in the suggested ticker and precision (`reportedState`, read fresh). While locked it says the balance isn't shown, rather than asking to unlock. Reject or close → 4001.
+- **One at a time per origin:** another suggestion while one waits → -32002. It needs no key, so it works while locked.
 
 ## Session cache
 

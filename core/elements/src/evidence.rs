@@ -61,17 +61,28 @@ pub(crate) fn checked_contracts(
         if sha256::Hash::hash(contract.as_bytes()).to_byte_array() != input.issuance_asset_entropy.unwrap_or_default() {
             return Err(invalid(format!("The contract for input {i} isn't the one its issuance commits to.")));
         }
-        let shown = registry_contract(contract, wallet).map_err(|why| invalid(format!("The contract for input {i} {why}")))?;
-        checked.insert(i, shown);
+        let fields = registry_fields(contract).map_err(|why| invalid(format!("The contract for input {i} {why}")))?;
+        let issuer_yours = wallet.gives_out(&fields.issuer);
+        let RegistryFields { name, ticker, precision, domain, .. } = fields;
+        checked.insert(i, ClearContract { name, ticker, precision, domain, issuer_yours });
     }
     Ok(checked)
 }
 
-/// The fields the approval shows, if `contract` follows the Liquid asset registry's rules (as
+/// A contract's fields, once they follow the registry's rules.
+pub(crate) struct RegistryFields {
+    pub name: String,
+    pub ticker: String,
+    pub precision: u8,
+    pub domain: String,
+    pub issuer: PublicKey,
+}
+
+/// `contract`'s fields, if it follows the Liquid asset registry's rules (as
 /// `lwk_wollet::Contract::validate`): version 0, precision 0-8, a 1-255 character name, a 3-24
 /// character ticker of letters, digits, dots and hyphens, a domain, and a compressed issuer key.
 /// Stricter than the registry in one way: the name must be printable ASCII, no control characters.
-fn registry_contract(contract: &str, wallet: &Wallet) -> Result<ClearContract, String> {
+pub(crate) fn registry_fields(contract: &str) -> Result<RegistryFields, String> {
     let value: Value = serde_json::from_str(contract).map_err(|e| format!("isn't JSON: {e}"))?;
     let field = |name: &str| value.get(name).ok_or(format!("has no `{name}`."));
     let text = |name: &str| field(name)?.as_str().ok_or(format!("has a `{name}` that isn't a string."));
@@ -96,13 +107,7 @@ fn registry_contract(contract: &str, wallet: &Wallet) -> Result<ClearContract, S
         .ok()
         .filter(|pk| pk.compressed)
         .ok_or("has an `issuer_pubkey` that isn't a compressed public key in hex.")?;
-    Ok(ClearContract {
-        name: name.into(),
-        ticker: ticker.into(),
-        precision: precision as u8,
-        domain: domain.into(),
-        issuer_yours: wallet.gives_out(&issuer),
-    })
+    Ok(RegistryFields { name: name.into(), ticker: ticker.into(), precision: precision as u8, domain: domain.into(), issuer })
 }
 
 /// A lowercase DNS name of at least two labels, each 1-63 letters, digits or inner hyphens.

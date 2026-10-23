@@ -16,7 +16,7 @@ import { parseElementsTx } from "./elements-tx.mjs";
  *   txs?: TxFixture[], addressTxs?: Record<string, object[]>, feeEstimates?: Record<string, number>, refuseBroadcast?: string,
  *   delayMs?: number, pathDelayMs?: Record<string, number>, txHexOverrides?: Record<string, string>, elements?: boolean,
  *   txStatuses?: Record<string, { confirmed: boolean, blockHeight?: number, blockHash?: string }>,
- *   broadcastTxid?: string }} EsploraStubConfig
+ *   broadcastTxid?: string, assets?: Record<string, object> }} EsploraStubConfig
  */
 
 /**
@@ -35,6 +35,7 @@ import { parseElementsTx } from "./elements-tx.mjs";
  *   spend from the address's script, as Esplora lists them: the mempool's first, newest first,
  *   then the 25 latest confirmed;
  * - `GET /fee-estimates`: `config.feeEstimates` (404 if absent);
+ * - `GET /asset/{id}`: `config.assets[id]` as given (Esplora's JSON, e.g. its `issuance_prevout`), else 404;
  * - `POST /tx`: parses the transaction, adds it to `config.txs` unconfirmed and answers its txid,
  *   or refuses with `config.refuseBroadcast`. With `config.elements`, it parses an Elements
  *   transaction instead, which it only records in `config.txStatuses` (unconfirmed);
@@ -107,6 +108,8 @@ export function createEsploraStub(config) {
     }
     if (pathname === "/blocks/tip/height") return [200, String(config.tipHeight ?? config.identityBlock.height)];
     if (pathname === "/fee-estimates") return config.feeEstimates ? [200, config.feeEstimates] : [404, "Not found"];
+    const asset = /^\/asset\/([0-9a-f]{64})$/.exec(pathname);
+    if (asset) return config.assets?.[asset[1]] ? [200, config.assets[asset[1]]] : [404, "Asset id not found"];
 
     const utxo = /^\/address\/([^/]+)\/utxo$/.exec(pathname);
     if (utxo) {

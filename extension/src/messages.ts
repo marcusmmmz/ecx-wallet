@@ -59,6 +59,12 @@ export type BackgroundMessage =
   | { kind: "accounts.list" }
   // How the wallet shows each chain (its Chain Entry's name, description and assets): wallet pages only.
   | { kind: "chains.list" }
+  // The asset store, per Slot's network (docs/adr/0010): wallet pages only.
+  | { kind: "assets.list"; slot: number }
+  | { kind: "assets.label"; slot: number; asset: string; name: string; ticker: string; precision: number }
+  | { kind: "assets.remove"; slot: number; asset: string }
+  // Names an asset by its contract (exact JSON), checked against the Slot's chain: wallet pages only.
+  | { kind: "assets.addByContract"; slot: number; asset: string; contract: string }
   // Turns a sidechain on or off (the main chain is always on): wallet pages only.
   | { kind: "chains.setOn"; slot: number; on: boolean }
   // Display settings: wallet pages only.

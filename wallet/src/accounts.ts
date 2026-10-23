@@ -2,7 +2,6 @@
 // #18, story 44; docs/adr/0003): a module only ever receives the key its chain's place in the tree
 // calls for. eCash (the root) gets the L1 Account Key; a Slot under it gets that Slot's Starter.
 import {
-  type AssetEntry,
   loadChainModule,
   loadL1Module,
   type ChainEntry,
@@ -13,6 +12,7 @@ import {
   type NetworkEntry,
   type Starter,
 } from "./chain-module";
+import type { NamedAsset } from "./assets";
 
 /** Slots with a bundled Chain Module, and the .wasm each ships as. */
 export const CHAIN_MODULE_FILES: Readonly<Record<number, string>> = { 24: "elements.wasm" };
@@ -77,7 +77,8 @@ export interface ChainDescription {
   chain: string;
   /** The network's key in the Chain Entry ("betanet"). */
   network: string;
-  assets: AssetEntry[];
+  /** The Chain Entry's, and in `chains.list` the asset store's after them (docs/adr/0010). */
+  assets: NamedAsset[];
   /** The wallet can Send on it (a sidechain whose server builds transfers, or whose module does over Esplora). */
   sends: boolean;
 }

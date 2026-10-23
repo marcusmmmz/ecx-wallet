@@ -12,7 +12,7 @@
     type DangerousMode,
   } from "$lib/background";
   import { formatAllDecimals } from "@ecx/wallet";
-  import { shortAsset } from "$lib/asset";
+  import { assetSource, shortAsset } from "$lib/asset";
   import Icon from "$lib/Icon.svelte";
   import { amountText } from "$lib/unit.svelte";
 
@@ -67,10 +67,16 @@
   /** The assets the request's chain names, and the main chain's coin (Deposits and Withdrawal payouts). */
   const assets = $derived(chains.find((c) => prompt && "chain" in prompt && c.chain === prompt.chain)?.assets ?? []);
   const coinAssets = $derived(chains.find((c) => c.id === "l1")?.assets ?? []);
-  /** An amount of the request's chain, as named by its Chain Entry; an unnamed asset says its id. */
+  /**
+   * An amount of the request's chain, as named by its Chain Entry or the asset store (saying which,
+   * with its id); an unnamed asset says its id.
+   */
   function amount(a: AssetAmount): string {
-    const named = assets.some((n) => n.id === a.asset);
-    return named ? amountText(a.amount, a.asset, assets) : `${amountText(a.amount, a.asset, assets)} (Unknown asset ${shortAsset(a.asset)})`;
+    const entry = assets.find((n) => n.id === a.asset);
+    const text = amountText(a.amount, a.asset, assets);
+    if (entry === undefined) return `${text} (Unknown asset ${shortAsset(a.asset)})`;
+    const source = assetSource(entry);
+    return source ? `${text} (${source}, ${shortAsset(a.asset)})` : text;
   }
   /** What to call each asset the request itself issues, by id: the new asset and its token. */
   function issuedAssetLabels(view: ClearView): Map<string, string> {
@@ -235,6 +241,53 @@
     </form>
     {#if error}<p class="error" role="alert" data-error>{error}</p>{/if}
   </main>
+{:else if prompt.kind === "suggestAsset"}
+  {@const a = prompt.asset}
+  {@const checked = a.source === "contract"}
+  {@const b = prompt.balance}
+  <!-- The balance in the suggested ticker and precision: what approving would show. -->
+  {@const as = { id: a.id, ticker: a.ticker, name: a.name, decimals: a.precision }}
+  <main class="screen" data-approval-ready data-suggest-asset>
+    <div class="title">
+      <h1>Name an asset</h1>
+      <p class="muted small">This site suggests a name for an asset, for your wallet to show:</p>
+    </div>
+    {@render requester(prompt.origin, prompt.chain)}
+    <section class="card stack">
+      <div><strong data-suggested-ticker>{a.ticker}</strong> <span class="muted" data-suggested-name>{a.name}</span></div>
+      <div class="small">{a.precision} decimal places</div>
+      <code class="tiny full-id" data-suggested-id>{a.id}</code>
+      <div class="small" data-suggested-balance>
+        {#if "locked" in b}
+          <span class="muted">Your balance isn't shown while the wallet is locked.</span>
+        {:else if "error" in b}
+          <span class="muted">Couldn't read your balance: {b.error}</span>
+        {:else}
+          You hold {amountText(b.amount, a.id, [as])}{#if b.unconfirmed !== "0"}, +{amountText(b.unconfirmed, a.id, [as])} unconfirmed{/if}.
+        {/if}
+      </div>
+      {#if checked}
+        <span class="badge ok" data-suggested-checked><Icon name="check" size={14} /> Its contract, checked against the chain</span>
+        <p class="muted small">
+          This is the contract the asset was issued with. The issuer chose its name.
+          {#if a.domain}Claims the domain <code>{a.domain}</code> (not checked by this wallet).{/if}
+        </p>
+      {:else}
+        <span class="badge" data-suggested-unchecked>Not checked: only this site's word</span>
+        <p class="muted small">The asset has no contract here, so nothing backs this name. It will show as named by this site.</p>
+      {/if}
+    </section>
+    {#if prompt.replaces}
+      {@const r = prompt.replaces}
+      <p class="notice" data-suggested-replaces>
+        <Icon name="warning" /><span>Replaces its current name, {r.ticker} ({r.name}), {assetSource(r)}.</span>
+      </p>
+    {/if}
+    <div class="decision">
+      <button data-reject disabled={busy} onclick={() => decide(false)}>Reject</button>
+      <button class="primary" data-approve disabled={busy} onclick={() => decide(true)}>Name it {a.ticker}</button>
+    </div>
+  </main>
 {:else if prompt.kind === "sign" && prompt.decoded.kind === "clear"}
   {@const view = prompt.decoded.view}
   {@const labels = prompt.hints?.outputLabels ?? {}}
@@ -309,9 +362,12 @@
               {#if output.destination.kind === "deposit"}
                 <span class="amount" data-deposit-amount>{coin(output.destination.deposit)}</span>
               {:else}
-                {@const named = assets.some((n) => n.id === output.asset)}
+                {@const entry = assets.find((n) => n.id === output.asset)}
+                {@const named = entry !== undefined}
                 <span class="amount">{amountText(output.amount, output.asset, shownAssets)}</span>
-                {#if !named}
+                {#if assetSource(entry)}
+                  <span class="muted small" data-asset-source>{assetSource(entry)} <code title={output.asset}>{shortAsset(output.asset)}</code></span>
+                {:else if !named}
                   <span class="muted small">{issuedLabels.get(output.asset) ?? "Unknown asset"} <code title={output.asset}>{shortAsset(output.asset)}</code></span>
                 {/if}
               {/if}
@@ -457,6 +513,9 @@
 {/if}
 
 <style>
+  .full-id {
+    overflow-wrap: anywhere;
+  }
   .title {
     display: flex;
     flex-direction: column;

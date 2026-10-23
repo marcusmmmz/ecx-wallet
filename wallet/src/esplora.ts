@@ -274,6 +274,27 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache }:
       }
     },
 
+    /**
+     * The outpoint the asset's issuance spent (Esplora's `issuance_prevout`); undefined if the server
+     * doesn't know the asset (404), or it wasn't issued by a transaction (the chain's own asset).
+     * Whoever uses it derives the asset id from it: the server isn't trusted for that.
+     */
+    async assetIssuance(asset: string): Promise<{ txid: string; vout: number } | undefined> {
+      const answer = await response(`/asset/${asset}`);
+      if (answer.status === 404) return undefined;
+      if (!answer.ok) throw refused(answer);
+      let prevout: Record<string, unknown> | undefined | null;
+      try {
+        prevout = (JSON.parse(answer.body) as Record<string, unknown>)?.issuance_prevout as typeof prevout;
+      } catch {
+        throw malformed("asset");
+      }
+      if (prevout == null) return undefined;
+      const { txid, vout } = prevout;
+      if (typeof txid !== "string" || !HASH.test(txid) || !isCount(vout)) throw malformed("asset");
+      return { txid, vout };
+    },
+
     /** Fee rates (sat/vB) by confirmation target in blocks. */
     async feeEstimates(): Promise<Record<string, number>> {
       const estimates = await getJson("/fee-estimates", "fee estimate");

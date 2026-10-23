@@ -5,6 +5,8 @@ export const ErrorCode = {
   UnsupportedMethod: 4200,
   Disconnected: 4900,
   ChainDisconnected: 4901,
+  /** The origin already has a request of this kind waiting for the user. */
+  RequestPending: -32002,
   InvalidParams: -32602,
   Internal: -32603,
 } as const;

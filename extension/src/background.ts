@@ -7,6 +7,7 @@ import {
   CACHE_PREFIX,
   scopeOf,
   createAccounts,
+  createAssets,
   createChainModules,
   createDeposits,
   esploraClient,
@@ -16,6 +17,7 @@ import {
   createSends,
   createSettings,
   describeChain,
+  servedNetwork,
   sidechainServer,
   SidechainServerError,
   SUPPORTED_SLOTS,
@@ -25,6 +27,7 @@ import {
   ProviderRpcError,
   VaultError,
   type ApprovalPrompt,
+  type AssetPrompt,
   type ChainEntry,
   type NetworkEntry,
   type ConnectAnswer,
@@ -295,6 +298,15 @@ async function askToConnect(prompt: ConnectPrompt): Promise<ConnectAnswer> {
   }
 }
 
+async function askToNameAsset(prompt: AssetPrompt): Promise<boolean> {
+  const approval = new ApprovalWindow();
+  try {
+    return (await approval.ask({ kind: "suggestAsset", ...prompt }))?.approved === true;
+  } finally {
+    approval.close();
+  }
+}
+
 async function askToTurnOn(prompt: TurnOnPrompt): Promise<boolean> {
   const approval = new ApprovalWindow();
   try {
@@ -326,6 +338,18 @@ const keys = { starter: (slot: number) => vault.starter(slot), l1AccountKey: () 
 const accounts = createAccounts({ ...keys, chainModule, l1Module });
 const settings = createSettings(keyValueStore(chrome.storage.local));
 
+/** Every chain's description, eCash first: what its Chain Entry says. */
+const describeChains = async () => [
+  { id: "l1" as const, ...describeChain(await l1Module()) },
+  ...(await Promise.all(SUPPORTED_SLOTS.map(async (slot) => ({ id: slot, ...describeChain(await chainModule(slot)!) })))),
+];
+
+/** The assets the wallet names beyond its Chain Entries, per network (docs/adr/0010). Not encrypted, like Grants. */
+const assets = createAssets({
+  store: keyValueStore(chrome.storage.local),
+  entryAssets: async (chain) => (await describeChains()).find((c) => c.chain === chain)?.assets ?? [],
+});
+
 /** The chain a Slot's module serves (CAIP-2): the key its on/off setting is stored under. */
 const slotChain = async (slot: number) => (await chainModule(slot)!).declare().binding.chain;
 
@@ -353,6 +377,7 @@ const signing = {
   chainModule,
   starter: keys.starter,
   now: () => Date.now(),
+  rememberSigned: assets.rememberSigned,
 };
 
 const handleProviderRequest = createProviderHandler({
@@ -363,6 +388,27 @@ const handleProviderRequest = createProviderHandler({
   chains: chainsOn,
   receiveAddresses: (slot) => accounts.receiveAddresses(slot),
   send: (slot, order, from) => sends.send(slot, order, from),
+  askToNameAsset,
+  async assetSuggestion(slot, origin, suggestion) {
+    const module = await chainModule(slot)!;
+    const { entry, network } = servedNetwork(module);
+    // A contract is checked against the chain, which only an Esplora server says how to do.
+    const client = network.sidechainServer.api === "esplora" ? esplora(entry, network) : undefined;
+    const { chain, asset, replaces } = await assets.suggestion(module, client, origin, suggestion);
+    return { chain, asset, ...(replaces ? { replaces } : {}) };
+  },
+  saveAsset: (chain, asset) => assets.save(chain, asset),
+  async assetBalance(slot, asset) {
+    // The suggestion needs no key, so this never asks to unlock just to show a balance.
+    if (!(await vault.status()).unlocked) return { locked: true };
+    try {
+      const report = await pullPath.reportedState(slot);
+      const of = (list: { asset: string; amount: string }[]) => list.find((b) => b.asset === asset)?.amount ?? "0";
+      return { amount: of(report.balances), unconfirmed: of(report.unconfirmed) };
+    } catch (error) {
+      return { error: (error as Error).message };
+    }
+  },
 });
 
 // The pull path: each Slot's Sidechain Server, in the Server API its Chain Entry names.
@@ -455,12 +501,35 @@ async function route(message: BackgroundMessage, sender: chrome.runtime.MessageS
     case "chains.list":
       // Public: what the Chain Entries say, so the page can name chains and assets even while locked.
       if (!fromWalletPage(sender)) throw new ProviderRpcError(ErrorCode.Unauthorized, "Unknown requester.");
-      return [
-        { id: "l1", on: true, ...describeChain(await l1Module()) },
-        ...(await Promise.all(
-          SUPPORTED_SLOTS.map(async (slot) => ({ id: slot, on: await chainsOn.isOn(slot), ...describeChain(await chainModule(slot)!) })),
-        )),
-      ];
+      // Each names its Chain Entry's assets, then the asset store's.
+      return Promise.all(
+        (await describeChains()).map(async (c) => ({ ...c, on: c.id === "l1" || (await chainsOn.isOn(c.id)), assets: await assets.named(c.chain) })),
+      );
+    case "assets.list":
+      // The asset store's entries for a Slot's network, for the Assets screen. Public, like `chains.list`.
+      if (!fromWalletPage(sender)) throw new ProviderRpcError(ErrorCode.Unauthorized, "Unknown requester.");
+      return assets.list(await slotChain(supportedSlot(message.slot)));
+    case "assets.label":
+      if (!fromWalletPage(sender)) throw new ProviderRpcError(ErrorCode.Unauthorized, "Unknown requester.");
+      return assets.label(await slotChain(supportedSlot(message.slot)), String(message.asset ?? ""), {
+        name: String(message.name ?? ""),
+        ticker: String(message.ticker ?? ""),
+        precision: Number(message.precision),
+      });
+    case "assets.remove":
+      if (!fromWalletPage(sender)) throw new ProviderRpcError(ErrorCode.Unauthorized, "Unknown requester.");
+      await assets.remove(await slotChain(supportedSlot(message.slot)), String(message.asset ?? ""));
+      return null;
+    case "assets.addByContract": {
+      // Names an asset by its contract, checked against the chain: answers what was stored.
+      if (!fromWalletPage(sender)) throw new ProviderRpcError(ErrorCode.Unauthorized, "Unknown requester.");
+      const module = await chainModule(await onSlot(message.slot))!;
+      const { entry, network } = servedNetwork(module);
+      if (network.sidechainServer.api !== "esplora") {
+        throw new ProviderRpcError(ErrorCode.InvalidParams, `${entry.name}'s server doesn't say how an asset was issued, so its contract can't be checked.`);
+      }
+      return assets.addByContract(module, esplora(entry, network), String(message.asset ?? ""), String(message.contract ?? ""));
+    }
     case "chains.setOn": {
       // Turning a sidechain on or off; the main chain is always on.
       if (!fromWalletPage(sender)) throw new ProviderRpcError(ErrorCode.Unauthorized, "Unknown requester.");

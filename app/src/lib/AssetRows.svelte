@@ -37,7 +37,12 @@
         <ChainMark {...assetMark(entry)} size={30} />
         <span class="name">
           <strong>{entry ? entry.ticker : "Unknown asset"}</strong>
-          <span class="muted tiny">{#if entry}{entry.name}{:else}<code title={asset}>{shortAsset(asset)}</code>{/if}</span>
+          <span class="muted tiny">
+            {#if entry}{entry.name}{:else}
+              <code title={asset}>{shortAsset(asset)}</code>
+              {#if view.info.id !== "l1"}<a class="link" href="#/assets/{view.info.id}/{asset}" data-name-asset>Name it</a>{/if}
+            {/if}
+          </span>
         </span>
         <span class="amounts">
           <strong class="amount" data-balance data-asset={asset}>{amountText(amount, asset, view.info.assets)}</strong>

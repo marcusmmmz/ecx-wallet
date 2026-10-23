@@ -92,6 +92,8 @@ pub enum RefusalCode {
     NothingToSign,
     /// The request's `evidence` doesn't check out against the payload (docs/adr/0009).
     InvalidEvidence,
+    /// `asset_contract`: the contract isn't the asset's, or breaks the registry's rules (docs/adr/0010).
+    InvalidContract,
     /// The Starter handed in isn't one (a wallet bug, not the requester's).
     InvalidStarter,
     /// `build_transfer`: the coins don't cover the amounts and the fee.

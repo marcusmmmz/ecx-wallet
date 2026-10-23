@@ -184,6 +184,11 @@ try {
   await shot(page, "12-grants");
   await page.close();
 
+  page = await openWalletPage(session, "#/assets");
+  await page.setViewport(POPUP);
+  await shot(page, "12-assets");
+  await page.close();
+
   const home = await open("#/", "[data-lock]");
   await home.click("[data-lock]");
   await home.waitForSelector('[data-vault-state="locked"]');

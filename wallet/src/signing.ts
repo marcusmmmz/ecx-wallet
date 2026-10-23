@@ -39,6 +39,8 @@ export interface SigningDeps {
   starter(slot: number): Promise<Starter>;
   /** Milliseconds since the epoch. */
   now(): number;
+  /** After signing a Clear View on `chain`: names the new assets whose contracts checked out (docs/adr/0010). */
+  rememberSigned?(chain: string, view: ClearView): Promise<void>;
 }
 
 export const rejected = () => new ProviderRpcError(ErrorCode.UserRejected, "The user rejected the request.");
@@ -111,7 +113,10 @@ export async function reviewAndSign(
     if (request.expiresAt <= nowSeconds()) {
       throw new ProviderRpcError(ErrorCode.InvalidParams, "This Signing Request expired while waiting for approval.");
     }
-    return await refusing(async () => module.sign(request.payload, await deps.starter(request.slot)));
+    const signed = await refusing(async () => module.sign(request.payload, await deps.starter(request.slot)));
+    // The signature is the requester's either way: failing to name an asset doesn't take it back.
+    if (decoded.kind === "clear") await deps.rememberSigned?.(request.chain, decoded.view).catch(console.error);
+    return signed;
   } finally {
     approval.close();
   }

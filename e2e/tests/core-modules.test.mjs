@@ -49,7 +49,7 @@ test("the shipped Elements Chain Module declares its binding and bundles Slot 24
   const elements = await loadChainModule(await readFile(path.join(DIST.chromium, "elements.wasm")));
   assert.deepEqual(elements.declare(), {
     binding: { chain: "ecash:betanet-s24", format: "pset", payloadVersions: ["1"] },
-    capabilities: ["depositDestination", "buildTransfer"],
+    capabilities: ["depositDestination", "buildTransfer", "assetContract"],
   });
   const entry = elements.chainEntry();
   assert.equal(entry.slot, 24);

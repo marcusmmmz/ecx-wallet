@@ -10,6 +10,8 @@
 //! - [`decode`] refuses what the wallet must never sign, and otherwise returns a Clear View (if the
 //!   Decoder fully understands the request) or Blind with the facts it can prove;
 //! - [`sign`] signs only the inputs that re-derive to the Starter, changing nothing else;
+//! - [`asset_contract`] checks an asset's contract against the outpoint its issuance spent (the
+//!   `assetContract` capability);
 //! - [`build_transfer`] builds the wallet's own Send from the account's coins (the `buildTransfer`
 //!   capability), and [`finalize`] turns the signed PSET into the transaction to broadcast.
 //!
@@ -18,6 +20,7 @@
 use serde::Serialize;
 
 mod account;
+mod asset_contract;
 mod classify;
 mod clear;
 mod decode;
@@ -29,6 +32,7 @@ mod sign;
 mod transfer;
 
 pub use account::{derive_account, Account, AddressEntry};
+pub use asset_contract::{asset_contract, CheckedContract};
 pub use chain_entry::{chain_entry, ChainEntry, NetworkEntry, ServerApi, SidechainServerEntry};
 pub use clear::{ClearContract, ClearInput, ClearIssuance, ClearOutput, ClearView, DangerousMode, Destination};
 pub use evidence::Evidence;
@@ -74,7 +78,7 @@ pub fn declare() -> Declaration {
             format: "pset".into(),
             payload_versions: vec!["1".into()],
         },
-        capabilities: vec!["depositDestination".into(), "buildTransfer".into()],
+        capabilities: vec!["depositDestination".into(), "buildTransfer".into(), "assetContract".into()],
     }
 }
 

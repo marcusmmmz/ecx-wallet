@@ -70,6 +70,10 @@ _Avoid_: Peg-out
 The description of one chain, eCash itself or a sidechain, that ships with a Wallet Base release: its name and what it's for, its Slot and parent chain (neither for eCash, the root), its networks, and on each its identity block, Activation (for a Slot, once pinned), the main-chain confirmations before a Deposit to it is credited (for a Slot), default Sidechain Server, Official Apps and the assets it names, among them the chain's ECX.
 _Avoid_: Chain manifest, chain descriptor, network profile
 
+**Asset Store**:
+The assets the Wallet Base names on a network beyond its Chain Entry's: each one it signed a new issuance of with a checked contract, added by a contract checked against the chain, or labelled by the user. Never with a ticker of the Chain Entry's, and always shown as not this release's own names (docs/adr/0010).
+_Avoid_: Asset registry (Liquid's, fetched from a server), token list
+
 **Spendable**:
 What a Send on a chain can spend now, per asset: confirmed coins, plus change from the wallet's own unconfirmed transactions that only it could replace, less coins a pending Send already spent (docs/adr/0006).
 _Avoid_: Available balance

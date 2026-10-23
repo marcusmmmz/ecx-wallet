@@ -1,5 +1,6 @@
 import { ErrorCode, ProviderRpcError } from "./errors";
 import type { SlotAddress } from "./accounts";
+import type { AssetSuggestion, StoredAsset } from "./assets";
 import { covers, GRANTABLE_METHODS, scopeOf, widen, type GrantableMethod, type GrantScope, type GrantStore, type Scope } from "./grants";
 import { parseSigningRequest } from "./signing-request";
 import { chainModuleFor, rejected, reviewAndSign, type SignPrompt, type SigningDeps } from "./signing";
@@ -22,12 +23,29 @@ export interface TurnOnPrompt {
   slots: number[];
 }
 
-/** What an approval window shows: a connect prompt, an unlock first, or a Signing Request. */
+/** An app suggests a name for an asset (`suggestAsset`), already checked as far as it can be. */
+export interface AssetPrompt {
+  origin: string;
+  /** CAIP-2. */
+  chain: string;
+  /** What would be stored: `contract` if checked against the chain, else `app`. */
+  asset: StoredAsset;
+  /** What the store has for the asset now, which approving replaces. */
+  replaces?: StoredAsset;
+  /** What the wallet holds of it, in base units, as its server reports it; not read while locked. */
+  balance: AssetBalance;
+}
+
+/** A wallet's balance of one asset, for the user to see beside a suggestion. */
+export type AssetBalance = { amount: string; unconfirmed: string } | { locked: true } | { error: string };
+
+/** What an approval window shows: a connect prompt, an unlock first, a Signing Request or an asset's name. */
 export type ApprovalPrompt =
   | ({ kind: "connect" } & ConnectPrompt)
   | { kind: "unlock"; origin: string; chain: string }
   | ({ kind: "turnOn" } & TurnOnPrompt)
-  | ({ kind: "sign" } & SignPrompt);
+  | ({ kind: "sign" } & SignPrompt)
+  | ({ kind: "suggestAsset" } & AssetPrompt);
 
 /** The user's answer to a connect prompt. */
 export interface ConnectAnswer {
@@ -48,6 +66,14 @@ export interface ProviderDeps extends SigningDeps {
   askToTurnOn(prompt: TurnOnPrompt): Promise<boolean>;
   /** The wallet's Send, asked for by `from` (only called for a supported Slot). */
   send(slot: number, order: TransferOrder, from: { origin: string }): Promise<SendResult>;
+  /** What `origin` suggests naming an asset on `slot`, checked before the user is asked; throws to refuse it (docs/adr/0010). */
+  assetSuggestion(slot: number, origin: string, suggestion: AssetSuggestion): Promise<Omit<AssetPrompt, "origin" | "balance">>;
+  /** The wallet's balance of `asset` on `slot`. Never asks to unlock: `{ locked: true }` while locked. */
+  assetBalance(slot: number, asset: string): Promise<AssetBalance>;
+  /** Asks the user to approve an asset's name; false if they reject or close the window. */
+  askToNameAsset(prompt: AssetPrompt): Promise<boolean>;
+  /** Stores a name the user approved. */
+  saveAsset(chain: string, asset: StoredAsset): Promise<StoredAsset>;
 }
 
 /**
@@ -138,6 +164,7 @@ export function createProviderHandler(deps: ProviderDeps) {
   async function granted(origin: string, method: GrantableMethod, params: unknown): Promise<unknown> {
     if (method === "signTransaction") return signTransaction(origin, params);
     if (method === "sendTransfer") return sendTransfer(origin, params);
+    if (method === "suggestAsset") return suggestAsset(origin, params);
     const slot = parseSlot(method, params);
     await authorize(origin, method, slot);
     await unlocked(origin, slot);
@@ -158,6 +185,33 @@ export function createProviderHandler(deps: ProviderDeps) {
     const result = await send(slot, { outputs: outputs as TransferOrder["outputs"] }, { origin });
     if (!result.accepted) throw new SidechainServerError(result.server, `The Sidechain Server at ${result.server} didn't accept the transaction.`);
     return result.txid === undefined ? {} : { txid: result.txid };
+  }
+
+  /** Origins with an asset suggestion waiting for the user: one window at a time each. */
+  const suggesting = new Set<string>();
+
+  /**
+   * An app suggests naming an asset (docs/adr/0010): by its contract, checked against the chain, or
+   * by a plain name. Everything that can refuse it does so before a window opens; the user then
+   * approves or rejects. Needs no key, so it works while locked. Answers what was stored.
+   */
+  async function suggestAsset(origin: string, params: unknown): Promise<StoredAsset> {
+    const slot = parseSlot("suggestAsset", params);
+    await authorize(origin, "suggestAsset", slot);
+    if (suggesting.has(origin)) {
+      throw new ProviderRpcError(ErrorCode.RequestPending, `${origin} already has an asset suggestion waiting for the user.`);
+    }
+    suggesting.add(origin);
+    try {
+      await turnOn(origin, [slot]);
+      const { asset, contract, label } = params as AssetSuggestion;
+      const suggested = await deps.assetSuggestion(slot, origin, { asset, contract, label });
+      const prompt = { origin, ...suggested, balance: await deps.assetBalance(slot, suggested.asset.id) };
+      if (!(await deps.askToNameAsset(prompt))) throw rejected();
+      return await deps.saveAsset(prompt.chain, prompt.asset);
+    } finally {
+      suggesting.delete(origin);
+    }
   }
 
   /**

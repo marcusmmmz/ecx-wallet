@@ -18,6 +18,7 @@ import type {
   SendResult,
   SlotAddress,
   SlotReport,
+  StoredAsset,
   Unit,
   VaultStatus,
 } from "@ecx/wallet";
@@ -38,6 +39,7 @@ export type {
   RefusedSend,
   SendResult,
   SlotReport,
+  StoredAsset,
   Unit,
   VaultStatus,
 };
@@ -225,6 +227,20 @@ export const refusedDeposit = (slot: number) => send<RefusedDeposit | null>({ ki
 
 /** Forgets the Slot's refused Deposit. */
 export const dismissRefusedDeposit = (slot: number) => send<null>({ kind: "deposit.dismissRefused", slot });
+
+/** The assets the wallet names on the Slot's network beyond its Chain Entry (docs/adr/0010). */
+export const listStoredAssets = (slot: number) => send<StoredAsset[]>({ kind: "assets.list", slot });
+
+/** Names an asset by its contract (exact JSON), once checked against the chain; throws, saying why, if it isn't. */
+export const addAssetByContract = (slot: number, asset: string, contract: string) =>
+  send<StoredAsset>({ kind: "assets.addByContract", slot, asset, contract });
+
+/** The user's own name for an asset with no contract, or a new one for an earlier label. */
+export const labelAsset = (slot: number, asset: string, label: { name: string; ticker: string; precision: number }) =>
+  send<StoredAsset>({ kind: "assets.label", slot, asset, ...label });
+
+/** Forgets an asset's stored name: it shows as an unknown asset again. */
+export const removeAsset = (slot: number, asset: string) => send<null>({ kind: "assets.remove", slot, asset });
 
 export const listGrants = () => send<Grant[]>({ kind: "grants.list" });
 

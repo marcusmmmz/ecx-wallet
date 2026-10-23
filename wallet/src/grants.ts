@@ -1,5 +1,5 @@
 /** Methods a Grant can cover. `connect` and `disconnect` need no Grant. */
-export const GRANTABLE_METHODS = ["getAddresses", "signTransaction", "sendTransfer"] as const;
+export const GRANTABLE_METHODS = ["getAddresses", "signTransaction", "sendTransfer", "suggestAsset"] as const;
 export type GrantableMethod = (typeof GRANTABLE_METHODS)[number];
 
 export interface Scope {

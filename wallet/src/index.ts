@@ -3,6 +3,8 @@ export { GRANTABLE_METHODS, covers, scopeOf, widen, type Grant, type GrantScope,
 export {
   createProviderHandler,
   type ApprovalPrompt,
+  type AssetBalance,
+  type AssetPrompt,
   type ConnectAnswer,
   type ConnectPrompt,
   type TurnOnPrompt,
@@ -24,6 +26,7 @@ export {
   createKeyRouting,
   createL1Module,
   describeChain,
+  servedNetwork,
   type Accounts,
   type ChainDescription,
   type ChainModules,
@@ -40,6 +43,7 @@ export {
   type Account,
   type AssetAmount,
   type AssetEntry,
+  type CheckedContract,
   type ClearView,
   type DangerousMode,
   type Decoded,
@@ -122,4 +126,5 @@ export {
 export { formatAllDecimals, formatAmount, parseAmount, totalAcrossChains, type TotalPart } from "./amounts";
 export { createSettings, UNITS, type Settings, type Unit } from "./settings";
 export { qrMatrix } from "./qr";
+export { createAssets, type Assets, type AssetSource, type AssetSuggestion, type NamedAsset, type StoredAsset } from "./assets";
 export { activityDays, activityKind, localDay, type ActivityItem, type ActivityKind } from "./activity";
