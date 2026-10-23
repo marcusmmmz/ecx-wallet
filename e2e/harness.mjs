@@ -424,6 +424,18 @@ export async function turnOnChain(page, slot, on = true) {
 }
 
 /**
+ * Waits until the home page's Activity tab has read its history: not refreshing, and showing
+ * entries, "No transactions yet" or why it couldn't read them. Close the page only after, as with
+ * `homeSettled` (which waits for the Home tab's cards, not shown here).
+ */
+export async function activitySettled(page) {
+  await page.waitForSelector(
+    "[data-activity]:not([data-refreshing]) :is([data-history-entry], [data-history-empty], [data-history-error])",
+    { timeout: 20_000 },
+  );
+}
+
+/**
  * Waits until the unlocked home page's requests have settled: a section for each chain that's on,
  * each with its fresh balance (not this session's last one, shown while refreshing) or why there
  * is none, and each Slot's with its Deposits. Close

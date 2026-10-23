@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 import { parseElementsTx } from "@ecx/stub-server/elements-tx";
-import { BROWSERS, homeSettled, launchWallet, openTestApp, openWalletPage, relock, serveEsplora, serveL1Esplora, serveTestApp, setUpWallet, WALLET_PASSWORD } from "../harness.mjs";
+import { activitySettled, BROWSERS, homeSettled, launchWallet, openTestApp, openWalletPage, relock, serveEsplora, serveL1Esplora, serveTestApp, setUpWallet, WALLET_PASSWORD } from "../harness.mjs";
 
 const GENESIS = "a7754ce0debc40baddbd8c47e79d19209685f22c63edaaf8b69cf54116374d7f";
 const RECEIVE_0 = "elements1qew44aehkjstjm56ng2rjrz57vwxh5g9su6dlpm";
@@ -329,6 +329,8 @@ for (const browserName of BROWSERS) describe(browserName, () => {
 
     await page.click("[data-send-activity]");
     await page.waitForSelector('[data-tab="activity"][aria-selected="true"]', { timeout: 10_000 });
+    // Its history requests must answer before the page closes, or Firefox logs the cut-off reply (#43).
+    await activitySettled(page);
     await page.close();
   });
 
