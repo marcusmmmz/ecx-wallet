@@ -125,8 +125,10 @@ fn a_plain_payment_is_clear_with_its_fee_from_the_previous_transactions() {
 
 #[test]
 fn every_flush_operation_is_blind_and_named() {
+    // A ClaimLaunch (kind 23) of token ab…ab, listing no outputs.
+    let claim = [&b"BAST\x00\x17"[..], &[0xab; 32], &[0]].concat();
     let cases: [(&[u8], &str); 4] = [
-        (b"BAST\x00\x24", "a token or DEX operation"),
+        (&claim, "a Flush claim launch"),
         (b"\xDBSTK", "a stake bond"),
         (b"\xD8WDR", "a withdrawal to eCash"),
         (b"something else", "OP_RETURN"),
@@ -138,6 +140,16 @@ fn every_flush_operation_is_blind_and_named() {
         assert_eq!(verifiable_facts.total_leaving[0].amount, "100000");
         assert_eq!(verifiable_facts.fee[0].amount, "50000");
     }
+}
+
+#[test]
+fn a_bast_marker_flush_couldnt_read_is_refused_before_unlock() {
+    // A LaunchToken with params (kind 36), cut short: the node would refuse the transaction.
+    let psbt = request(&[ours(1, 100_000, 0, true)], vec![pay(script(FOREIGN, 0, 1), 50_000), op_return(b"BAST\x00\x24")], 0, Sequence::ENABLE_RBF_NO_LOCKTIME);
+    let refusal = check(&psbt.to_string()).unwrap_err();
+    assert_eq!(refusal.code, RefusalCode::Malformed);
+    assert!(refusal.message.contains("doesn't parse"), "{}", refusal.message);
+    assert_eq!(sign(&psbt.to_string(), STARTER).unwrap_err().code, RefusalCode::Malformed);
 }
 
 #[test]

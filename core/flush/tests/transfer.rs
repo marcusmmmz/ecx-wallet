@@ -1,12 +1,13 @@
-//! The wallet's Send of ECX inside the module: built from the account's coins, decoded by the Flush
-//! Decoder, signed and finalized. No replay marker, and never a value-0 coin.
+//! The wallet's Send inside the module: built from the account's coins, decoded by the Flush
+//! Decoder, signed and finalized. No replay marker. A Send of ECX never spends a value-0 coin; one
+//! of an asset spends only coins carrying it, listed by a transfer marker (docs/adr/0013).
 mod common;
 
 use std::str::FromStr;
 
 use bitcoin::consensus::encode::deserialize_hex;
 use bitcoin::psbt::Psbt;
-use bitcoin::{Sequence, Transaction};
+use bitcoin::{ScriptBuf, Sequence, Transaction};
 use common::{address, paying, script, tx_hex, FOREIGN, STARTER};
 use ecx_flush::{build_transfer, decode, finalize, sign, ClearView, Decoded, Destination, RefusalCode};
 use serde_json::json;
@@ -102,12 +103,15 @@ fn not_enough_ecx_says_what_it_needs_and_what_the_wallet_has() {
 }
 
 #[test]
-fn a_send_moves_only_ecx_to_a_flush_address() {
+fn a_send_pays_flush_addresses_in_ecx_or_an_asset_the_wallet_holds() {
     let with = |asset: &str, to: &str| {
         json!({ "coins": [coin(1, 100_000)], "outputs": [{ "asset": asset, "amount": "1000", "to": { "address": to } }], "feeRate": FEE_RATE, "changeIndex": 0 }).to_string()
     };
     let flush = address(FOREIGN, 0, 0);
-    assert_eq!(build_transfer(&with(&"00".repeat(32), &flush), STARTER).unwrap_err().code, RefusalCode::Malformed);
+    let refusal = build_transfer(&with(&"ab".repeat(32), &flush), STARTER).unwrap_err();
+    assert_eq!(refusal.code, RefusalCode::InsufficientFunds);
+    assert!(refusal.message.contains(&format!("Not enough of asset {}: this sends 1000 units, and the wallet can spend 0", "ab".repeat(32))), "{}", refusal.message);
+    assert_eq!(build_transfer(&with("not an asset", &flush), STARTER).unwrap_err().code, RefusalCode::Malformed);
     for other in ["bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu", "elements1qew44aehkjstjm56ng2rjrz57vwxh5g9su6dlpm", "bflx1qnotanaddress"] {
         let refusal = build_transfer(&with("", other), STARTER).unwrap_err();
         assert!(refusal.message.contains("isn't a Flush address"), "{other}: {}", refusal.message);
@@ -142,4 +146,81 @@ fn a_built_send_signs_and_finalizes_into_a_transaction_with_a_witness_per_input(
     assert_eq!(tx.compute_txid(), psbt.unsigned_tx.compute_txid(), "signing changes only the witnesses");
     assert!(tx.input.iter().all(|i| i.witness.len() == 2));
     assert_eq!(tx.lock_time.to_consensus_u32(), 0);
+}
+
+const BROSEVELT: &str = "7351ccd9fd2f091cce3f9d8e3cd0b95f278885f4610620784b8c64be8b0237c1";
+const FLUSH: &str = "617a6ad47771d6161d35023a90e7b5134ee6317c4f3d38475ec2cde540acb04f";
+
+/// A coin of the account at 0/0 carrying `units` of `asset`: output 0 of a transfer whose marker lists it.
+fn token_coin(seed: u8, asset: &str, units: u64) -> serde_json::Value {
+    let marker = ScriptBuf::from_bytes(ecx_flush::bast::transfer_marker(&[(0, asset, units)]).unwrap());
+    json!({ "tx": tx_hex(&paying(seed, &[(&script(STARTER, 0, 0), 0), (&marker, 0)])), "vout": 0, "chain": 0, "index": 0 })
+}
+
+fn token_order(asset: &str, units: u64, coins: Vec<serde_json::Value>) -> String {
+    let to = address(FOREIGN, 0, 0);
+    json!({ "coins": coins, "outputs": [{ "asset": asset, "amount": units.to_string(), "to": { "address": to } }], "feeRate": FEE_RATE, "changeIndex": 2 })
+        .to_string()
+}
+
+#[test]
+fn a_token_send_pays_the_tokens_lists_them_with_their_change_and_pays_the_fee_in_ecx() {
+    let psbt = built(&token_order(BROSEVELT, 1_200, vec![coin(1, 100_000), token_coin(2, BROSEVELT, 5_000)]));
+    let tx = &psbt.unsigned_tx;
+    assert_eq!(tx.input.len(), 2, "the token coin, then an ECX coin for the fee");
+    let values: Vec<_> = tx.output.iter().map(|o| o.value.to_sat()).collect();
+    assert_eq!(values[..3], [0, 0, 0], "the payment, the token change and the marker carry no ECX");
+    assert_eq!((&tx.output[0].script_pubkey, &tx.output[1].script_pubkey, &tx.output[3].script_pubkey), (&script(FOREIGN, 0, 0), &script(STARTER, 1, 2), &script(STARTER, 1, 2)));
+    let marker = ecx_flush::bast::parse(tx.output[2].script_pubkey.as_bytes()).unwrap();
+    let listed: Vec<_> = marker.outputs.iter().map(|o| (o.n, o.token.as_ref().unwrap().amount)).collect();
+    assert_eq!((marker.kind, listed), (0, vec![(0, 1_200), (1, 3_800)]));
+
+    let view = clear(&psbt);
+    assert_eq!((view.inputs[0].asset.as_str(), view.inputs[0].amount.as_str()), (BROSEVELT, "5000"));
+    let outputs: Vec<_> = view.outputs.iter().map(|o| (o.index, o.asset.as_str(), o.amount.as_str())).collect();
+    assert_eq!(outputs[..2], [(0, BROSEVELT, "1200"), (1, BROSEVELT, "3800")]);
+    assert_eq!(outputs.len(), 3, "the marker isn't an output of the Clear View");
+    assert_eq!(view.outputs[1].destination, Destination::Address { address: address(STARTER, 1, 2), yours: true });
+    let fee: u64 = view.fee.amount.parse().unwrap();
+    assert_eq!(tx.output[3].value.to_sat() + fee, 100_000);
+
+    let signed = sign(&psbt.to_string(), STARTER).unwrap();
+    assert!(finalize(&signed).is_ok());
+}
+
+#[test]
+fn an_exact_token_amount_has_no_token_change() {
+    let psbt = built(&token_order(BROSEVELT, 5_000, vec![coin(1, 100_000), token_coin(2, BROSEVELT, 5_000)]));
+    let marker = ecx_flush::bast::parse(psbt.unsigned_tx.output[1].script_pubkey.as_bytes()).unwrap();
+    assert_eq!(marker.outputs.iter().map(|o| o.n).collect::<Vec<_>>(), [0]);
+}
+
+#[test]
+fn only_coins_of_the_asset_sent_are_spent() {
+    let psbt = built(&token_order(BROSEVELT, 100, vec![coin(1, 100_000), token_coin(2, FLUSH, 9_000), token_coin(3, BROSEVELT, 300)]));
+    assert_eq!(psbt.unsigned_tx.input.len(), 2);
+    let view = clear(&psbt);
+    assert!(view.inputs.iter().all(|i| i.asset != FLUSH), "FLUSH's coin isn't spent");
+
+    let refusal = build_transfer(&token_order(BROSEVELT, 301, vec![coin(1, 100_000), token_coin(3, BROSEVELT, 300)]), STARTER).unwrap_err();
+    assert_eq!(refusal.code, RefusalCode::InsufficientFunds);
+    assert!(refusal.message.contains("this sends 301 units, and the wallet can spend 300"), "{}", refusal.message);
+    // ECX must pay the fee: token coins carry none.
+    assert_eq!(build_transfer(&token_order(BROSEVELT, 100, vec![token_coin(3, BROSEVELT, 300)]), STARTER).unwrap_err().code, RefusalCode::InsufficientFunds);
+}
+
+#[test]
+fn a_request_that_would_lose_tokens_is_refused_before_unlock() {
+    let mut psbt = built(&token_order(BROSEVELT, 1_200, vec![coin(1, 100_000), token_coin(2, BROSEVELT, 5_000)]));
+    // List only the payment: 3,800 units would be lost.
+    psbt.unsigned_tx.output[2].script_pubkey = ScriptBuf::from_bytes(ecx_flush::bast::transfer_marker(&[(0, BROSEVELT, 1_200)]).unwrap());
+    let refusal = ecx_flush::check(&psbt.to_string()).unwrap_err();
+    assert!(refusal.message.contains("doesn't carry on exactly the tokens"), "{}", refusal.message);
+
+    // Spend the token coin with no marker at all.
+    psbt.unsigned_tx.output.remove(2);
+    psbt.outputs.remove(2);
+    let refusal = ecx_flush::check(&psbt.to_string()).unwrap_err();
+    assert!(refusal.message.contains("has no BAST marker"), "{}", refusal.message);
+    assert_eq!(sign(&psbt.to_string(), STARTER).unwrap_err().code, RefusalCode::Malformed);
 }

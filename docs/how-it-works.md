@@ -136,7 +136,7 @@ A ticker of the Chain Entry's, in any case, is refused, with the reason shown. A
 
 1. It gathers the **Spendable** coins: confirmed coins, plus outputs of trusted unconfirmed transactions, less held coins.
 2. It picks the first unused change address (else `/1/19`) and the fee rate.
-3. The Slot's module builds it (`build_transfer`): largest coins first, dust change goes to the fee. `elements.wasm` builds a PSET from the coins as reported, and refuses confidential destinations. `flush.wasm` builds a PSBT of ECX from each coin's whole transaction (`/tx/:txid/hex`), never spends a value-0 output (a token's), and pays at least 1 sat/vB. The wallet refuses to go on if it spends an outpoint the server never listed.
+3. The Slot's module builds it (`build_transfer`): largest coins first, dust change goes to the fee. `elements.wasm` builds a PSET from the coins as reported, and refuses confidential destinations. `flush.wasm` builds a PSBT from each coin's whole transaction (`/tx/:txid/hex`) and pays at least 1 sat/vB. A Send of ECX never spends a value-0 output. A Send of an asset spends only confirmed coins carrying that asset, as their transactions' markers say, and lists its tokens with a transfer marker (ADR 0013). The wallet refuses to go on if it spends an outpoint the server never listed.
 4. The module's Clear View goes to the approval window as "This wallet (Send on <chain>)". It must be exactly the payments asked for, plus outputs back to the wallet (`isTransferAskedFor`).
 5. After approval: `sign`, `finalize`, `POST /tx`.
 6. The coins it spent are **held** in `storage.local` (`held:<txid>`) until it confirms (on Flush: its block is anchored), or until the server hasn't known it for 6 blocks.

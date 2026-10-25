@@ -21,6 +21,12 @@ A token whose id neither the Chain Entry nor the asset store names shows as "Unk
 
 What this proves: the ticker and the decimals are the asset's own, since consensus binds an id to its ticker's hash. The display name is the one the registration set. The asset's controller can change it later (`SetDisplayName`), and the wallet doesn't follow that.
 
+## Sending tokens (#59)
+
+A Send may pay an asset's tokens. The wallet offers the module its confirmed coins of value 0, each as the asset token its transaction lists on it (the mempool refuses a token spent unconfirmed, `ba-token-unconfirmed`). `build_transfer` reads each coin's token again from its transaction and spends only coins of the assets sent, largest first: never a control coin, LP shares, a position, an order or a result. The outputs are the payments in order (a token's at value 0), each sent asset's change, a transfer marker (kind 0) listing every token output, then ECX change. ECX coins pay the fee.
+
+The Decoder shows a transfer as a Clear View: each input and output in ECX or in the asset its token is, with the marker left out of the outputs, since its meaning is the tokens it lists. A request that spends a result or a token of another kind, or runs any other operation, is Blind. `check`, `decode` and `sign` refuse what Flush would refuse: a token output spent with no marker, a marker that doesn't parse, a transfer marker holding ECX or listing a result, and a transfer that doesn't carry on exactly the tokens its inputs spend.
+
 ## Considered Options
 
 - **Use `holdings` for every token balance:** rejected. It is the server's word on every amount; reading markers makes most of them the chain's.
@@ -33,4 +39,5 @@ What this proves: the ticker and the decimals are the asset's own, since consens
 
 - `flush.wasm` declares `tokens`. The wallet asks a module for tokens only when it declares them.
 - Reading a balance on Flush costs one transaction fetch per value-0 coin the session hasn't seen, and one `holdings` call per address holding a result.
-- Sending tokens is #59. It needs per-outpoint tokens for every input, so results can't be spent until a server reports them per outpoint.
+- A result can't be spent: the module can't list its token again without knowing it, and no server reports results per outpoint.
+- A request with a `BAST` marker that doesn't parse is refused before unlock, where it used to be Blind: Flush would refuse the transaction.

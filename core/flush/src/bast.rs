@@ -586,3 +586,46 @@ impl<'a> Reader<'a> {
         (0..n).map(|_| item(self)).collect()
     }
 }
+
+/// A transfer's marker (kind 0, no operation) listing `outputs`, each `(n, asset id in display
+/// order, amount)`, as the node writes it (`MarkerScript`): the minimal push of its bytes.
+/// `outputs` must be in increasing `n`, at most `MAX_LISTED`.
+pub fn transfer_marker(outputs: &[(u32, &str, u64)]) -> Result<Vec<u8>, String> {
+    if outputs.len() > MAX_LISTED {
+        return Err(format!("more than {MAX_LISTED} listed outputs"));
+    }
+    if outputs.windows(2).any(|w| w[0].0 >= w[1].0) {
+        return Err("listed outputs out of order".into());
+    }
+    let mut body = TAG.to_vec();
+    body.extend([0, 0, outputs.len() as u8]);
+    for &(n, id, amount) in outputs {
+        let mut internal: Vec<u8> = (0..id.len()).step_by(2).map(|i| u8::from_str_radix(id.get(i..i + 2).unwrap_or("x"), 16)).collect::<Result<_, _>>().map_err(|_| "an asset id is hex")?;
+        if internal.len() != 32 {
+            return Err("an asset id is 32 bytes".into());
+        }
+        internal.reverse();
+        body.extend(varint(n as u64));
+        body.push(TokenKind::Asset as u8);
+        body.extend(internal);
+        body.extend(varint(amount));
+    }
+    let mut script = vec![0x6A];
+    match body.len() {
+        0..=75 => script.push(body.len() as u8),
+        76..=0xFF => script.extend([0x4C, body.len() as u8]),
+        _ => return Err("the marker is too large".into()),
+    }
+    script.extend(body);
+    Ok(script)
+}
+
+/// Core's VARINT (`WriteVarInt`).
+fn varint(mut n: u64) -> Vec<u8> {
+    let mut bytes = vec![(n & 0x7F) as u8];
+    while n > 0x7F {
+        n = (n >> 7) - 1;
+        bytes.insert(0, (n & 0x7F) as u8 | 0x80);
+    }
+    bytes
+}

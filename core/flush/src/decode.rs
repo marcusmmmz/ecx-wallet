@@ -1,9 +1,11 @@
 //! `decode(payload, starter)`: the Flush Decoder. A Clear View of a request it fully understands,
 //! or `Blind { reason, verifiableFacts }`; never a partial Clear View.
 //!
-//! It understands payments of ECX to addresses, and nothing else: every Flush operation (tokens,
-//! the DEX, staking, withdrawals) is an `OP_RETURN` marker, and a request carrying one is Blind,
-//! naming the operation when the tag is known. Whether an input or output is "yours" is decided
+//! It understands payments of ECX and transfers of asset tokens to addresses (a `BAST` marker of
+//! kind 0, docs/adr/0013), and nothing else: every other Flush operation (the DEX, staking,
+//! withdrawals) is an `OP_RETURN` marker, and a request carrying one is Blind, naming the operation
+//! when the tag is known. What a spent token output carries comes from the transaction holding it,
+//! and the transfer's marker is left out of the outputs: its whole meaning is the tokens it lists. Whether an input or output is "yours" is decided
 //! only by re-deriving it from the Starter, never by the requester; with no `bip32_derivation`,
 //! only the receive address apps are given counts (docs/adr/0007). Every amount comes from the
 //! previous transactions the PSBT carries, which `validated` checked against their txids.
@@ -12,7 +14,9 @@ use bitcoin::secp256k1::PublicKey;
 use bitcoin::{EcdsaSighashType, TxOut};
 use serde::Serialize;
 
+use crate::bast::{self, TokenKind};
 use crate::psbt::{operation, refuse, spent, validated, AssetAmount, OwnedInput, Refusal, RefusalCode};
+use crate::tokens::{token_flow, TokenFlow};
 use crate::{address, AccountKeys};
 
 /// What `decode` makes of a request it doesn't refuse.
@@ -56,9 +60,9 @@ pub struct ClearView {
 #[serde(rename_all = "camelCase")]
 pub struct ClearInput {
     pub index: usize,
-    /// Always "".
+    /// "" for ECX, else the asset id of the token it spends.
     pub asset: String,
-    /// Sats, as a decimal string.
+    /// Sats, or the asset's base units, as a decimal string.
     pub amount: String,
     /// Re-derives to the Starter: `sign` signs it.
     pub yours: bool,
@@ -68,9 +72,9 @@ pub struct ClearInput {
 #[serde(rename_all = "camelCase")]
 pub struct ClearOutput {
     pub index: usize,
-    /// Always "".
+    /// "" for ECX, else the asset id of the token it carries.
     pub asset: String,
-    /// Sats, as a decimal string.
+    /// Sats, or the asset's base units, as a decimal string.
     pub amount: String,
     pub destination: Destination,
 }
@@ -130,6 +134,7 @@ pub fn decode(payload: &str, starter: &str) -> Result<Decoded, Refusal> {
     let psbt = validated(payload)?;
     let keys = AccountKeys::new(starter).map_err(|e| refuse(RefusalCode::InvalidStarter, e))?;
     let kinds = classified(&psbt, &keys)?;
+    let flow = token_flow(&psbt)?;
     let inputs_total: u64 = (0..psbt.inputs.len()).map(|i| spent(&psbt, i).value.to_sat()).sum();
     let outputs_total: u64 = psbt.unsigned_tx.output.iter().map(|o| o.value.to_sat()).sum();
     let fee = inputs_total
@@ -141,11 +146,16 @@ pub fn decode(payload: &str, starter: &str) -> Result<Decoded, Refusal> {
         let reason = "The request contains fields the Flush Decoder doesn't understand.";
         return Ok(Decoded::Blind { reason: reason.into(), verifiable_facts: facts });
     }
-    if let Some((index, op)) = psbt.unsigned_tx.output.iter().enumerate().find_map(|(i, o)| operation(&o.script_pubkey).map(|op| (i, op))) {
+    if let Some((index, marker)) = flow.marker.as_ref().filter(|(_, m)| m.kind != 0) {
+        let reason = format!("The request is a Flush {} (output {index}), which this wallet can't show yet.", marker.name.replace('_', " "));
+        return Ok(Decoded::Blind { reason, verifiable_facts: facts });
+    }
+    let other = |o: &bitcoin::TxOut| (!bast::is_marker(o.script_pubkey.as_bytes())).then(|| operation(&o.script_pubkey)).flatten();
+    if let Some((index, op)) = psbt.unsigned_tx.output.iter().enumerate().find_map(|(i, o)| other(o).map(|op| (i, op))) {
         let reason = format!("The request is {op} on Flush (output {index}), which this wallet can't show yet.");
         return Ok(Decoded::Blind { reason, verifiable_facts: facts });
     }
-    match clear_view(&psbt, &keys, &kinds, fee) {
+    match clear_view(&psbt, &keys, &kinds, fee, &flow) {
         Ok(view) => Ok(Decoded::Clear { view }),
         Err(why) => Ok(Decoded::Blind { reason: format!("The Flush Decoder can't fully explain this request: {why}"), verifiable_facts: facts }),
     }
@@ -197,7 +207,7 @@ fn verifiable_facts(psbt: &Psbt, keys: &AccountKeys, kinds: &[InputKind], fee: u
 }
 
 /// The Clear View of `psbt` (already validated), or why the Decoder can't give one.
-fn clear_view(psbt: &Psbt, keys: &AccountKeys, kinds: &[InputKind], fee: u64) -> Result<ClearView, String> {
+fn clear_view(psbt: &Psbt, keys: &AccountKeys, kinds: &[InputKind], fee: u64, flow: &TokenFlow) -> Result<ClearView, String> {
     if psbt.version != 0 || !psbt.xpub.is_empty() {
         return Err("it has global fields the Decoder doesn't explain.".into());
     }
@@ -214,22 +224,44 @@ fn clear_view(psbt: &Psbt, keys: &AccountKeys, kinds: &[InputKind], fee: u64) ->
             return Err(format!("input {index} has fields the Decoder doesn't explain."));
         }
         let yours = matches!(kind, InputKind::Yours { .. });
-        inputs.push(ClearInput { index, asset: String::new(), amount: spent(psbt, index).value.to_sat().to_string(), yours });
+        let (asset, amount) = match &flow.inputs[index] {
+            None => (String::new(), spent(psbt, index).value.to_sat()),
+            Some(listed) => asset_token(listed).map_err(|what| format!("input {index} spends {what}."))?,
+        };
+        inputs.push(ClearInput { index, asset, amount: amount.to_string(), yours });
     }
 
     let mut outputs = vec![];
+    let marker = flow.marker.as_ref().map(|(index, _)| *index);
     for (index, (txout, output)) in psbt.unsigned_tx.output.iter().zip(&psbt.outputs).enumerate() {
         if !only_explained_output_fields(output) {
             return Err(format!("output {index} has fields the Decoder doesn't explain."));
+        }
+        if marker == Some(index) {
+            // The transfer's marker: 0 sat, and what it says is each listed output's token.
+            continue;
         }
         if txout.script_pubkey.is_op_return() {
             return Err(format!("output {index} is an OP_RETURN, which a plain payment doesn't have."));
         }
         let address = address(&txout.script_pubkey).ok_or_else(|| format!("output {index} pays a script that isn't an address."))?;
         let destination = Destination::Address { address, yours: output_yours(keys, output, txout) };
-        outputs.push(ClearOutput { index, asset: String::new(), amount: txout.value.to_sat().to_string(), destination });
+        let (asset, amount) = match flow.output(index) {
+            None => (String::new(), txout.value.to_sat()),
+            Some(listed) => asset_token(listed).map_err(|what| format!("output {index} carries {what}."))?,
+        };
+        outputs.push(ClearOutput { index, asset, amount: amount.to_string(), destination });
     }
     Ok(ClearView { dangerous_modes: vec![], inputs, outputs, fee: AssetAmount::sats(fee) })
+}
+
+/// A listed output's asset token as (id, amount), or what else it carries, for the Blind reason.
+fn asset_token(listed: &bast::Listed) -> Result<(String, u64), String> {
+    match &listed.token {
+        Some(t) if t.kind == TokenKind::Asset => Ok((t.id.clone(), t.amount)),
+        Some(t) => Err(format!("a {} token, which the Decoder doesn't show yet", t.kind.name())),
+        None => Err("a result, whose token only the node's state knows".into()),
+    }
 }
 
 /// True if `input` sets nothing beyond what a Clear View shows or `sign` needs. Unknown and

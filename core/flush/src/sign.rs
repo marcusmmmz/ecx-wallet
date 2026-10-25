@@ -12,6 +12,7 @@ use serde::Serialize;
 
 use crate::decode::{classified, InputKind};
 use crate::psbt::{refuse, spent, validated, Refusal, RefusalCode};
+use crate::tokens::token_flow;
 use crate::AccountKeys;
 
 /// Refuses exactly what `decode` refuses. Signs P2WPKH inputs with SIGHASH_ALL (BIP143) only.
@@ -19,6 +20,7 @@ pub fn sign(payload: &str, starter: &str) -> Result<String, Refusal> {
     let mut psbt = validated(payload)?;
     let keys = AccountKeys::new(starter).map_err(|e| refuse(RefusalCode::InvalidStarter, e))?;
     let kinds = classified(&psbt, &keys)?;
+    token_flow(&psbt)?;
 
     let mut signatures = vec![];
     let mut cache = SighashCache::new(&psbt.unsigned_tx);

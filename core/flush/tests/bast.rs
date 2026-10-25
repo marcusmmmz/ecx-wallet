@@ -3,7 +3,7 @@
 //! `bast-vectors.json`: 12 live Slot 99 transactions (kinds 1, 2, 7, 18, 20, 21, 23, 24, 25, 26, 27,
 //! 35), recorded 2026-10-25 with the reference decoder of #58, whose listed outputs match the
 //! explorer's `/flush/tx`. The hand-built vectors are #59's (a kind-0 transfer, a control coin).
-use ecx_flush::bast::{asset_id, is_marker, parse, TokenKind};
+use ecx_flush::bast::{asset_id, is_marker, parse, transfer_marker, TokenKind};
 use serde_json::Value;
 
 const VECTORS: &str = include_str!("bast-vectors.json");
@@ -172,4 +172,18 @@ fn varints_have_one_encoding_each() {
         assert_eq!(burn(hex), Ok(value), "{hex}");
     }
     assert_eq!(burn("80808080808080808080ff00"), Err("VARINT too large".into()));
+}
+
+#[test]
+fn a_transfer_marker_is_written_as_the_node_writes_it() {
+    let brosevelt = "7351ccd9fd2f091cce3f9d8e3cd0b95f278885f4610620784b8c64be8b0237c1";
+    let script = transfer_marker(&[(0, brosevelt, 100_000), (1, brosevelt, 4_897_763)]).unwrap();
+    assert_eq!(
+        script,
+        unhex("6a4c52424153540000020000c137028bbe648c4b78200661f48588275fb9d03c8e9d3fce1c092ffdd9cc5173858c200100c137028bbe648c4b78200661f48588275fb9d03c8e9d3fce1c092ffdd9cc517381a9f663")
+    );
+    let one = transfer_marker(&[(3, brosevelt, 1)]).unwrap();
+    assert_eq!(one[1] as usize, one.len() - 2, "a short marker is a direct push");
+    assert_eq!(parse(&one).unwrap().outputs[0].n, 3);
+    assert!(transfer_marker(&[(1, brosevelt, 1), (0, brosevelt, 1)]).is_err());
 }

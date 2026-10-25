@@ -71,8 +71,14 @@ fn transaction(tx_hex: &str) -> Result<Transaction, Refusal> {
     deserialize_hex(tx_hex).map_err(|e| malformed(format!("Not a transaction: {e}")))
 }
 
+/// What output `vout` of `tx` carries: Ok(None) for an output no marker lists (a coin, or a
+/// block's empty fee output), `Listed::token` None for a result.
+pub(crate) fn listed_on(tx: &Transaction, vout: u32) -> Result<Option<bast::Listed>, Refusal> {
+    Ok(marker(tx)?.and_then(|(_, m)| m.outputs.into_iter().find(|o| o.n == vout)))
+}
+
 /// The transaction's marker, if it has one, refusing a transaction the node would refuse for it.
-fn marker(tx: &Transaction) -> Result<Option<(usize, Marker)>, Refusal> {
+pub(crate) fn marker(tx: &Transaction) -> Result<Option<(usize, Marker)>, Refusal> {
     let mut markers = tx.output.iter().enumerate().filter(|(_, o)| bast::is_marker(o.script_pubkey.as_bytes()));
     let Some((index, output)) = markers.next() else { return Ok(None) };
     if markers.next().is_some() {
@@ -133,3 +139,64 @@ pub fn asset_registration(asset: &str, tx_hex: &str) -> Result<CheckedRegistrati
     Ok(CheckedRegistration { asset: reg.asset, txid, ticker, name, decimals: reg.decimals })
 }
 
+/// The tokens a request moves: its marker, and what each input carries, as the transactions it
+/// spends (each checked against its txid by `validated`) list them.
+pub(crate) struct TokenFlow {
+    /// The marker, and its output's index.
+    pub marker: Option<(usize, Marker)>,
+    /// Per input: the token its spent output carries (`Listed::token` None for a result), or None
+    /// for an output no marker lists.
+    pub inputs: Vec<Option<bast::Listed>>,
+}
+
+impl TokenFlow {
+    /// The token output `n` of the request carries, if its marker lists it.
+    pub fn output(&self, n: usize) -> Option<&bast::Listed> {
+        self.marker.as_ref()?.1.outputs.iter().find(|o| o.n as usize == n)
+    }
+}
+
+/// What `psbt` (already `validated`) does with tokens, refusing what Flush would refuse: spending a
+/// token output without a marker (`bad-ba-tokens-lost`), and a transfer (kind 0) whose marker holds
+/// value (`bad-ba-marker-value`), lists a result (`bad-ba-results`) or doesn't carry on exactly the
+/// tokens its inputs bring (`bad-ba-tokens-lost`, `bad-ba-tokens-unbacked`). A transfer that spends a
+/// result can't be checked here: the Decoder shows it Blind.
+pub(crate) fn token_flow(psbt: &bitcoin::psbt::Psbt) -> Result<TokenFlow, Refusal> {
+    let tx = &psbt.unsigned_tx;
+    let marker = marker(tx)?;
+    let mut inputs = vec![];
+    for (i, txin) in tx.input.iter().enumerate() {
+        let previous = psbt.inputs[i].non_witness_utxo.as_ref().expect("validated");
+        inputs.push(listed_on(previous, txin.previous_output.vout)?);
+    }
+    let flow = TokenFlow { marker, inputs };
+    let Some((index, marker)) = &flow.marker else {
+        if let Some(i) = flow.inputs.iter().position(Option::is_some) {
+            return Err(malformed(format!("Input {i} spends a token's output, but the request has no BAST marker to carry it on: Flush would refuse it.")));
+        }
+        return Ok(flow);
+    };
+    if marker.kind != 0 {
+        return Ok(flow);
+    }
+    if tx.output[*index].value.to_sat() != 0 {
+        return Err(malformed("The transfer's BAST marker holds ECX, which Flush refuses for a transfer."));
+    }
+    if marker.outputs.iter().any(|o| o.token.is_none()) {
+        return Err(malformed("The transfer's BAST marker lists a result, which Flush refuses for a transfer."));
+    }
+    let tokens = |listed: &mut dyn Iterator<Item = &bast::Listed>| -> Option<std::collections::BTreeMap<(bast::TokenKind, String), u128>> {
+        let mut totals = std::collections::BTreeMap::new();
+        for l in listed {
+            let t = l.token.as_ref()?;
+            *totals.entry((t.kind, t.id.clone())).or_insert(0u128) += t.amount as u128;
+        }
+        Some(totals)
+    };
+    let Some(spent) = tokens(&mut flow.inputs.iter().flatten()) else { return Ok(flow) };
+    let carried = tokens(&mut marker.outputs.iter()).expect("no result listed");
+    if spent != carried {
+        return Err(malformed("The transfer doesn't carry on exactly the tokens its inputs spend: Flush would refuse it."));
+    }
+    Ok(flow)
+}

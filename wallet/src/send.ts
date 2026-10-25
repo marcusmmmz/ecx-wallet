@@ -20,6 +20,7 @@ import {
   type ChainEntry,
   type ModuleTransferOrder,
   type NetworkEntry,
+  type OutputTokens,
   type ReportedCoin,
   type Starter,
   type TransferOutput,
@@ -115,11 +116,14 @@ export function createSends(deps: SendDeps) {
   /**
    * The account's spendable coins: explicit and holding something, confirmed or from a trusted
    * transaction (unless the history may have left some out), and not held back. An output with no
-   * asset is the chain's own coin. One of value 0 holds nothing to send: on Flush it's a token's
-   * output or an empty fee output, which a Send must never spend.
+   * asset is the chain's own coin. One of value 0 holds no coin: on Flush it's a token's output or
+   * an empty fee output. Where the module reads tokens (`tokens`, docs/adr/0013), a confirmed one
+   * carrying an asset token is that asset's coin, in its units: the mempool refuses a token spent
+   * unconfirmed (`ba-token-unconfirmed`). The module reads the token again when it builds.
    */
   async function spendableCoins(slot: number, target: KeyedChain<Starter>, server: EsploraClient, key: Starter) {
     const account = target.module.deriveAccount(key, { receive: WATCHED_RECEIVE_ADDRESSES, change: WATCHED_CHANGE_ADDRESSES });
+    const readsTokens = target.module.declare().capabilities.includes("tokens");
     const addresses = [...account.receive.map((a) => ({ ...a, chain: 0 as const })), ...account.change.map((a) => ({ ...a, chain: 1 as const }))];
     const found = [];
     for (let i = 0; i < addresses.length; i += QUERIES_AT_ONCE) {
@@ -127,7 +131,7 @@ export function createSends(deps: SendDeps) {
         ...(await Promise.all(
           addresses.slice(i, i + QUERIES_AT_ONCE).map(async ({ address, chain, index }) =>
             (await server.addressUtxos(address)).flatMap((u) =>
-              u.value === undefined || u.value === 0
+              u.value === undefined || (u.value === 0 && !(readsTokens && u.confirmed))
                 ? []
                 : [{ txid: u.txid, vout: u.vout, asset: u.asset ?? NATIVE_COIN, value: String(u.value), chain, index, confirmed: u.confirmed }],
             ),
@@ -135,7 +139,7 @@ export function createSends(deps: SendDeps) {
         )),
       );
     }
-    const utxos = found.flat();
+    const utxos = await withTokens(target, server, found.flat());
     const trusted = new Set<string>();
     if (utxos.some((u) => !u.confirmed)) {
       const history = await deps.pullPath.history(slot);
@@ -146,6 +150,34 @@ export function createSends(deps: SendDeps) {
       .filter((u) => (u.confirmed || trusted.has(u.txid)) && !held.has(`${u.txid}:${u.vout}`))
       .map(({ confirmed: _, ...coin }) => coin);
     return { coins, account };
+  }
+
+  /**
+   * `utxos` with each value-0 one as the asset token its transaction lists on it, by the module;
+   * one that carries no asset token (a control coin, a result, nothing) is left out.
+   */
+  async function withTokens<T extends { txid: string; vout: number; asset: string; value: string }>(
+    target: KeyedChain<Starter>,
+    server: EsploraClient,
+    utxos: T[],
+  ): Promise<T[]> {
+    const txids = [...new Set(utxos.filter((u) => u.value === "0").map((u) => u.txid))];
+    if (txids.length === 0) return utxos;
+    const listed = new Map<string, OutputTokens>();
+    for (let i = 0; i < txids.length; i += QUERIES_AT_ONCE) {
+      const batch = txids.slice(i, i + QUERIES_AT_ONCE);
+      const hex = await Promise.all(batch.map((txid) => server.txHex(txid)));
+      hex.forEach((tx, j) => {
+        const tokens = target.module.outputTokens(tx);
+        if (tokens.txid !== batch[j]) throw refusal(`The Sidechain Server at ${server.url} sent another transaction for ${batch[j]}.`);
+        listed.set(batch[j], tokens);
+      });
+    }
+    return utxos.flatMap((u) => {
+      if (u.value !== "0") return [u];
+      const token = listed.get(u.txid)!.outputs.find((o) => o.vout === u.vout)?.token;
+      return token?.kind === "asset" ? [{ ...u, asset: token.id, value: token.amount }] : [];
+    });
   }
 
   /** `coins` as whole transactions, for a `psbt` module. Each is fetched once; the module checks what it holds. */

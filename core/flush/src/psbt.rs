@@ -100,10 +100,11 @@ pub(crate) fn spent(psbt: &Psbt, i: usize) -> &TxOut {
     &psbt.inputs[i].non_witness_utxo.as_ref().expect("validated").output[outpoint.vout as usize]
 }
 
-/// The refusals that need no key, so the wallet can refuse before asking the user to unlock.
-/// `decode`, `sign` and `finalize` run them again.
+/// The refusals that need no key, so the wallet can refuse before asking the user to unlock:
+/// the PSBT's own, then what Flush would refuse about the tokens it moves. `decode` and `sign`
+/// run them again, `finalize` the first.
 pub fn check(payload: &str) -> Result<(), Refusal> {
-    validated(payload).map(|_| ())
+    crate::tokens::token_flow(&validated(payload)?).map(|_| ())
 }
 
 /// The Flush operation an `OP_RETURN` output marks: its first push starts with the operation's

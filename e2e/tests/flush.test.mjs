@@ -1,7 +1,8 @@
 // Flush (Slot 46) over its explorer, in node: the wallet's own TypeScript and the shipped flush.wasm
 // against the Esplora stub in Flush mode (mempool.space's electrs fork plus `/flush/blocks`), with a
 // scripted approval window instead of a browser. Balance, history, Send, finality and the stall
-// (#56, docs/adr/0012); token balances and names from their registration (#58, docs/adr/0013).
+// (#56, docs/adr/0012); token balances, names from their registration (#58) and token Sends (#59,
+// docs/adr/0013).
 // Fixtures are made here: no plain ECX transfer exists on the live chain.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -314,6 +315,44 @@ describe("Flush", () => {
     } finally {
       config.flushAssets = undefined;
     }
+  });
+
+  test("a token Send spends only that asset's confirmed coins, lists its tokens, and pays the fee in ECX", async () => {
+    const tokens = (seed, units) => paying(seed, [[RECEIVE_0.scriptPubkey, 0], [marker(0, [], [{ n: 0, asset: BROSEVELT, amount: units }]), 0]]);
+    const confirmedTokens = tokens("a1", 5_000);
+    const pendingTokens = tokens("a2", 700);
+    const ecxCoin = paying("a3", [[RECEIVE_1.scriptPubkey, 100_000]]);
+    fund([
+      { hex: confirmedTokens, blockHeight: 400, blockHash: FINAL },
+      { hex: pendingTokens, confirmed: false },
+      { hex: ecxCoin, blockHeight: 401, blockHash: FINAL },
+    ]);
+    const { sends, prompts } = sendsWith();
+    assert.deepEqual(
+      (await sends.spendable(46)).sort((a, b) => a.asset.localeCompare(b.asset)),
+      [
+        { asset: "", amount: "100000" },
+        { asset: BROSEVELT, amount: "5000" },
+      ],
+      "an unconfirmed token coin can't be spent",
+    );
+
+    const before = stub.broadcasts().length;
+    await sends.send(46, { outputs: [{ asset: BROSEVELT, amount: "1200", to: { address: PAY_TO } }] });
+    const { decoded } = prompts.at(-1).prompt;
+    assert.equal(decoded.kind, "clear");
+    assert.deepEqual(
+      decoded.view.outputs.map(({ asset, amount, destination }) => [asset, amount, destination.yours]),
+      [
+        [BROSEVELT, "1200", false],
+        [BROSEVELT, "3800", true],
+        ["", decoded.view.outputs[2].amount, true],
+      ],
+    );
+    assert.equal(stub.broadcasts().length, before + 1);
+    const tx = parseTx(stub.broadcasts().at(-1));
+    assert.deepEqual(tx.inputs.map((i) => i.txid), [parseTx(confirmedTokens).txid, parseTx(ecxCoin).txid]);
+    assert.equal(flush.outputTokens(stub.broadcasts().at(-1)).outputs.length, 2, "the payment and the token change are listed");
   });
 
   test("the explorer's errors read as its own words", async () => {
