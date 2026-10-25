@@ -1,14 +1,15 @@
 // Flush (Slot 46) over its explorer, in node: the wallet's own TypeScript and the shipped flush.wasm
 // against the Esplora stub in Flush mode (mempool.space's electrs fork plus `/flush/blocks`), with a
 // scripted approval window instead of a browser. Balance, history, Send, finality and the stall
-// (#56, docs/adr/0012). Fixtures are made here: no plain ECX transfer exists on the live chain.
+// (#56, docs/adr/0012); token balances and names from their registration (#58, docs/adr/0013).
+// Fixtures are made here: no plain ECX transfer exists on the live chain.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { createEsploraStub } from "@ecx/stub-server/esplora";
 import { encodeTx, parseTx } from "@ecx/stub-server/bitcoin-tx";
-import { DIST, importWallet } from "../harness.mjs";
+import { DIST, importWallet, ROOT } from "../harness.mjs";
 
 const wallet = await importWallet();
 const flush = await wallet.loadChainModule(await readFile(path.join(DIST.chromium, "flush.wasm")));
@@ -41,6 +42,34 @@ const paying = (seed, outputs) => encodeTx({ inputs: [{ txid: seed.repeat(32), v
 
 const lockState = () => ({ unlocked: true, steps: [] });
 
+/** BROSEVELT, a live Slot 99 asset, and the transaction that registered it (core/flush/tests). */
+const BROSEVELT = "7351ccd9fd2f091cce3f9d8e3cd0b95f278885f4610620784b8c64be8b0237c1";
+const BROSEVELT_REGISTRATION = "24fc101fccc71bc60845e190c2ad1e07b332fe7a6de99af37acdaaefdd9db891";
+const LIVE_TXS = JSON.parse(await readFile(path.join(ROOT, "core/flush/tests/token-txs.json"), "utf8"));
+
+/** Core's VARINT (serialize.h): base 128, most significant group first, one less per continuation byte. */
+function varint(n) {
+  let x = BigInt(n);
+  const bytes = [Number(x & 0x7fn)];
+  while (x > 0x7fn) {
+    x = (x >> 7n) - 1n;
+    bytes.unshift(Number((x & 0x7fn) | 0x80n));
+  }
+  return bytes;
+}
+
+/**
+ * A `BAST` marker's script (docs/adr/0013): `kind` with `fields` (bytes), listing each output as
+ * `{ n, asset, amount }` (an asset token) or `{ n }` (a result).
+ */
+function marker(kind, fields, listed) {
+  const internal = (id) => Buffer.from(id, "hex").reverse();
+  const body = [...Buffer.from("BAST"), 0, kind, ...fields, listed.length];
+  for (const { n, asset, amount } of listed) body.push(...varint(n), ...(asset === undefined ? [0xff] : [0, ...internal(asset), ...varint(amount)]));
+  const push = body.length <= 75 ? [body.length] : [0x4c, body.length];
+  return Buffer.from([0x6a, ...push, ...body]).toString("hex");
+}
+
 describe("Flush", () => {
   const config = { flush: true, identityBlock, tipHeight: 500, feeEstimates: { 1: 1, 6: 0.1, 1008: 0.1 }, txs: [], utxos: {} };
   let stub;
@@ -71,7 +100,7 @@ describe("Flush", () => {
     }
   }
 
-  function pullPathWith({ lock = lockState(), prompts = [] } = {}) {
+  function pullPathWith({ lock = lockState(), prompts = [], tokens } = {}) {
     const flushModule = module();
     const deps = {
       supportedSlots: [46],
@@ -89,7 +118,7 @@ describe("Flush", () => {
       l1Module: async () => l1,
       l1AccountKey: async () => assert.fail("Flush asked for the L1 Account Key"),
       now: () => Date.now(),
-      sidechainServer: (entry, network) => wallet.sidechainServer(entry, network),
+      sidechainServer: (entry, network) => wallet.sidechainServer(entry, network, undefined, undefined, tokens),
     };
     return { pullPath: wallet.createPullPath(deps), deps, prompts };
   }
@@ -209,6 +238,81 @@ describe("Flush", () => {
       assert.equal((await pullPathWith().pullPath.reportedState(46)).stalledSince, tipTime);
     } finally {
       config.tipTime = undefined;
+    }
+  });
+
+  test("a token output counts as the asset its creating transaction lists, and a result as its server's word", async () => {
+    const tokens = async (tx) => flush.outputTokens(tx);
+    // A transfer: 1,500 BROSEVELT units to RECEIVE_0 (output 0), beside an ECX payment.
+    const transfer = paying("f1", [[RECEIVE_0.scriptPubkey, 0], [marker(0, [], [{ n: 0, asset: BROSEVELT, amount: 1_500 }]), 0], [RECEIVE_0.scriptPubkey, 9_000]]);
+    // A ClaimLaunch (kind 23): its result output pays RECEIVE_1, whose token only the node knows.
+    const claim = paying("f2", [[RECEIVE_1.scriptPubkey, 0], [marker(23, [...Buffer.alloc(32, 0xcd)], [{ n: 0 }]), 0]]);
+    // An output of value 0 that no marker lists (a block producer's fee output, when the block has none).
+    const unlisted = coinbase(320, [[RECEIVE_1.scriptPubkey, 0]]);
+    fund([
+      { hex: transfer, blockHeight: 300, blockHash: FINAL },
+      { hex: claim, blockHeight: 310, blockHash: FINAL },
+      { hex: unlisted, blockHeight: 320, blockHash: FINAL },
+    ]);
+    config.holdings = { [RECEIVE_1.address]: [{ ticker: "BROSEVELT", kind: "asset", asset_id: BROSEVELT, amount_units: "400" }] };
+    try {
+      const report = await pullPathWith({ tokens }).pullPath.reportedState(46);
+      assert.deepEqual(report.balances, [
+        { asset: BROSEVELT, amount: "1500" },
+        { asset: "", amount: "9000" },
+      ]);
+      assert.deepEqual(report.unverified, [{ asset: BROSEVELT, amount: "400" }], "the result's token, as holdings has it");
+      assert.ok(!stub.requests().some((p) => p.includes(RECEIVE_0.address) && p.endsWith("/holdings")), "an address with no result isn't asked");
+
+      // Without the module's reading, a token output adds nothing, as before.
+      const plain = await pullPathWith().pullPath.reportedState(46);
+      assert.deepEqual(plain.balances, [{ asset: "", amount: "9000" }]);
+      assert.equal(plain.unverified, undefined);
+    } finally {
+      config.holdings = undefined;
+    }
+  });
+
+  test("a server that sends another transaction for a token output reports nothing", async () => {
+    const transfer = paying("f3", [[RECEIVE_0.scriptPubkey, 0], [marker(0, [], [{ n: 0, asset: BROSEVELT, amount: 1 }]), 0]]);
+    fund([{ hex: transfer, blockHeight: 300, blockHash: FINAL }]);
+    config.txHexOverrides = { [parseTx(transfer).txid]: paying("f4", [[RECEIVE_0.scriptPubkey, 0], [marker(0, [], [{ n: 0, asset: BROSEVELT, amount: 10 ** 12 }]), 0]]) };
+    try {
+      await assert.rejects(pullPathWith({ tokens: async (tx) => flush.outputTokens(tx) }).pullPath.reportedState(46), /sent another transaction for/);
+    } finally {
+      config.txHexOverrides = undefined;
+    }
+  });
+
+  test("an asset is named from its registration, checked against its ticker's hash", async () => {
+    const memory = new Map();
+    const store = { get: async (k) => memory.get(k), set: async (k, v) => void memory.set(k, v) };
+    const assets = wallet.createAssets({ store, entryAssets: async () => module().chainEntry().networks.betanet.assets });
+    const client = wallet.esploraClient(wallet.esploraConfig(module().chainEntry(), module().chainEntry().networks.betanet), (...args) => fetch(...args));
+    fund([{ hex: LIVE_TXS[BROSEVELT_REGISTRATION], blockHeight: 604, blockHash: FINAL }]);
+    config.flushAssets = { [BROSEVELT]: { asset: BROSEVELT, name: "BROSEVELT", decimals: 9, registered: 604, registration: BROSEVELT_REGISTRATION } };
+    try {
+      const stored = await assets.addByRegistration(module(), client, BROSEVELT);
+      assert.deepEqual(stored, {
+        id: BROSEVELT,
+        name: "Theodore Brosevelt",
+        ticker: "BROSEVELT",
+        precision: 2, // the registration's, not the server's 9
+        source: "registration",
+        registration: BROSEVELT_REGISTRATION,
+      });
+      assert.equal((await assets.named(CHAIN)).find((a) => a.id === BROSEVELT)?.source, "registration");
+
+      // The server names another asset's registration: refused by the module.
+      const other = "617a6ad47771d6161d35023a90e7b5134ee6317c4f3d38475ec2cde540acb04f";
+      config.flushAssets[other] = { ...config.flushAssets[BROSEVELT], asset: other };
+      await assert.rejects(assets.addByRegistration(module(), client, other), new RegExp(`registers asset ${BROSEVELT}, not ${other}`));
+      // Or a height the transaction isn't confirmed at.
+      config.flushAssets[BROSEVELT].registered = 605;
+      await assert.rejects(assets.addByRegistration(module(), client, BROSEVELT), /isn't confirmed at block 605/);
+      await assert.rejects(assets.addByRegistration(module(), client, "ab".repeat(32)), /doesn't know asset/);
+    } finally {
+      config.flushAssets = undefined;
     }
   });
 

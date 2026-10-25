@@ -35,10 +35,14 @@ export function amountText(amount: string, id: string, assets: AssetEntry[]): st
   return formatAmount(amount, assets.find((a) => a.id === id), current);
 }
 
-/** Each asset's confirmed amount ("0" if it only has unconfirmed coins), and what's unconfirmed, if any. */
-export function assetsOf(report: ChainReport): { asset: string; amount: string; unconfirmed?: string }[] {
+/**
+ * Each asset's confirmed amount ("0" if it only has unconfirmed coins or unverified tokens), what's
+ * unconfirmed, and what only its server vouches for (Flush's result outputs, docs/adr/0013), if any.
+ */
+export function assetsOf(report: ChainReport): { asset: string; amount: string; unconfirmed?: string; unverified?: string }[] {
   const pending = new Map(report.unconfirmed.map((u) => [u.asset, u.amount]));
-  const confirmed = report.balances.map(({ asset, amount }) => ({ asset, amount, unconfirmed: pending.get(asset) }));
-  const onlyPending = report.unconfirmed.filter((u) => !report.balances.some((b) => b.asset === u.asset));
-  return [...confirmed, ...onlyPending.map(({ asset, amount }) => ({ asset, amount: "0", unconfirmed: amount }))];
+  const vouched = new Map((report.unverified ?? []).map((u) => [u.asset, u.amount]));
+  const rows = new Map(report.balances.map(({ asset, amount }) => [asset, { asset, amount }]));
+  for (const asset of [...pending.keys(), ...vouched.keys()]) if (!rows.has(asset)) rows.set(asset, { asset, amount: "0" });
+  return [...rows.values()].map((row) => ({ ...row, unconfirmed: pending.get(row.asset), unverified: vouched.get(row.asset) }));
 }

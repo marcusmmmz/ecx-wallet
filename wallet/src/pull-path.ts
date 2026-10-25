@@ -35,6 +35,8 @@ export interface ChainReport {
   balances: AssetAmount[];
   /** What's on its way in, unconfirmed: shown apart, never spent. */
   unconfirmed: AssetAmount[];
+  /** Tokens only the server vouches for (Flush's result outputs, docs/adr/0013): shown apart, never spent. */
+  unverified?: AssetAmount[];
   /** When the chain's last block was mined (seconds since the epoch), if it has stalled. */
   stalledSince?: number;
   /** When the server reported it, in milliseconds since the epoch. */
@@ -128,8 +130,16 @@ export function createPullPath(deps: PullPathDeps) {
 
   async function reported<K extends ChainKey>(target: ChainServer<K>): Promise<ChainReport> {
     const { chain, server } = target;
-    const { balances, unconfirmed, stalledSince } = await server.state(await watch(target));
-    const report = { chain, server: server.url, balances, unconfirmed, ...(stalledSince === undefined ? {} : { stalledSince }), readAt: deps.now() };
+    const { balances, unconfirmed, unverified, stalledSince } = await server.state(await watch(target));
+    const report = {
+      chain,
+      server: server.url,
+      balances,
+      unconfirmed,
+      ...(unverified === undefined ? {} : { unverified }),
+      ...(stalledSince === undefined ? {} : { stalledSince }),
+      readAt: deps.now(),
+    };
     await deps.cache?.set(cacheKey.balance(chain, server.url), report);
     return report;
   }

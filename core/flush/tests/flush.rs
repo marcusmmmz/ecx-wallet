@@ -52,7 +52,7 @@ fn declare_reports_slot_46s_betanet_binding_and_buildtransfer() {
     assert_eq!(d.binding.chain, "ecash:betanet-s46");
     assert_eq!(d.binding.format, "psbt");
     assert_eq!(d.binding.payload_versions, ["0"]);
-    assert_eq!(d.capabilities, ["buildTransfer"]);
+    assert_eq!(d.capabilities, ["buildTransfer", "tokens"]);
 }
 
 #[test]

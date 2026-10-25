@@ -1,6 +1,7 @@
 // The stub Esplora server: the Esplora endpoints the wallet uses (docs/adr/0002), answered from
 // fixtures. The e2e build's Sidechain Servers. With `config.flush` it answers as Flush's explorer
-// does (mempool.space's electrs fork plus `/flush/blocks`, docs/adr/0012), as recorded on #56.
+// does (mempool.space's electrs fork plus `/flush/blocks`, docs/adr/0012), as recorded on #56,
+// with the node reads tokens need (`getasset`, `holdings`, docs/adr/0013).
 //
 // Like the Elements explorer it stands in for, it sends no CORS headers: the extension reaches it
 // through its `host_permissions`, as it reaches the real one. Dependency-free node `http`.
@@ -18,7 +19,8 @@ import { parseElementsTx } from "./elements-tx.mjs";
  *   delayMs?: number, pathDelayMs?: Record<string, number>, txHexOverrides?: Record<string, string>, elements?: boolean,
  *   txStatuses?: Record<string, { confirmed: boolean, blockHeight?: number, blockHash?: string }>,
  *   broadcastTxid?: string, assets?: Record<string, object>, flush?: boolean,
- *   finality?: Record<string, "soft" | "anchored" | "final">, tipTime?: number }} EsploraStubConfig
+ *   finality?: Record<string, "soft" | "anchored" | "final">, tipTime?: number,
+ *   flushAssets?: Record<string, object>, holdings?: Record<string, object[]> }} EsploraStubConfig
  */
 
 /** How many confirmed transactions an address's list holds per page, as both electrs forks list them. */
@@ -55,6 +57,9 @@ const PAGE = 25;
  * finality (`config.finality[hash]`, default `final`; null for a block it doesn't know); a coinbase
  * input has `txid: ""`; `/utxo` statuses have no `block_time`; `/fee-estimates` is HTTP 203; a
  * height past the tip is HTTP 500; errors are JSON `{ error }`, and unknown routes an HTML 404.
+ * `/flush/rpc/getasset?args=["0x<id>"]` answers `config.flushAssets[id]` (getasset's JSON), else 404
+ * `{ error: "Not found" }`; `/flush/market/addresses/{address}/holdings` answers
+ * `{ items: config.holdings[address] ?? [], address }`.
  */
 export function createEsploraStub(config) {
   /** Every request, in order: its path, or `POST <path>`. */
@@ -160,6 +165,21 @@ export function createEsploraStub(config) {
           }),
         ),
       ];
+    }
+    if (config.flush && pathname === "/flush/rpc/getasset") {
+      let id;
+      try {
+        [id] = JSON.parse(query.get("args") ?? "[]");
+      } catch {
+        return [400, { error: "Invalid arguments" }];
+      }
+      const record = typeof id === "string" && id.startsWith("0x") ? config.flushAssets?.[id.slice(2)] : undefined;
+      return record ? [200, record] : [404, { error: "Not found" }];
+    }
+    const holdings = config.flush ? /^\/flush\/market\/addresses\/([^/]+)\/holdings$/.exec(pathname) : null;
+    if (holdings) {
+      const address = decodeURIComponent(holdings[1]);
+      return [200, { items: config.holdings?.[address] ?? [], address }];
     }
     const asset = /^\/asset\/([0-9a-f]{64})$/.exec(pathname);
     if (asset) return config.assets?.[asset[1]] ? [200, config.assets[asset[1]]] : [404, "Asset id not found"];

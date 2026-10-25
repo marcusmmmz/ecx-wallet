@@ -82,13 +82,22 @@ export interface ChainDescription {
   assets: NamedAsset[];
   /** The wallet can Send on it (a sidechain whose server builds transfers, or whose module does over Esplora). */
   sends: boolean;
+  /**
+   * How the wallet checks a name for one of its assets, if it can: by the asset's contract
+   * (Elements, `assetContract` over Esplora) or its registration (Flush, `tokens`; docs/adr/0013).
+   */
+  checksNames?: "contract" | "registration";
 }
 
 export function describeChain(module: ChainModule<never>): ChainDescription {
   const { entry, network, chain } = servedNetwork(module);
   const key = Object.keys(entry.networks).find((k) => entry.networks[k] === network)!;
-  const sends = network.parent !== undefined && canSend(module.declare().capabilities, network);
-  return { name: entry.name, description: entry.description, chain, network: key, assets: network.assets, sends };
+  const { capabilities } = module.declare();
+  const sends = network.parent !== undefined && canSend(capabilities, network);
+  const { api } = network.sidechainServer;
+  const checksNames =
+    api === "esplora" && capabilities.includes("assetContract") ? "contract" : api === "flush" && capabilities.includes("tokens") ? "registration" : undefined;
+  return { name: entry.name, description: entry.description, chain, network: key, assets: network.assets, sends, ...(checksNames ? { checksNames } : {}) };
 }
 
 /** True if a sidechain can Send through this wallet: its server builds, or its module does over Esplora (Flush's included). */

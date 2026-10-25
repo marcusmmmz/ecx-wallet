@@ -9,7 +9,9 @@
 //! - [`decode`] is the Flush Decoder: a Clear View of plain payments, or Blind with the facts it
 //!   can prove (every Flush operation: tokens, the DEX, staking, withdrawals);
 //! - [`sign`] signs only the inputs that re-derive to the Starter, changing nothing else;
-//! - [`finalize`] turns a signed PSBT into the transaction to broadcast.
+//! - [`finalize`] turns a signed PSBT into the transaction to broadcast;
+//! - [`output_tokens`] and [`asset_registration`] read tokens and asset names from the
+//!   transactions that made them (the `tokens` capability, docs/adr/0013).
 //!
 //! The module holds nothing between calls and receives only its own Slot's Starter. Every
 //! per-network value comes from Slot 46's Chain Entry (`chain-entry.json`), never from constants.
@@ -27,12 +29,14 @@ pub mod bast;
 mod decode;
 mod psbt;
 mod sign;
+mod tokens;
 mod transfer;
 
 pub use chain_entry::{chain_entry, ChainEntry, NetworkEntry, ServerApi, SidechainServerEntry};
 pub use decode::{decode, ClearInput, ClearOutput, ClearView, DangerousMode, Decoded, Destination, VerifiableFacts};
 pub use psbt::{check, AssetAmount, OwnedInput, Refusal, RefusalCode};
 pub use sign::{finalize, sign, Finalized};
+pub use tokens::{asset_registration, output_tokens, CheckedRegistration, OutputToken, OutputTokens, TokenAmount, MAX_DECIMALS};
 pub use transfer::{build_transfer, Built, Coin, Payment, PaymentTo, Spent, TransferOrder};
 
 /// The network this build serves (betanet only, until mainnet: #32).
@@ -69,7 +73,7 @@ pub struct Declaration {
 pub fn declare() -> Declaration {
     Declaration {
         binding: Binding { chain: network().chain.clone(), format: "psbt".into(), payload_versions: vec!["0".into()] },
-        capabilities: vec!["buildTransfer".into()],
+        capabilities: vec!["buildTransfer".into(), "tokens".into()],
     }
 }
 

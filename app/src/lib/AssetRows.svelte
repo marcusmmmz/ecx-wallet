@@ -31,7 +31,7 @@
     </p>
   {/if}
   <ul>
-    {#each assetsOf(report) as { asset, amount, unconfirmed } (asset)}
+    {#each assetsOf(report) as { asset, amount, unconfirmed, unverified } (asset)}
       {@const entry = view.info.assets.find((a) => a.id === asset)}
       <li class="asset" data-asset={asset}>
         <ChainMark {...assetMark(entry)} size={30} />
@@ -48,6 +48,15 @@
           <strong class="amount" data-balance data-asset={asset}>{amountText(amount, asset, view.info.assets)}</strong>
           {#if unconfirmed !== undefined}
             <span class="tiny pending" data-unconfirmed data-asset={asset}>+{amountText(unconfirmed, asset, view.info.assets)} unconfirmed</span>
+          {/if}
+          {#if unverified !== undefined}
+            <span
+              class="tiny muted"
+              data-unverified
+              data-asset={asset}
+              title="On outputs whose token no transaction states (a swap's, a pool withdrawal's): only its server says so."
+              >+{amountText(unverified, asset, view.info.assets)} reported by its server</span
+            >
           {/if}
         </span>
       </li>

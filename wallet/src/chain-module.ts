@@ -317,6 +317,46 @@ export interface ChainModule<K extends ChainKey = Starter> {
    * ChainModuleRefusal (`invalidContract`).
    */
   assetContract(asset: string, issuance: { txid: string; vout: number }, contract: string): CheckedContract;
+  /**
+   * Only if `declare()` lists `tokens` (Flush, docs/adr/0013): what the raw transaction `tx` (hex)
+   * puts on each output its marker lists. `txid` is the module's own, for the caller to match
+   * against the outpoint it asked about. Throws ChainModuleRefusal (`malformed`).
+   */
+  outputTokens(tx: string): OutputTokens;
+  /**
+   * Only if `declare()` lists `tokens`: `asset`'s name and decimals, if `tx` (hex) registers that
+   * asset under a ticker that hashes to it. Throws ChainModuleRefusal (`invalidContract`, `malformed`).
+   */
+  assetRegistration(asset: string, tx: string): CheckedRegistration;
+}
+
+/** A token a Flush output carries (docs/adr/0013). */
+export interface OutputToken {
+  vout: number;
+  /** Absent for a result: what it carries is in the node's state, not in the transaction. */
+  token?: { kind: TokenKind; id: string; amount: string };
+}
+
+/** A token's kind on Flush. Only `asset` tokens count towards a balance. */
+export type TokenKind = "asset" | "control" | "reservation" | "lp" | "receipt" | "position" | "order";
+
+/** `outputTokens`' answer. */
+export interface OutputTokens {
+  /** Display hex, as the module computed it. */
+  txid: string;
+  /** Every output the transaction's marker lists; none without a marker. */
+  outputs: OutputToken[];
+}
+
+/** An asset's registration, checked by the module: its ticker hashes to the asset id. */
+export interface CheckedRegistration {
+  asset: string;
+  /** The registration's txid. */
+  txid: string;
+  ticker: string;
+  /** Its display name, or else the ticker. */
+  name: string;
+  decimals: number;
 }
 
 /** One of the account's coins as its server reports it: what a PSET module (Elements) builds from. */
@@ -431,6 +471,8 @@ function chainModuleOf<K extends ChainKey>(m: CoreModule): ChainModule<K> {
     buildTransfer: (order, key) => refusals(() => json<BuiltTransfer>("build_transfer", JSON.stringify(order), key)),
     finalize: (payload) => refusals(() => json<{ tx: string; txid: string }>("finalize", payload)),
     assetContract: (asset, { txid, vout }, contract) => refusals(() => json<CheckedContract>("asset_contract", asset, txid, vout, contract)),
+    outputTokens: (tx) => refusals(() => json<OutputTokens>("output_tokens", tx)),
+    assetRegistration: (asset, tx) => refusals(() => json<CheckedRegistration>("asset_registration", asset, tx)),
   };
 }
 

@@ -18,6 +18,8 @@ export function assetSource(entry: { source?: AssetSource; origin?: string } | u
       return "your label";
     case "app":
       return `named by ${entry.origin ?? "an app"}`;
+    case "registration":
+      return "from its registration";
     default:
       return "from its contract";
   }

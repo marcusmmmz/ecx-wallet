@@ -20,6 +20,11 @@ export interface ReportedState {
   /** What unconfirmed outputs would add once confirmed, per asset; none if nothing is pending. */
   unconfirmed: AssetAmount[];
   /**
+   * Tokens only the server vouches for, beyond `balances` and `unconfirmed`: those on Flush's
+   * result outputs, whose token no transaction states (docs/adr/0013). Absent if none.
+   */
+  unverified?: AssetAmount[];
+  /**
    * When the chain's last block was mined (seconds since the epoch), if it's been longer than the
    * chain ever goes without one: nothing confirms until it moves again. Flush only (docs/adr/0012).
    */

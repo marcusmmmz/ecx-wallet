@@ -2,12 +2,13 @@
 // Blockstream's electrs, limited to the endpoints mempool's electrs fork also serves. Esplora knows
 // nothing of watches: the wallet asks for each watched address's outputs and adds them up itself.
 // Flush's explorer (Server API `flush`, docs/adr/0012) is mempool's fork plus `/flush/blocks`: a
-// block there counts as confirmed only once an eCash anchor covers it.
+// block there counts as confirmed only once an eCash anchor covers it. Its tokens ride on outputs
+// of value 0, which only the creating transaction's marker explains (docs/adr/0013).
 //
 // `esploraClient` is the API itself, endpoint by endpoint, each answer checked for shape (Deposit
 // uses it directly on eCash's server); `esploraServer` is the pull path's view of it.
 import { cacheKey, type SessionCache } from "./cache";
-import { NATIVE_COIN, type AssetAmount, type IdentityBlock } from "./chain-module";
+import { NATIVE_COIN, type AssetAmount, type IdentityBlock, type OutputToken, type OutputTokens } from "./chain-module";
 import { serverFetch, SidechainServerError, type Fetch, type HistoryEntry, type Issuance, type SidechainServer, type TreasuryScript, type WatchData } from "./sidechain-server";
 import { isM5 } from "./treasury";
 
@@ -72,6 +73,13 @@ export interface EsploraServerConfig {
   finality?: boolean;
   /** Seconds without a block after which the chain counts as stalled; never, if absent. */
   stallAfter?: number;
+  /**
+   * What a raw transaction's outputs carry, by the chain's own module (Flush's `tokens`,
+   * docs/adr/0013). With it, a coin of value 0 counts as the token its creating transaction lists
+   * on it, and a result as the server's word (`unverified`). Without it, or if it answers undefined
+   * (the module doesn't read tokens), such a coin adds nothing.
+   */
+  tokens?: (tx: string) => Promise<OutputTokens | undefined>;
   /** Milliseconds since the epoch. */
   now?: () => number;
 }
@@ -444,6 +452,43 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
       return { txid, vout };
     },
 
+    /**
+     * Which transaction registered a Flush asset, as the node's `getasset` says (`/flush/rpc`);
+     * undefined if the node doesn't know the asset. Whoever uses it checks that transaction is the
+     * registration: the server isn't trusted for that (docs/adr/0013).
+     */
+    async assetRegistration(asset: string): Promise<{ txid: string; height: number } | undefined> {
+      const answer = await response(`/flush/rpc/getasset?args=${encodeURIComponent(JSON.stringify([`0x${asset}`]))}`);
+      if (answer.status === 404) return undefined;
+      if (!answer.ok) throw refused(answer);
+      let record: Record<string, unknown>;
+      try {
+        record = (JSON.parse(answer.body) ?? {}) as Record<string, unknown>;
+      } catch {
+        throw malformed("asset");
+      }
+      const { registration, registered } = record;
+      if (typeof registration !== "string" || !HASH.test(registration) || !isCount(registered)) throw malformed("asset");
+      return { txid: registration, height: registered };
+    },
+
+    /**
+     * A Flush address's asset tokens as the node's DEX API counts them (`/flush/market/addresses/:a/holdings`),
+     * results included: the server's word only, with no outpoints (docs/adr/0013).
+     */
+    async holdings(address: string): Promise<AssetAmount[]> {
+      const answer = (await getJson(`/flush/market/addresses/${encodeURIComponent(address)}/holdings`, "list of holdings")) as Record<string, unknown>;
+      if (!Array.isArray(answer?.items)) throw malformed("list of holdings");
+      return answer.items.flatMap((item: Record<string, unknown>) => {
+        const { kind, asset_id, amount_units } = item ?? {};
+        if (kind !== "asset") return [];
+        if (typeof asset_id !== "string" || !HASH.test(asset_id) || typeof amount_units !== "string" || !/^[0-9]+$/.test(amount_units)) {
+          throw malformed("list of holdings");
+        }
+        return [{ asset: asset_id, amount: amount_units }];
+      });
+    },
+
     /** Fee rates (sat/vB) by confirmation target in blocks. */
     async feeEstimates(): Promise<Record<string, number>> {
       const estimates = await getJson("/fee-estimates", "fee estimate");
@@ -468,14 +513,70 @@ export function esploraServer(config: EsploraServerConfig, fetchFn: Fetch): Side
   const { url } = client;
 
   /**
+   * What the transaction `txid` lists on its outputs, by the chain's module: its raw transaction
+   * comes from the session's cache or the server, and is kept only once the module's txid for it
+   * is `txid`. Read once per state, however many of its outputs the watch holds.
+   */
+  function outputTokens(txid: string, read: Map<string, Promise<OutputTokens | undefined>>): Promise<OutputTokens | undefined> {
+    const tokens = config.tokens!;
+    if (!read.has(txid)) {
+      read.set(
+        txid,
+        (async () => {
+          const key = cacheKey.tx(txid);
+          const cached = await config.cache?.get<string>(key);
+          const tx = cached ?? (await client.txHex(txid));
+          const listed = await tokens(tx);
+          if (listed === undefined) return undefined;
+          if (listed.txid !== txid) throw new SidechainServerError(url, `The Sidechain Server at ${url} sent another transaction for ${txid}.`);
+          if (cached === undefined) await config.cache?.set(key, tx);
+          return listed;
+        })(),
+      );
+    }
+    return read.get(txid)!;
+  }
+
+  /**
    * The address's explicit outputs, confirmed or not. Confidential ones (commitments, no `value`)
    * aren't counted. Bitcoin's Esplora (eCash) has no assets: its outputs carry none, and count as
-   * the chain's coin. Esplora already leaves out outputs spent in its mempool.
+   * the chain's coin. Esplora already leaves out outputs spent in its mempool. With `tokens`
+   * (Flush), a coin of value 0 is the asset token its creating transaction lists on it, if any;
+   * `results` says whether the address holds one whose token only the server can tell.
    */
-  async function explicitOutputs(address: string): Promise<(AssetAmount & { confirmed: boolean })[]> {
-    return (await client.addressUtxos(address)).flatMap(({ value, asset, confirmed }) =>
-      value === undefined ? [] : [{ asset: asset ?? NATIVE_COIN, amount: String(value), confirmed }],
-    );
+  async function explicitOutputs(address: string, read: Map<string, Promise<OutputTokens | undefined>>): Promise<{ outputs: (AssetAmount & { confirmed: boolean })[]; results: boolean }> {
+    const outputs: (AssetAmount & { confirmed: boolean })[] = [];
+    let results = false;
+    const utxos = await client.addressUtxos(address);
+    const tokens = new Map<string, OutputTokens | undefined>();
+    if (config.tokens !== undefined) {
+      const txids = [...new Set(utxos.filter((u) => u.value === 0).map((u) => u.txid))];
+      (await Promise.all(txids.map((txid) => outputTokens(txid, read)))).forEach((t, i) => tokens.set(txids[i], t));
+    }
+    for (const { txid, vout, value, asset, confirmed } of utxos) {
+      if (value === undefined) continue;
+      if (value === 0 && config.tokens !== undefined) {
+        const listed: OutputToken | undefined = tokens.get(txid)?.outputs.find((o) => o.vout === vout);
+        if (listed !== undefined && listed.token === undefined) results = true;
+        if (listed?.token?.kind === "asset") outputs.push({ asset: listed.token.id, amount: listed.token.amount, confirmed });
+        continue;
+      }
+      outputs.push({ asset: asset ?? NATIVE_COIN, amount: String(value), confirmed });
+    }
+    return { outputs, results };
+  }
+
+  /**
+   * What `holdings` says the address has beyond the asset tokens the wallet read itself: the
+   * tokens on its result outputs, as the server alone reports them (docs/adr/0013).
+   */
+  async function unverifiedTokens(address: string, readable: (AssetAmount & { confirmed: boolean })[]): Promise<AssetAmount[]> {
+    const read = new Map<string, bigint>();
+    for (const { asset, amount } of readable) read.set(asset, (read.get(asset) ?? 0n) + BigInt(amount));
+    return (await client.holdings(address)).flatMap(({ asset, amount }) => {
+      const beyond = BigInt(amount) - (read.get(asset) ?? 0n);
+      return beyond > 0n ? [{ asset, amount: beyond.toString() }] : [];
+    });
   }
 
   const listed = (totals: Map<string, bigint>) => [...totals].map(([asset, amount]) => ({ asset, amount: amount.toString() }));
@@ -547,12 +648,22 @@ export function esploraServer(config: EsploraServerConfig, fetchFn: Fetch): Side
       await client.checkChain();
       const confirmed = new Map<string, bigint>();
       const unconfirmed = new Map<string, bigint>();
-      const [outputs, stalledSince] = await Promise.all([eachAddress(watch, explicitOutputs), stalled()]);
-      for (const { asset, amount, confirmed: isConfirmed } of outputs.flat()) {
+      const unverified = new Map<string, bigint>();
+      const read = new Map<string, Promise<OutputTokens | undefined>>();
+      const byAddress = (address: string) =>
+        explicitOutputs(address, read).then(async (held) => ({ ...held, unverified: held.results ? await unverifiedTokens(address, held.outputs) : [] }));
+      const [held, stalledSince] = await Promise.all([eachAddress(watch, byAddress), stalled()]);
+      for (const { asset, amount, confirmed: isConfirmed } of held.flatMap((h) => h.outputs)) {
         const totals = isConfirmed ? confirmed : unconfirmed;
         totals.set(asset, (totals.get(asset) ?? 0n) + BigInt(amount));
       }
-      return { balances: listed(confirmed), unconfirmed: listed(unconfirmed), ...(stalledSince === undefined ? {} : { stalledSince }) };
+      for (const { asset, amount } of held.flatMap((h) => h.unverified)) unverified.set(asset, (unverified.get(asset) ?? 0n) + BigInt(amount));
+      return {
+        balances: listed(confirmed),
+        unconfirmed: listed(unconfirmed),
+        ...(unverified.size === 0 ? {} : { unverified: listed(unverified) }),
+        ...(stalledSince === undefined ? {} : { stalledSince }),
+      };
     },
     /**
      * Each watched address's transactions, merged: a spend touches several of them. Unconfirmed

@@ -1,7 +1,7 @@
 // The assets the wallet names beyond its Chain Entries (docs/adr/0010): one store per network, in
 // persistent storage and not encrypted, like Grants. A screen looks an asset up in the Chain Entry
-// first, then here, and says where a stored name came from: the asset's own contract, an app the
-// user approved it from, or the user.
+// first, then here, and says where a stored name came from: the asset's own contract or (Flush) its
+// registration, an app the user approved it from, or the user.
 import { ErrorCode, ProviderRpcError } from "./errors";
 import { ChainModuleRefusal, type AssetEntry, type ChainModule, type ClearView } from "./chain-module";
 import type { EsploraClient } from "./esplora";
@@ -11,9 +11,10 @@ import type { KeyValueStore } from "./vault";
  * Where a stored asset's name came from: `signed`, a new issuance the wallet signed whose contract
  * evidence checked out; `contract`, a contract checked against the chain (added by the user, or
  * suggested by an app and approved); `app`, a name an app suggested without a contract, which the
- * user approved; `label`, the user's own name for an asset with no contract.
+ * user approved; `label`, the user's own name for an asset with no contract; `registration`, a
+ * Flush asset's ticker and decimals from the transaction that registered it (docs/adr/0013).
  */
-export type AssetSource = "signed" | "contract" | "app" | "label";
+export type AssetSource = "signed" | "contract" | "app" | "label" | "registration";
 
 export interface StoredAsset {
   /** Lowercase display hex. */
@@ -29,6 +30,8 @@ export interface StoredAsset {
   source: AssetSource;
   /** The app that suggested it (`app`, or a `contract` an app suggested): its web origin. */
   origin?: string;
+  /** `registration`: the transaction that registered it, display hex. */
+  registration?: string;
 }
 
 /** An asset as screens name it: its Chain Entry's word on it, or (with `source`) the store's. */
@@ -56,8 +59,9 @@ export interface AssetsDeps {
 const storeKey = (chain: string) => `assets:${chain}`;
 const ID = /^[0-9a-f]{64}$/;
 const refused = (message: string) => new ProviderRpcError(ErrorCode.InvalidParams, message);
-/** A name the asset's own contract backs: only removing it makes room for another. */
-const fromContract = (asset: StoredAsset | undefined) => asset?.source === "signed" || asset?.source === "contract";
+/** A name the asset's own contract or registration backs: only removing it makes room for another. */
+const backing = (asset: StoredAsset) => (asset.source === "registration" ? "its registration" : "its contract");
+const fromContract = (asset: StoredAsset | undefined) => asset?.source === "signed" || asset?.source === "contract" || asset?.source === "registration";
 
 /** An asset id as given, or refused. */
 function assetId(asset: unknown): string {
@@ -163,6 +167,35 @@ export function createAssets({ store, entryAssets }: AssetsDeps) {
     },
 
     /**
+     * Names a Flush asset from its registration (docs/adr/0013): the server says which transaction
+     * registered it, the wallet checks that transaction is confirmed, and the Slot's module checks
+     * it registers this asset under a ticker that hashes to its id. `module` must declare `tokens`;
+     * `client` is its network's server, over Flush's explorer.
+     */
+    async addByRegistration(module: ChainModule, client: EsploraClient, asset: string): Promise<StoredAsset> {
+      const { binding, capabilities } = module.declare();
+      if (!capabilities.includes("tokens")) throw refused(`This wallet can't read registrations on ${binding.chain}.`);
+      const id = assetId(asset);
+      await client.checkChain();
+      const registered = await client.assetRegistration(id);
+      if (registered === undefined) throw refused(`The Sidechain Server at ${client.url} doesn't know asset ${id}.`);
+      const status = await client.txStatus(registered.txid);
+      if (!status?.confirmed || status.blockHeight !== registered.height) {
+        throw refused(`Asset ${id}'s registration ${registered.txid} isn't confirmed at block ${registered.height}, as the server says.`);
+      }
+      let checked;
+      try {
+        checked = module.assetRegistration(id, await client.txHex(registered.txid));
+      } catch (error) {
+        if (error instanceof ChainModuleRefusal) throw refused(error.message);
+        throw error;
+      }
+      if (checked.txid !== registered.txid) throw refused(`The Sidechain Server at ${client.url} sent another transaction for ${registered.txid}.`);
+      const { ticker, name, decimals } = checked;
+      return put(binding.chain, { id, name, ticker, precision: decimals, source: "registration", registration: checked.txid });
+    },
+
+    /**
      * The user's own name for `asset`, which has no contract: shown as theirs, never as checked.
      * Renames an earlier label or an app's name; never replaces a name from the asset's contract.
      */
@@ -171,7 +204,7 @@ export function createAssets({ store, entryAssets }: AssetsDeps) {
       checkLabel(label);
       const existing = (await stored(chain))[id];
       if (fromContract(existing)) {
-        throw refused(`This asset is named ${existing!.ticker} from its contract. Remove that name first to give it your own.`);
+        throw refused(`This asset is named ${existing!.ticker} from ${backing(existing!)}. Remove that name first to give it your own.`);
       }
       return put(chain, { id, name: label.name, ticker: label.ticker, precision: label.precision, source: "label" });
     },
@@ -202,7 +235,7 @@ export function createAssets({ store, entryAssets }: AssetsDeps) {
       }
       await admissible(chain, suggested);
       const existing = (await stored(chain))[id];
-      if (suggested.source === "app" && fromContract(existing)) throw refused(`This wallet already names asset ${id} ${existing!.ticker}, from its contract.`);
+      if (suggested.source === "app" && fromContract(existing)) throw refused(`This wallet already names asset ${id} ${existing!.ticker}, from ${backing(existing!)}.`);
       return { chain, asset: suggested, ...(existing === undefined ? {} : { replaces: existing }) };
     },
 

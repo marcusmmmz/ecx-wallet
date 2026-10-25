@@ -83,3 +83,20 @@ pub unsafe extern "C" fn sign(payload: *const u8, payload_len: usize, starter: *
 pub unsafe extern "C" fn finalize(payload: *const u8, payload_len: usize) -> i32 {
     ret_text(text(payload, payload_len).and_then(|p| ecx_flush::finalize(p).map_err(refusal).and_then(|f| json(&f))))
 }
+
+/// Raw transaction (hex) → `{ txid, outputs: [{ vout, token? }] }`: what its `BAST` marker puts on
+/// each output it lists (`token` absent for a result), as JSON, or a refusal.
+#[no_mangle]
+pub unsafe extern "C" fn output_tokens(tx: *const u8, tx_len: usize) -> i32 {
+    ret_text(text(tx, tx_len).and_then(|t| ecx_flush::output_tokens(t).map_err(refusal).and_then(|o| json(&o))))
+}
+
+/// Asset id (display hex) + raw transaction (hex) → `{ asset, txid, ticker, name, decimals }` if the
+/// transaction registers that asset under a ticker that hashes to it, as JSON, or a refusal.
+#[no_mangle]
+pub unsafe extern "C" fn asset_registration(asset: *const u8, asset_len: usize, tx: *const u8, tx_len: usize) -> i32 {
+    ret_text(text(asset, asset_len).and_then(|a| {
+        let t = text(tx, tx_len)?;
+        ecx_flush::asset_registration(a, t).map_err(refusal).and_then(|r| json(&r))
+    }))
+}

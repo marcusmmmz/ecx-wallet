@@ -412,12 +412,18 @@ const handleProviderRequest = createProviderHandler({
   },
 });
 
+/** What a transaction's outputs carry, by its Slot's module, if that declares `tokens` (Flush, docs/adr/0013). */
+const tokensOn = (entry: ChainEntry) => async (tx: string) => {
+  const module = entry.slot === undefined ? undefined : await chainModule(entry.slot);
+  return module?.declare().capabilities.includes("tokens") ? module.outputTokens(tx) : undefined;
+};
+
 // The pull path: each Slot's Sidechain Server, in the Server API its Chain Entry names.
 const pullPath = createPullPath({
   ...signing,
   ...keys,
   l1Module,
-  sidechainServer: (entry, network) => sidechainServer(entry, network, undefined, sessionCache),
+  sidechainServer: (entry, network) => sidechainServer(entry, network, undefined, sessionCache, tokensOn(entry)),
   cache: sessionCache,
 });
 
@@ -526,6 +532,16 @@ async function route(message: BackgroundMessage, sender: chrome.runtime.MessageS
         throw new ProviderRpcError(ErrorCode.InvalidParams, `${entry.name}'s server doesn't say how an asset was issued, so its contract can't be checked.`);
       }
       return assets.addByContract(module, esplora(entry, network), String(message.asset ?? ""), String(message.contract ?? ""));
+    }
+    case "assets.addByRegistration": {
+      // Names a Flush asset from its registration, checked against the chain: answers what was stored.
+      if (!fromWalletPage(sender)) throw new ProviderRpcError(ErrorCode.Unauthorized, "Unknown requester.");
+      const module = await chainModule(await onSlot(message.slot))!;
+      const { entry, network } = servedNetwork(module);
+      if (network.sidechainServer.api !== "flush") {
+        throw new ProviderRpcError(ErrorCode.InvalidParams, `${entry.name}'s server doesn't say which transaction registered an asset.`);
+      }
+      return assets.addByRegistration(module, esplora(entry, network), String(message.asset ?? ""));
     }
     case "chains.setOn": {
       // Turning a sidechain on or off; the main chain is always on.

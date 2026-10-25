@@ -35,6 +35,8 @@ pub enum RefusalCode {
     InsufficientFunds,
     /// `build_transfer`: an amount is below what Flush relays.
     Dust,
+    /// `asset_registration`: the transaction isn't the asset's registration, or names it no ticker.
+    InvalidContract,
 }
 
 pub(crate) fn refuse(code: RefusalCode, message: impl Into<String>) -> Refusal {

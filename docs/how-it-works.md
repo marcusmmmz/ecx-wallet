@@ -70,6 +70,7 @@ The extension build turns those URLs into `host_permissions` and the CSP's `conn
 - electrs already leaves out outputs its mempool spends. So a Deposit's coin leaves the confirmed balance at once, and its change shows as unconfirmed.
 - Lookups run 20 at once (`QUERIES_AT_ONCE`).
 - **Flush** (`"flush"`, ADR 0012): a block counts as confirmed once an eCash block anchors it (`/flush/blocks`; `CONFIRMED_AT`), so ECX in a soft block shows as unconfirmed. Five minutes without a block (`FLUSH_STALL_SECONDS`) shows "Stalled" on home and a notice on Flush's screen. Its explorer lists no unconfirmed incoming outputs.
+- **Flush tokens** (ADR 0013): a coin of value 0 is read from the transaction that made it (`/tx/:txid/hex`, cached for the session). `flush.wasm`'s `output_tokens` says which token its `BAST` marker lists on it, and the txid it computes must be the coin's. An asset token counts towards that asset's balance; other token kinds (control coins, LP shares, positions, orders) don't. A **result** output (a swap's, a pool withdrawal's) carries a token no transaction states: for an address holding one, `/flush/market/addresses/:a/holdings` gives what it holds beyond the tokens the wallet read, and Home shows that apart, as "+N reported by its server".
 - Over Esplora the wallet builds its own transactions: Send (below) on a Slot, Deposit (below) on eCash.
 
 ### The Standard Sidechain API, `ecx-v0` (`wallet/src/standard-sidechain-api.ts`)
@@ -86,7 +87,7 @@ The API this project defines, for a sidechain with no indexer. Its protocol draf
 - **One total** at the top adds up each chain's ECX: the asset its Chain Entry marks `ecx` (`totalAcrossChains`, ADR 0005). Deposits on the way show apart, never in the total.
 - **One section per chain** below (`l1.reported`, `accounts.reported`), each with the confirmed balance per asset and "+N unconfirmed" beside it when there is any. Unconfirmed coins are only shown: a Deposit spends confirmed coins only.
 - **Names** come from the Chain Entry: the chain ("Main chain", "Elements+") and its assets (`chains.list`).
-- **The asset store** (`wallet/src/assets.ts`, ADR 0010) names other assets, one store per network in plain `storage.local` (`assets:<chain>`). It holds an asset the wallet signed a new issuance of, with a checked contract (`signed`), one the user added by its contract (`assets.addByContract`, `contract`), or one the user labelled (`label`). Adding by contract reads the issuance's outpoint from Esplora's `/asset/:id`, and `elements.wasm`'s `asset_contract` derives the asset id from it and the contract's hash. A ticker of the Chain Entry's, in any case, is refused. Where it matters (the Assets screen, Activity details, the approval window), a stored name is marked "from its contract" or "your label", with the asset's id. Home's balance rows show only its ticker and name. Any other asset is "Unknown asset". The [Assets](#assets) screen manages the store.
+- **The asset store** (`wallet/src/assets.ts`, ADR 0010) names other assets, one store per network in plain `storage.local` (`assets:<chain>`). It holds an asset the wallet signed a new issuance of, with a checked contract (`signed`), one the user added by its contract (`assets.addByContract`, `contract`), a Flush asset added from its registration (`assets.addByRegistration`, `registration`, ADR 0013), or one the user labelled (`label`). Adding by contract reads the issuance's outpoint from Esplora's `/asset/:id`, and `elements.wasm`'s `asset_contract` derives the asset id from it and the contract's hash. A ticker of the Chain Entry's, in any case, is refused. Where it matters (the Assets screen, Activity details, the approval window), a stored name is marked "from its contract", "from its registration" or "your label", with the asset's id. Home's balance rows show only its ticker and name. Any other asset is "Unknown asset". The [Assets](#assets) screen manages the store.
 - **A chain's own screen** (`#/chain/<l1|slot>`) says "Reported by <server URL>".
 - **Units:** every ECX amount follows one unit, ECX or sats (`formatAmount`; `settings.unit`, kept in `storage.local`). Tapping the total switches it.
 
@@ -116,15 +117,16 @@ The API this project defines, for a sidechain with no indexer. Its protocol draf
 
 ## Assets
 
-**What the user sees** (#51): Settings → Assets (`#/assets`) lists the asset store's entries for each sidechain that's on, each with its ticker, name, source ("from its contract" or "your label"), full id and decimal places. From there the user can:
+**What the user sees** (#51): Settings → Assets (`#/assets`) lists the asset store's entries for each sidechain that's on, each with its ticker, name, source ("from its contract", "from its registration" or "your label"), full id and decimal places. From there the user can:
 
 - **Add by contract:** paste an asset id and its contract JSON (`assets.addByContract`). The wallet checks it against the chain as under [Home](#home-balances-and-chains) and refuses a mismatch, saying why.
+- **Add from its registration** (Flush, in place of a contract): paste an asset id (`assets.addByRegistration`). The node's `getasset` (`/flush/rpc/getasset`) names the transaction that registered it and the height. The wallet checks that transaction is confirmed at that height, and `flush.wasm`'s `asset_registration` checks it registers this asset under a ticker whose SHA-256 is the id. The ticker, decimals and name (its display name, or else the ticker) come from that registration (ADR 0013).
 - **Add a label** for an asset with no contract: a name, ticker and decimal places (`assets.label`), held to the registry's rules for a contract's name and ticker. It can't replace a name from the asset's contract: remove that first.
 - **Rename a label** or a name an app suggested ([`suggestAsset`](#suggestasset), marked "named by <origin>"), which makes it the user's label. **Remove** any entry (`assets.remove`). Removing only forgets the name, and the asset shows as "Unknown asset" again.
 
 A ticker of the Chain Entry's, in any case, is refused, with the reason shown. An "Unknown asset" on Home's rows or in an Activity transaction's details has "Name it", which opens `#/assets/<slot>/<asset>` with the form ready for that asset. The approval window has no such link, since leaving it would abandon the request.
 
-**How:** `assets.list`, `assets.label` and `assets.remove` take a Slot and work on its network's store (`wallet/src/assets.ts`). Only `assets.addByContract` reads the chain, so it needs the chain on and an Esplora server.
+**How:** `assets.list`, `assets.label` and `assets.remove` take a Slot and work on its network's store (`wallet/src/assets.ts`). Only `assets.addByContract` and `assets.addByRegistration` read the chain, so they need the chain on and an Esplora server (Flush's explorer, for a registration).
 
 ## Send
 

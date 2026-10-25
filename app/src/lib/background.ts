@@ -235,6 +235,9 @@ export const listStoredAssets = (slot: number) => send<StoredAsset[]>({ kind: "a
 export const addAssetByContract = (slot: number, asset: string, contract: string) =>
   send<StoredAsset>({ kind: "assets.addByContract", slot, asset, contract });
 
+/** Names a Flush asset from the transaction that registered it, once checked; throws, saying why, if it can't be. */
+export const addAssetByRegistration = (slot: number, asset: string) => send<StoredAsset>({ kind: "assets.addByRegistration", slot, asset });
+
 /** The user's own name for an asset with no contract, or a new one for an earlier label. */
 export const labelAsset = (slot: number, asset: string, label: { name: string; ticker: string; precision: number }) =>
   send<StoredAsset>({ kind: "assets.label", slot, asset, ...label });

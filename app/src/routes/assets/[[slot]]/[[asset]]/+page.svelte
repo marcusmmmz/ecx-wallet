@@ -2,6 +2,7 @@
   import { page } from "$app/state";
   import {
     addAssetByContract,
+    addAssetByRegistration,
     labelAsset,
     listChains,
     listStoredAssets,
@@ -19,7 +20,8 @@
    */
   interface Form {
     slot: number;
-    mode: "contract" | "label";
+    /** How it's named: by the chain's own check (`contract`, `registration`), or as the user's label. */
+    mode: "contract" | "registration" | "label";
     asset: string;
     contract: string;
     name: string;
@@ -52,9 +54,13 @@
     (e) => (loadError = (e as Error).message),
   );
 
+  /** How the wallet checks a name on the Slot's chain: its contract (Elements), its registration (Flush), or not at all. */
+  const checks = (slot: number) => slots.find((c) => c.id === slot)?.checksNames;
+
   function open(slot: number, start: Partial<Form> = {}) {
     error = "";
-    form = { slot, mode: "contract", asset: "", contract: "", name: "", ticker: "", precision: "0", renaming: false, ...start };
+    const mode = checks(slot) ?? "label";
+    form = { slot, mode, asset: "", contract: "", name: "", ticker: "", precision: "0", renaming: false, ...start };
   }
 
   function rename(slot: number, a: StoredAsset) {
@@ -70,6 +76,7 @@
     try {
       const asset = f.asset.trim();
       if (f.mode === "contract") await addAssetByContract(f.slot, asset, f.contract.trim());
+      else if (f.mode === "registration") await addAssetByRegistration(f.slot, asset);
       else await labelAsset(f.slot, asset, { name: f.name.trim(), ticker: f.ticker.trim(), precision: Number(f.precision) });
       // The list first, so a closed form always means the new entry shows.
       await load();
@@ -122,9 +129,12 @@
       {#if form?.slot === chain.id}
         {@const f = form}
         <form class="card stack" onsubmit={submit} aria-busy={busy} data-asset-form>
-          {#if !f.renaming}
+          {#if !f.renaming && checks(f.slot) !== undefined}
+            {@const checked = checks(f.slot)!}
             <span class="segmented" role="group" aria-label="Name it by">
-              <button type="button" aria-pressed={f.mode === "contract"} onclick={() => (f.mode = "contract")} data-form-mode="contract">Its contract</button>
+              <button type="button" aria-pressed={f.mode === checked} onclick={() => (f.mode = checked)} data-form-mode={checked}>
+                {checked === "contract" ? "Its contract" : "Its registration"}
+              </button>
               <button type="button" aria-pressed={f.mode === "label"} onclick={() => (f.mode = "label")} data-form-mode="label">Your label</button>
             </span>
           {/if}
@@ -138,6 +148,11 @@
               <textarea class="mono" rows="5" bind:value={f.contract} spellcheck="false" data-form-contract></textarea>
             </label>
             <p class="muted tiny">The wallet checks it is the contract this asset was issued with, by the chain's record of its issuance.</p>
+          {:else if f.mode === "registration"}
+            <p class="muted tiny">
+              The wallet reads the transaction that registered this asset and checks that its ticker is the asset's: on Flush, an asset's id is
+              its ticker's hash. Its decimals and name come from that registration.
+            </p>
           {:else}
             <label>Name <input bind:value={f.name} autocomplete="off" data-form-name /></label>
             <div class="pair">
@@ -150,7 +165,7 @@
           <div class="buttons">
             <button type="button" onclick={() => (form = undefined)} data-form-cancel>Cancel</button>
             <button class="primary" type="submit" disabled={busy} data-form-submit>
-              {f.renaming ? "Rename" : f.mode === "contract" ? "Check and add" : "Add label"}
+              {f.renaming ? "Rename" : f.mode === "label" ? "Add label" : "Check and add"}
             </button>
           </div>
         </form>
