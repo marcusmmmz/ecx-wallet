@@ -23,6 +23,7 @@ use bitcoin::{CompressedPublicKey, NetworkKind, ScriptBuf};
 use serde::Serialize;
 
 pub mod chain_entry;
+pub mod bast;
 mod decode;
 mod psbt;
 mod sign;
