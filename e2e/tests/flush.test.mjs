@@ -2,7 +2,7 @@
 // against the Esplora stub in Flush mode (mempool.space's electrs fork plus `/flush/blocks`), with a
 // scripted approval window instead of a browser. Balance, history, Send, finality and the stall
 // (#56, docs/adr/0012); token balances, names from their registration (#58) and token Sends (#59,
-// docs/adr/0013).
+// docs/adr/0013); Deposit credits, which Flush pays as coinbase outputs (#57).
 // Fixtures are made here: no plain ECX transfer exists on the live chain.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -353,6 +353,74 @@ describe("Flush", () => {
     const tx = parseTx(stub.broadcasts().at(-1));
     assert.deepEqual(tx.inputs.map((i) => i.txid), [parseTx(confirmedTokens).txid, parseTx(ecxCoin).txid]);
     assert.equal(flush.outputTokens(stub.broadcasts().at(-1)).outputs.length, 2, "the payment and the token change are listed");
+  });
+
+  test("a Deposit is credited by Flush's coinbase payout of its value, equal Deposits matched oldest first", async () => {
+    // eCash's server: each Deposit confirmed twice (Flush's depositConfirmations is 2).
+    const l1Config = { identityBlock: l1.chainEntry().networks.betanet.identityBlock, tipHeight: 1001, txStatuses: {} };
+    const l1Stub = createEsploraStub(l1Config);
+    const l1Url = await l1Stub.listen();
+    try {
+      const memory = new Map();
+      const store = {
+        list: async () => [...memory.values()].map((d) => structuredClone(d)),
+        put: async (d) => void memory.set(d.txid, structuredClone(d)),
+        remove: async (txid) => void memory.delete(txid),
+      };
+      const { deps } = pullPathWith();
+      const at = (network, server) => ({ ...network, sidechainServer: { ...network.sidechainServer, url: server } });
+      const deposits = wallet.createDeposits({
+        ...deps,
+        openSigningApproval: () => assert.fail("no approval"),
+        esplora: (entry, network) => wallet.esploraClient(wallet.esploraConfig(entry, at(network, entry.slot === undefined ? l1Url : url)), (...args) => fetch(...args)),
+        store,
+        now: () => Date.now(),
+      });
+      const deposit = (n, value) => ({
+        slot: 46,
+        chainName: "Flush",
+        txid: n.repeat(32),
+        vout: 0,
+        value: String(value),
+        address: RECEIVE_0.address,
+        asset: "",
+        scriptPubkey: RECEIVE_0.scriptPubkey,
+        createdAt: Number.parseInt(n, 16),
+        slotHeight: 100,
+      });
+      const [d1, d2, d3] = [deposit("d1", 50_000), deposit("d2", 50_000), deposit("d3", 70_000)];
+      for (const d of [d1, d2, d3]) {
+        await store.put(d);
+        l1Config.txStatuses[d.txid] = { confirmed: true, blockHeight: 1000, blockHash: "e0".repeat(32) };
+      }
+
+      // One payout of 50,000 so far, and an older one below the tip at the Deposits (a payment before them).
+      const old = coinbase(90, [["", 0], [RECEIVE_0.scriptPubkey, 50_000]]);
+      const first = coinbase(105, [["", 0], [RECEIVE_0.scriptPubkey, 50_000]]);
+      fund([
+        { hex: old, blockHeight: 90, blockHash: FINAL },
+        { hex: first, blockHeight: 105, blockHash: FINAL },
+      ]);
+      let list = await deposits.list(46);
+      const state = (d) => list.find((s) => s.txid === d.txid);
+      assert.equal(state(d1).state, "credited", "the oldest Deposit takes the first payout");
+      assert.deepEqual([state(d2).state, state(d2).paidBy, state(d2).claim], ["awaitingCredit", "chain", undefined]);
+      assert.equal(state(d3).state, "awaitingCredit");
+      assert.deepEqual(memory.get(d1.txid).credit, { txid: parseTx(first).txid, vout: 1 }, "kept, with its payout, while an equal Deposit waits");
+
+      // The second payout comes: it's d2's, and both are forgotten once reported.
+      const second = coinbase(110, [["", 0], [RECEIVE_1.scriptPubkey, 1], [RECEIVE_0.scriptPubkey, 50_000]]);
+      fund([
+        { hex: old, blockHeight: 90, blockHash: FINAL },
+        { hex: first, blockHeight: 105, blockHash: FINAL },
+        { hex: second, blockHeight: 110, blockHash: FINAL },
+      ]);
+      list = await deposits.list(46);
+      assert.deepEqual([state(d1).state, state(d2).state, state(d3).state], ["credited", "credited", "awaitingCredit"]);
+      assert.deepEqual([...memory.keys()], [d3.txid]);
+    } finally {
+      await l1Stub.close();
+    }
   });
 
   test("the explorer's errors read as its own words", async () => {

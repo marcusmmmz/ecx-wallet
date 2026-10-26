@@ -82,7 +82,7 @@
             {/if}
             <span class="tiny" class:muted={d.state !== "notFound"} class:bad={d.state === "notFound"} data-deposit-status>{depositState(d)}</span>
             <code class="tiny muted txid" title="Transaction id on the main chain" data-deposit-txid>{d.txid}</code>
-            {#if d.state === "awaitingCredit"}
+            {#if d.state === "awaitingCredit" && d.claim}
               <details data-claim>
                 <summary class="tiny">Show claim details</summary>
                 <p class="muted tiny">
@@ -105,7 +105,7 @@
         </li>
       {/each}
     </ul>
-    <p class="muted tiny" data-deposits-note>{depositConfirmations === undefined ? "Deposits wait for main-chain confirmations" : `Deposits wait ${depositConfirmations} main-chain blocks`}, then the chain's operator credits them. Withdrawals take months.</p>
+    <p class="muted tiny" data-deposits-note>{depositConfirmations === undefined ? "Deposits wait for main-chain confirmations" : `Deposits wait ${depositConfirmations} main-chain blocks`}, then the chain's operator credits them, or on a chain that pays them itself, its next block. Withdrawals take months.</p>
   </section>
 {/if}
 

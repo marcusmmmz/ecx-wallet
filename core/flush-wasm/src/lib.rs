@@ -100,3 +100,10 @@ pub unsafe extern "C" fn asset_registration(asset: *const u8, asset_len: usize, 
         ecx_flush::asset_registration(a, t).map_err(refusal).and_then(|r| json(&r))
     }))
 }
+
+/// Starter → `{ address, destination, asset, minimum, scriptPubkey }` as JSON: what a Deposit is
+/// credited to. Fails while the Chain Entry pins no activation (`declare` lists it only then).
+#[no_mangle]
+pub unsafe extern "C" fn deposit_destination(starter: *const u8, starter_len: usize) -> i32 {
+    ret_text(text(starter, starter_len).and_then(ecx_flush::deposit_destination).and_then(|d| json(&d)))
+}

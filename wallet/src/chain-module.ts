@@ -183,6 +183,8 @@ export interface DepositCredit {
   yours: boolean;
   /** L1 confirmations before the Slot may credit it. */
   confirmations: number;
+  /** Who pays it: someone running the Slot's node imports it (Elements), or the Slot itself in a block of its own (Flush). */
+  paidBy: "operator" | "chain";
 }
 
 /** A risky mode of a request, shown above everything else. */
@@ -287,6 +289,8 @@ export interface DepositDestination {
   asset: string;
   /** Sats: the smallest Deposit. */
   minimum: string;
+  /** The address's script, hex, where the Slot pays its credit itself (Flush: a coinbase output to it). */
+  scriptPubkey?: string;
 }
 
 /** A Chain Module whose key is `K`. */

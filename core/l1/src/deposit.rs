@@ -29,6 +29,15 @@ const SEQUENCE: Sequence = Sequence::ENABLE_RBF_NO_LOCKTIME;
 /// Change below this is left to the fee rather than paid to a change address.
 const MIN_CHANGE: u64 = 546;
 
+/// The longest destination: Backbone's `MAX_DEPOSIT_DESTINATION_SIZE` (`src/drivechain/sidechain.h`),
+/// its RPC's cap, and consensus once `limits_activation_height` is set (#57).
+const MAX_DESTINATION_BYTES: usize = 100;
+
+/// The largest M5 Backbone's mempool takes (`dc-tx-too-large`), and the largest that spends an
+/// unconfirmed Treasury (`dc-unconfirmed-parent`), in vbytes (`src/policy/truc_policy.h`, #57).
+const MAX_DEPOSIT_VSIZE: u64 = 10_000;
+const MAX_CHAINED_DEPOSIT_VSIZE: u64 = 1_000;
+
 /// What to deposit, and what to build it from.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -66,6 +75,9 @@ pub struct PrevOut {
     /// The whole transaction, hex.
     pub tx: String,
     pub vout: u32,
+    /// The Treasury is a pending M5's: Backbone takes an M5 spending it only up to 1,000 vB.
+    #[serde(default)]
+    pub unconfirmed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -107,9 +119,9 @@ pub fn build_deposit(order_json: &str, account_key: &str) -> Result<Built, Refus
     let keys = AccountKeys::new(account_key).map_err(|e| refuse(RefusalCode::InvalidAccountKey, e))?;
     let amount = u64::from_str(&order.amount).ok().filter(|a| *a > 0).ok_or_else(|| malformed("The amount must be a whole number of sats above 0."))?;
     let destination = (bitcoin::hex::FromHex::from_hex(&order.destination).ok() as Option<Vec<u8>>)
-        .filter(|d| !d.is_empty())
+        .filter(|d| !d.is_empty() && d.len() <= MAX_DESTINATION_BYTES)
         .and_then(|d| PushBytesBuf::try_from(d).ok())
-        .ok_or_else(|| malformed("The destination must be 1 to 520 bytes of hex."))?;
+        .ok_or_else(|| malformed(format!("The destination must be 1 to {MAX_DESTINATION_BYTES} bytes of hex.")))?;
 
     let mut coins = order
         .coins
@@ -159,21 +171,31 @@ pub fn build_deposit(order_json: &str, account_key: &str) -> Result<Built, Refus
         }
         Transaction { version: Version::TWO, lock_time: LockTime::from_consensus(network().params.replay_lock_time), input, output }
     };
-    // The fee for `tx` once signed: every P2WPKH input gets a witness of the largest size it can have.
-    let fee = |tx: &Transaction| {
+    // The size of `tx` once signed: every P2WPKH input gets a witness of the largest size it can have.
+    let vsize = |tx: &Transaction| {
         let mut signed = tx.clone();
         let treasury_inputs = usize::from(treasury.is_some());
         for input in signed.input.iter_mut().skip(treasury_inputs) {
             input.witness = Witness::from_slice(&[vec![0u8; 72], vec![0u8; 33]]);
         }
-        let vsize = signed.weight().to_wu().div_ceil(4);
-        (vsize * order.fee_rate).div_ceil(1000)
+        signed.weight().to_wu().div_ceil(4)
     };
+    let fee = |tx: &Transaction| (vsize(tx) * order.fee_rate).div_ceil(1000);
+    let chained = order.treasury.as_ref().is_some_and(|t| t.unconfirmed);
+    let limit = if chained { MAX_CHAINED_DEPOSIT_VSIZE } else { MAX_DEPOSIT_VSIZE };
 
     let mut total = 0u64;
     for count in 1..=coins.len() {
         total += coins[count - 1].txout.value.to_sat();
         let chosen = &coins[..count];
+        let size = vsize(&unsigned(chosen, Some(0)));
+        if size > limit {
+            let (which, or) = if chained { (" that spends an unconfirmed Treasury", ", or wait for the Treasury to confirm") } else { ("", "") };
+            return Err(refuse(
+                RefusalCode::InsufficientFunds,
+                format!("This Deposit would take {count} coins and {size} vB: eCash relays at most {limit} vB for a Deposit{which}. Deposit less{or}."),
+            ));
+        }
         let with_change = fee(&unsigned(chosen, Some(0)));
         if let Some(change) = total.checked_sub(amount + with_change).filter(|change| *change >= MIN_CHANGE) {
             return psbt(unsigned(chosen, Some(change)), chosen, &treasury, Some(order.change_index), &keys);

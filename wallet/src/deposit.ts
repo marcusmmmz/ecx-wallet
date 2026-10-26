@@ -8,7 +8,8 @@
 //
 // Afterwards the Deposit waits: the Slot's L1 confirmations (6 on betanet), then for someone
 // running the Slot's node to import it (crediting isn't automatic on Elements), then it shows on
-// the Slot's server.
+// the Slot's server. Flush pays it itself: a coinbase output to the address, once a Flush block
+// acknowledges the M5's eCash block, matched to the Deposit by address and value (#57).
 import { createKeyRouting, type ChainModules, type Keys } from "./accounts";
 import { cacheKey, type SessionCache } from "./cache";
 import { ChainModuleRefusal, type ChainEntry, type ClearView, type DepositCredit, type L1AccountKey, type L1Module, type NetworkEntry } from "./chain-module";
@@ -52,6 +53,35 @@ export async function isCredited(server: EsploraClient, deposit: Pick<PendingDep
   }
 }
 
+/** An output, as `txid:vout`. */
+const outpoint = ({ txid, vout }: { txid: string; vout: number }) => `${txid}:${vout}`;
+
+/**
+ * Flush's credit for `deposit`: the earliest coinbase output after the first (vout ≥ 1) paying
+ * its script exactly its value, in a block above the Slot's tip when it was made, that `claimed`
+ * doesn't hold (another Deposit's). Nothing on Flush names the M5, so equal Deposits to the same
+ * address are told apart by order: Flush pays them in eCash order, and the wallet matches them
+ * oldest first (#57).
+ */
+export async function flushCredit(
+  server: EsploraClient,
+  deposit: Pick<PendingDeposit, "address" | "scriptPubkey" | "value" | "slotHeight">,
+  claimed: Set<string>,
+): Promise<{ txid: string; vout: number } | undefined> {
+  const { txs } = await server.addressHistory(deposit.address);
+  const coinbase = (tx: EsploraTx) => tx.vin.length === 1 && tx.vin[0].txid === "00".repeat(32) && tx.vin[0].vout === 0xffffffff;
+  const paid = txs
+    .filter((tx) => tx.status.confirmed && coinbase(tx) && (deposit.slotHeight === undefined || tx.status.blockHeight! > deposit.slotHeight))
+    .sort((a, b) => a.status.blockHeight! - b.status.blockHeight!);
+  for (const tx of paid) {
+    for (let vout = 1; vout < tx.vout.length; vout++) {
+      const { scriptpubkey, value } = tx.vout[vout];
+      if (scriptpubkey === deposit.scriptPubkey && String(value) === deposit.value && !claimed.has(outpoint({ txid: tx.txid, vout }))) return { txid: tx.txid, vout };
+    }
+  }
+  return undefined;
+}
+
 /** Who the approval window names for a Deposit: the wallet itself asks. */
 export const DEPOSIT_REQUESTER = "This wallet (Deposit from the main chain)";
 
@@ -69,6 +99,10 @@ export interface PendingDeposit {
   address: string;
   /** The asset the credit arrives in. */
   asset: string;
+  /** The address's script, hex, where the Slot pays the credit itself (Flush). */
+  scriptPubkey?: string;
+  /** Flush: the coinbase output matched as its credit, kept so no later Deposit claims it too. */
+  credit?: { txid: string; vout: number };
   /** Milliseconds since the epoch. */
   createdAt: number;
   /**
@@ -91,7 +125,18 @@ export interface DepositClaim {
 export type DepositStatus = PendingDeposit &
   (
     | { state: "confirming"; confirmations: number; depositConfirmations: number }
-    | { state: "awaitingCredit"; confirmations: number; depositConfirmations: number; claim: DepositClaim; creditServer?: string }
+    /**
+     * `paidBy: "operator"`: someone running the Slot's node imports it with `claim` (Elements).
+     * `"chain"`: the Slot pays it itself in a block of its own (Flush), and there is nothing to claim.
+     */
+    | {
+        state: "awaitingCredit";
+        confirmations: number;
+        depositConfirmations: number;
+        paidBy: "operator" | "chain";
+        claim?: DepositClaim;
+        creditServer?: string;
+      }
     | { state: "credited"; creditServer: string }
     | { state: "notFound"; server: string }
     | { state: "unavailable"; error: string }
@@ -158,9 +203,10 @@ export function createDeposits(deps: DepositDeps) {
     return deps.esplora(target.entry, target.network);
   }
 
-  /** The Slot's server, where its Deposits' credits show, if it speaks Esplora. */
+  /** The Slot's server, where its Deposits' credits show, if it speaks Esplora (Flush's explorer included). */
   function creditServer(target: { entry: ChainEntry; network: NetworkEntry }): EsploraClient | undefined {
-    return target.network.sidechainServer.api === "esplora" ? deps.esplora(target.entry, target.network) : undefined;
+    const { api } = target.network.sidechainServer;
+    return api === "esplora" || api === "flush" ? deps.esplora(target.entry, target.network) : undefined;
   }
 
   /** A raw transaction, from the session's cache or else the server; kept only once it hashes to `txid`. */
@@ -222,6 +268,53 @@ export function createDeposits(deps: DepositDeps) {
     }
   }
 
+  /**
+   * Where each of a Flush Slot's `pending` Deposits (newest first) stands: L1 confirmations, then
+   * Flush's payout, matched oldest first so that equal Deposits take their payouts in eCash order.
+   * A matched payout is recorded on its Deposit. A credited Deposit is forgotten once no other
+   * pending Deposit of the same value to the same script could take its payout instead.
+   */
+  async function flushStatuses(
+    pending: PendingDeposit[],
+    l1: EsploraClient,
+    credits: EsploraClient,
+    depositConfirmations: number,
+    tip: () => Promise<number>,
+  ): Promise<DepositStatus[]> {
+    const claimed = new Set(pending.flatMap((d) => (d.credit ? [outpoint(d.credit)] : [])));
+    const statuses = new Map<string, DepositStatus>();
+    for (const deposit of [...pending].reverse()) {
+      statuses.set(
+        deposit.txid,
+        await (async (): Promise<DepositStatus> => {
+          try {
+            if (deposit.credit) return { ...deposit, state: "credited", creditServer: credits.url };
+            const status = await l1.txStatus(deposit.txid);
+            if (status === undefined) return { ...deposit, state: "notFound", server: l1.url };
+            if (!status.confirmed) return { ...deposit, state: "confirming", confirmations: 0, depositConfirmations };
+            const confirmations = (await tip()) - status.blockHeight! + 1;
+            if (confirmations < depositConfirmations) return { ...deposit, state: "confirming", confirmations, depositConfirmations };
+            const credit = deposit.scriptPubkey === undefined ? undefined : await flushCredit(credits, deposit, claimed);
+            if (credit === undefined) return { ...deposit, state: "awaitingCredit", confirmations, depositConfirmations, paidBy: "chain", creditServer: credits.url };
+            claimed.add(outpoint(credit));
+            deposit.credit = credit;
+            await deps.store.put(deposit);
+            return { ...deposit, state: "credited", creditServer: credits.url };
+          } catch (error) {
+            if (error instanceof SidechainServerError) return { ...deposit, state: "unavailable", error: error.message };
+            throw error;
+          }
+        })(),
+      );
+    }
+    const waiting = (d: PendingDeposit) => statuses.get(d.txid)!.state !== "credited";
+    for (const d of pending) {
+      const twin = pending.some((o) => o !== d && waiting(o) && o.scriptPubkey === d.scriptPubkey && o.value === d.value);
+      if (!waiting(d) && !twin) await deps.store.remove(d.txid);
+    }
+    return pending.map((d) => statuses.get(d.txid)!);
+  }
+
   return {
     /**
      * Deposits `amount` sats of the wallet's confirmed eCash to `slot`, credited to the Slot's first
@@ -260,7 +353,7 @@ export function createDeposits(deps: DepositDeps) {
         destination: destination.destination,
         feeRate: rate,
         coins: available,
-        treasury: treasury === undefined ? null : { tx: await txHex(server, l1.module, treasury.txid), vout: treasury.vout },
+        treasury: treasury === undefined ? null : { tx: await txHex(server, l1.module, treasury.txid), vout: treasury.vout, unconfirmed: treasury.unconfirmed },
         changeIndex,
       };
       const psbt = await refusing(async () => l1.module.buildDeposit(order, key));
@@ -294,6 +387,7 @@ export function createDeposits(deps: DepositDeps) {
             address: destination.address,
             yours: true,
             confirmations: depositConfirmationsOf(target.network),
+            paidBy: target.network.sidechainServer.api === "flush" ? "chain" : "operator",
           };
           const view = depositView(decoded.view, slot, amount, destination.destination, credit);
           vout = view.outputs.find((o) => o.destination.kind === "deposit")!.index;
@@ -323,7 +417,18 @@ export function createDeposits(deps: DepositDeps) {
           credits?.tipHeight().catch(() => undefined),
           new Promise<undefined>((resolve) => setTimeout(resolve, TIP_WAIT_MS)),
         ]);
-        await deps.store.put({ slot, chainName: target.entry.name, txid, vout, value: amount, address: destination.address, asset: destination.asset, createdAt: deps.now(), ...(slotHeight === undefined ? {} : { slotHeight }) });
+        await deps.store.put({
+          slot,
+          chainName: target.entry.name,
+          txid,
+          vout,
+          value: amount,
+          address: destination.address,
+          asset: destination.asset,
+          createdAt: deps.now(),
+          ...(destination.scriptPubkey === undefined ? {} : { scriptPubkey: destination.scriptPubkey }),
+          ...(slotHeight === undefined ? {} : { slotHeight }),
+        });
         return { txid, server: server.url };
       }
     },
@@ -338,7 +443,9 @@ export function createDeposits(deps: DepositDeps) {
      * The Slot's pending Deposits and where each stands: L1 confirmations (from eCash's server), then
      * the wait for the operator, then credited once the Slot's server lists a transaction to the
      * address with an input claiming the Deposit's txid (`is_pegin`), confirmed or not. A credited
-     * Deposit is reported once, then forgotten.
+     * Deposit is reported once, then forgotten. On Flush, which pays Deposits itself, the wait is
+     * for its coinbase payout (`flushCredit`), matched oldest Deposit first; a credited one is kept
+     * while another Deposit of the same value to the same address waits, so that one can't claim it.
      */
     async list(slot: number): Promise<DepositStatus[]> {
       const pending = (await deps.store.list()).filter((d) => d.slot === slot).sort((a, b) => b.createdAt - a.createdAt);
@@ -347,7 +454,10 @@ export function createDeposits(deps: DepositDeps) {
       const target = await routing.slot(slot);
       const credits = creditServer(target);
       const depositConfirmations = depositConfirmationsOf(target.network);
+      const paidBy = target.network.sidechainServer.api === "flush" ? ("chain" as const) : ("operator" as const);
       let tip: Promise<number> | undefined;
+
+      if (paidBy === "chain") return flushStatuses(pending, l1, credits!, depositConfirmations, () => (tip ??= l1.tipHeight()));
 
       return Promise.all(
         pending.map(async (deposit): Promise<DepositStatus> => {
@@ -358,8 +468,8 @@ export function createDeposits(deps: DepositDeps) {
             const confirmations = (await (tip ??= l1.tipHeight())) - status.blockHeight! + 1;
             if (confirmations < depositConfirmations) return { ...deposit, state: "confirming", confirmations, depositConfirmations };
             const claim = { txid: deposit.txid, vout: deposit.vout, blockHash: status.blockHash!, address: deposit.address, value: deposit.value };
-            if (credits === undefined) return { ...deposit, state: "awaitingCredit", confirmations, depositConfirmations, claim };
-            if (!(await isCredited(credits, deposit))) return { ...deposit, state: "awaitingCredit", confirmations, depositConfirmations, claim, creditServer: credits.url };
+            if (credits === undefined) return { ...deposit, state: "awaitingCredit", confirmations, depositConfirmations, paidBy, claim };
+            if (!(await isCredited(credits, deposit))) return { ...deposit, state: "awaitingCredit", confirmations, depositConfirmations, paidBy, claim, creditServer: credits.url };
             await deps.store.remove(deposit.txid);
             return { ...deposit, state: "credited", creditServer: credits.url };
           } catch (error) {

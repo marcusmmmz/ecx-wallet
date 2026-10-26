@@ -252,3 +252,25 @@ fn what_the_decoder_cant_fully_explain_is_blind() {
     no_address.outputs.swap(1, 2);
     assert!(blind(&no_address).contains("no deposit address follows it"), "{}", blind(&no_address));
 }
+
+#[test]
+fn a_deposit_on_an_unconfirmed_treasury_stays_within_what_ecash_relays_for_one() {
+    // Backbone refuses an M5 over 1,000 vB that spends an unconfirmed Treasury (`dc-unconfirmed-parent`).
+    let small: Vec<_> = (1..=30).map(|seed| coin(seed, 1_000)).collect();
+    let (_, mut prev) = treasury(500_000);
+    prev["unconfirmed"] = json!(true);
+    let error = build_deposit(&order(20_000, small.clone(), Some(prev)), &account_key()).unwrap_err();
+    assert_eq!(error.code, RefusalCode::InsufficientFunds);
+    assert!(error.message.contains("eCash relays at most 1000 vB for a Deposit that spends an unconfirmed Treasury"), "{}", error.message);
+    // A confirmed Treasury allows up to 10,000 vB: the same Deposit builds.
+    let (_, prev) = treasury(500_000);
+    assert!(build_deposit(&order(20_000, small, Some(prev)), &account_key()).is_ok());
+}
+
+#[test]
+fn a_destination_longer_than_backbones_100_bytes_is_refused() {
+    let mut long = serde_json::from_str::<serde_json::Value>(&order(50_000, vec![coin(1, 90_000)], None)).unwrap();
+    long["destination"] = json!("61".repeat(101));
+    let error = build_deposit(&long.to_string(), &account_key()).unwrap_err();
+    assert!(error.message.contains("1 to 100 bytes"), "{}", error.message);
+}

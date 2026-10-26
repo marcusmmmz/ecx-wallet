@@ -111,7 +111,7 @@
         return (
           `${slot} has no Treasury on the main chain's server, so this is its first Deposit. The wallet can't confirm the Slot is active ` +
           "and that it has no Treasury yet: if either is wrong, the funds can be lost. If someone else's first Deposit is pending, " +
-          "this one can be left stuck unconfirmed."
+          "the main chain refuses this one, or drops it once the other confirms, and its coins come back."
         );
       }
       return (
@@ -385,8 +385,8 @@
               <div class="small" data-deposit>
                 Deposit {coin(d.deposit)} to Slot {d.slot}{d.credit ? ` (${d.credit.chainName})` : ""}.
                 {#if d.credit}
-                  {coin(d.deposit)} credited to <code data-destination>{d.credit.address}</code> after {d.credit.confirmations} blocks, once
-                  the operator imports it.
+                  {coin(d.deposit)} credited to <code data-destination>{d.credit.address}</code> after {d.credit.confirmations} blocks,
+                  {d.credit.paidBy === "chain" ? `in a block of ${d.credit.chainName}'s own.` : "once the operator imports it."}
                 {:else}
                   Credited to <code data-destination>{d.text ?? d.data}</code>.
                 {/if}

@@ -153,9 +153,9 @@ A ticker of the Chain Entry's, in any case, is refused, with the reason shown. A
 
 **How** (`wallet/src/deposit.ts`, #31, ADR 0004):
 
-1. The Slot's Chain Module says what the Deposit credits (`depositDestination`). For Elements, that's its first receive address as UTF-8, with a minimum of 3,000 sats, credited exactly the value.
+1. The Slot's Chain Module says what the Deposit credits (`depositDestination`). For Elements, that's its first receive address as UTF-8, with a minimum of 3,000 sats, credited exactly the value. For Flush, it's `s46_<address>_<checksum>` (the checksum is the first 6 hex digits of the SHA-256 of `s46_<address>_`), with a minimum of 294 sats; `flush.wasm` declares it only once Slot 46's Chain Entry pins its activation (ADR 0004).
 2. `treasury.ts` finds the Slot's Treasury on eCash's Esplora by #15's strict exactly-one rule (`/scripthash/:h/utxo`, following pending M5s). With none, only a pinned `activation` in the Slot's Chain Entry allows a first Deposit.
-3. `l1.wasm`'s `build_deposit` builds the M5 from the account's confirmed coins: largest first, the fee at the 6-block estimate, change to the first unused change address. Every input carries its previous transaction, so the module checks every value itself.
+3. `l1.wasm`'s `build_deposit` builds the M5 from the account's confirmed coins: largest first, the fee at the 6-block estimate, change to the first unused change address. Every input carries its previous transaction, so the module checks every value itself. It refuses an M5 eCash won't relay: over 10,000 vB, or over 1,000 vB when the Treasury it spends is a pending M5's, and a destination over 100 bytes (Backbone's limits, #57).
 4. The L1 Decoder's Clear View goes to the approval window. After approval: `sign`, `finalize`, `POST /tx`.
 
 **The replay marker:** `l1.wasm` refuses to check, decode, sign or finalize any spend without it: betanet's `nLockTime` 499999999 and a non-final `nSequence`.
@@ -163,8 +163,8 @@ A ticker of the Chain Entry's, in any case, is refused, with the reason shown. A
 **Tracking:** pending Deposits sit in `storage.local` (`deposit:<txid>`) and show under "In progress" on the Activity tabs (`deposit.list`), each with its txid. They go through:
 
 1. "n / N" confirmations, N being the Slot's `depositConfirmations` from its Chain Entry (6 on betanet; BIP300's 100 when absent);
-2. waiting for the operator's `importdrivechaindeposit` (the claim arguments are shown);
-3. "credited", once the Slot's server lists a transaction to the address (`/address/:a/txs`) with an input claiming the Deposit's txid (`is_pegin`), confirmed or not. Past the first page it pages back (`/txs/chain/:last`), 25 confirmed at a time, until a page ends in a transaction mined below the Slot's tip when the Deposit was sent, less 10 blocks for a reorg (`isCredited`). That height is read just after the broadcast, waiting at most 5 seconds, and kept with the Deposit (`slotHeight`); without it, the tracker pages to the end. Heights, not block times: after a gap in a BMM chain's blocks, a block's time may legally be hours in the past.
+2. waiting for the operator's `importdrivechaindeposit` (the claim arguments are shown), or on Flush, which pays Deposits itself, for its payout;
+3. "credited", once the Slot's server lists a transaction to the address (`/address/:a/txs`) with an input claiming the Deposit's txid (`is_pegin`), confirmed or not. Past the first page it pages back (`/txs/chain/:last`), 25 confirmed at a time, until a page ends in a transaction mined below the Slot's tip when the Deposit was sent, less 10 blocks for a reorg (`isCredited`). That height is read just after the broadcast, waiting at most 5 seconds, and kept with the Deposit (`slotHeight`); without it, the tracker pages to the end. Heights, not block times: after a gap in a BMM chain's blocks, a block's time may legally be hours in the past. On Flush, nothing names the M5: its credit is a coinbase output after the first paying the address exactly the Deposit's value, in a block above `slotHeight`, that no other Deposit has claimed (`flushCredit`). Deposits are matched oldest first, as Flush pays them in eCash order. The matched output is kept with the Deposit, which stays listed as credited while another Deposit of the same value to the same address waits.
 
 A stuck Deposit (its server doesn't know it, or its status can't be read) offers "Stop tracking": the wallet forgets it, and the transaction is unaffected. Healthy ones offer nothing.
 

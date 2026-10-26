@@ -81,8 +81,9 @@
     <p class="notice">
       <Icon name="warning" />
       <span>
-        A Deposit moves ECX from the main chain to {target}. It is credited to your own address there after 100
-        main-chain blocks, once the chain's operator imports it. It only comes back through a Withdrawal, which takes months.
+        A Deposit moves ECX from the main chain to {target}. It is credited to your own address there after its main-chain
+        confirmations, once the chain's operator imports it or, on a chain that pays Deposits itself, in its next block. It only
+        comes back through a Withdrawal, which takes months.
       </span>
     </p>
     <p class="reported">

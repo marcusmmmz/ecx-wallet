@@ -4,6 +4,8 @@
 //!
 //! - [`declare`] reports the binding the module serves;
 //! - [`derive_account`] turns the Slot 46 Starter into BIP84 (P2WPKH) addresses and watch data;
+//! - [`deposit_destination`] says what a Deposit from eCash is credited to, once Slot 46's
+//!   activation is pinned;
 //! - [`build_transfer`] builds the wallet's own Send of ECX from the account's coins;
 //! - [`check`] refuses, without the Starter, what the wallet must never sign;
 //! - [`decode`] is the Flush Decoder: a Clear View of plain payments, or Blind with the facts it
@@ -25,6 +27,7 @@ use bitcoin::{CompressedPublicKey, NetworkKind, ScriptBuf};
 use serde::Serialize;
 
 pub mod chain_entry;
+mod deposit;
 pub mod bast;
 mod decode;
 mod psbt;
@@ -33,6 +36,7 @@ mod tokens;
 mod transfer;
 
 pub use chain_entry::{chain_entry, ChainEntry, NetworkEntry, ServerApi, SidechainServerEntry};
+pub use deposit::{deposit_destination, long_form, DepositDestination, MAX_DESTINATION_BYTES};
 pub use decode::{decode, ClearInput, ClearOutput, ClearView, DangerousMode, Decoded, Destination, VerifiableFacts};
 pub use psbt::{check, AssetAmount, OwnedInput, Refusal, RefusalCode};
 pub use sign::{finalize, sign, Finalized};
@@ -70,11 +74,14 @@ pub struct Declaration {
     pub capabilities: Vec<String>,
 }
 
+/// `depositDestination` only once the Chain Entry pins Slot 46's activation (docs/adr/0004): a
+/// Deposit to an inactive Slot is accepted on eCash and its funds are anyone's (#57).
 pub fn declare() -> Declaration {
-    Declaration {
-        binding: Binding { chain: network().chain.clone(), format: "psbt".into(), payload_versions: vec!["0".into()] },
-        capabilities: vec!["buildTransfer".into(), "tokens".into()],
+    let mut capabilities = vec!["buildTransfer".to_string(), "tokens".into()];
+    if network().activation.is_some() {
+        capabilities.push("depositDestination".into());
     }
+    Declaration { binding: Binding { chain: network().chain.clone(), format: "psbt".into(), payload_versions: vec!["0".into()] }, capabilities }
 }
 
 /// This build's network in Slot 46's Chain Entry.

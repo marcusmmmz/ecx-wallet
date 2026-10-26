@@ -9,8 +9,11 @@
 // from the transaction itself, never from what the server says about it.
 import type { EsploraClient, EsploraTx } from "./esplora";
 
-/** The Treasury to spend, or none: the Slot has never been funded (or isn't active). */
-export type Treasury = { txid: string; vout: number } | undefined;
+/**
+ * The Treasury to spend, or none: the Slot has never been funded (or isn't active). `unconfirmed`:
+ * it is a pending M5's, so an M5 spending it may be at most 1,000 vB (Backbone's `dc-unconfirmed-parent`).
+ */
+export type Treasury = { txid: string; vout: number; unconfirmed: boolean } | undefined;
 
 /** How many pending M5s in a row the wallet follows (Bitcoin Core's ancestor limit). */
 const MAX_PENDING = 25;
@@ -85,7 +88,7 @@ export async function findTreasury(client: EsploraClient, script: string, slot: 
   if (chains.size > 1) throw cant(`${client.url} shows ${chains.size} Treasuries, and a Slot has only one.`);
   const [ends] = chains.values();
   if (ends.size > 1) throw cant(`${client.url} shows ${ends.size} pending Treasuries spending the same one.`);
-  const [end] = ends;
+  const [[root, [end]]] = [...chains].map(([root, ends]) => [root, [...ends]] as const);
   const [txid, vout] = end.split(":");
-  return { txid, vout: Number(vout) };
+  return { txid, vout: Number(vout), unconfirmed: end !== root };
 }
