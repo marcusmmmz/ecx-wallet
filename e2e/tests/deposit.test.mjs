@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, test } from "node:test";
 import { addressScript, encodeTx, parseTx, scripthash } from "@ecx/stub-server/bitcoin-tx";
-import { BROWSERS, importWallet, launchWallet, openWalletPage, serveEsplora, serveL1Esplora, setUpWallet } from "../harness.mjs";
+import { activitySettled, BROWSERS, homeSettled, importWallet, launchWallet, openWalletPage, serveEsplora, serveL1Esplora, setUpWallet } from "../harness.mjs";
 
 const GENESIS = "a7754ce0debc40baddbd8c47e79d19209685f22c63edaaf8b69cf54116374d7f";
 const POLICY_ASSET = "5836dcc06130dcf6a65b6ac493813fd65559955283e44cc3f07966294eccb2c8";
@@ -97,7 +97,10 @@ async function readDepositView(approval) {
   });
 }
 
-/** The pending Deposits on home's Activity tab, once Slot 24's are loaded. */
+/**
+ * The pending Deposits on home's Activity tab, once Slot 24's are loaded. The page closes only once
+ * home has settled: closing it with a request pending is a Firefox runtime error (#43).
+ */
 async function readDeposits(session) {
   const page = await session.openPage("index.html#/");
   await page.waitForSelector('[data-account="24"][data-deposits-ready]', { timeout: 20_000 });
@@ -114,6 +117,7 @@ async function readDeposits(session) {
         : undefined,
     })),
   );
+  await homeSettled(page);
   await page.close();
   return shown;
 }
@@ -389,6 +393,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
       assert.equal(await home.$eval("[data-deposit-stop-tracking]", (e) => e.textContent.trim()), "Stop tracking");
       await home.click("[data-deposit-stop-tracking]");
       await home.waitForFunction((t) => document.querySelector(`[data-deposit="${t}"]`) === null, { timeout: 10_000 }, txid);
+      await activitySettled(home);
       await home.close();
       assert.deepEqual(await readDeposits(session), []);
     });
