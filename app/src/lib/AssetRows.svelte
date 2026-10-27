@@ -1,5 +1,6 @@
 <script lang="ts">
   import { shortAsset } from "$lib/asset";
+  import AssetBadge from "$lib/AssetBadge.svelte";
   import ChainMark from "$lib/ChainMark.svelte";
   import { assetMark, type ChainView } from "$lib/chains.svelte";
   import Icon from "$lib/Icon.svelte";
@@ -36,7 +37,7 @@
       <li class="asset" data-asset={asset}>
         <ChainMark {...assetMark(entry)} size={30} />
         <span class="name">
-          <strong>{entry ? entry.ticker : "Unknown asset"}</strong>
+          <strong>{entry ? entry.ticker : "Unknown asset"}<AssetBadge {entry} /></strong>
           <span class="muted tiny">
             {#if entry}{entry.name}{:else}
               <code title={asset}>{shortAsset(asset)}</code>

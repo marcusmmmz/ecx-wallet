@@ -65,6 +65,7 @@ const readEntries = (page) =>
         id: t(e.querySelector("[data-stored-id]")),
         ticker: t(e.querySelector("[data-stored-ticker]")),
         source: t(e.querySelector("[data-stored-source]")),
+        trust: e.querySelector("[data-asset-trust]")?.getAttribute("data-asset-trust") ?? null,
         rename: e.querySelector("[data-rename]") !== null,
       };
     }),
@@ -125,7 +126,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
 
     await fill(page, "[data-form-contract]", USDT_CONTRACT);
     assert.equal(await submit(page), null);
-    assert.deepEqual(await readEntries(page), [{ id: USDT, ticker: "USDt", source: "from its contract", rename: false }], "its full id and source");
+    assert.deepEqual(await readEntries(page), [{ id: USDT, ticker: "USDt", source: "from its contract", trust: "unverified", rename: false }], "its full id and source; anyone could write a USDt contract");
     await page.close();
     assert.equal((await homeTickers(session))[USDT], "USDt");
   });
@@ -139,7 +140,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
     await fill(page, "[data-form-ticker]", "PTS");
     await fill(page, "[data-form-precision]", "2");
     assert.equal(await submit(page), null);
-    assert.deepEqual((await readEntries(page)).find((e) => e.id === POINTS), { id: POINTS, ticker: "PTS", source: "your label", rename: true });
+    assert.deepEqual((await readEntries(page)).find((e) => e.id === POINTS), { id: POINTS, ticker: "PTS", source: "your label", trust: null, rename: true }, "the user's own label has no badge");
 
     await page.click(`[data-stored-asset="${POINTS}"] [data-rename]`);
     assert.equal(await page.$eval("[data-form-asset]", (e) => e.readOnly), true, "renaming keeps the asset");

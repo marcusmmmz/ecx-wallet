@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { parseAmount } from "@ecx/wallet";
-  import { shortAsset } from "$lib/asset";
+  import { assetTrust, shortAsset } from "$lib/asset";
   import { listChains, spendable, startSend, type AssetAmount, type ChainInfo, type SendResult } from "$lib/background";
   import Icon from "$lib/Icon.svelte";
   import TopBar from "$lib/TopBar.svelte";
@@ -56,7 +56,12 @@
     const entry = entryOf(asset);
     return entry === undefined ? "base units" : entry.ecx && unit.value === "sats" ? "sats" : entry.ticker;
   }
-  const nameOf = (asset: string) => entryOf(asset)?.ticker ?? `Unknown asset ${shortAsset(asset)}`;
+  /** An option can hold text only: an unverified name says so in words (docs/adr/0015). */
+  const nameOf = (asset: string) => {
+    const entry = entryOf(asset);
+    const name = entry?.ticker ?? `Unknown asset ${shortAsset(asset)}`;
+    return assetTrust(entry) === "unverified" ? `⚠ ${name} (not verified)` : assetTrust(entry) === "verified" ? `${name} ✓` : name;
+  };
 
   /** A row's amount in base units; 0 while it doesn't parse (the Send refuses it then). */
   function baseUnits(r: Row): bigint {

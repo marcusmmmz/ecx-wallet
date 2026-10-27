@@ -11,6 +11,7 @@
     type StoredAsset,
   } from "$lib/background";
   import { assetSource } from "$lib/asset";
+  import AssetBadge from "$lib/AssetBadge.svelte";
   import Icon from "$lib/Icon.svelte";
   import TopBar from "$lib/TopBar.svelte";
 
@@ -174,7 +175,7 @@
       {#each stored[chain.id] ?? [] as a (a.id)}
         <div class="card stack" data-stored-asset={a.id}>
           <div class="asset-head">
-            <strong data-stored-ticker>{a.ticker}</strong>
+            <strong data-stored-ticker>{a.ticker}</strong><AssetBadge entry={a} />
             <span class="muted small">{a.name}</span>
             <span class="badge" data-stored-source>{assetSource(a)}</span>
           </div>

@@ -13,6 +13,7 @@
   } from "$lib/background";
   import { formatAllDecimals } from "@ecx/wallet";
   import { assetSource, shortAsset } from "$lib/asset";
+  import AssetBadge from "$lib/AssetBadge.svelte";
   import Icon from "$lib/Icon.svelte";
   import { amountText } from "$lib/unit.svelte";
 
@@ -364,7 +365,7 @@
               {:else}
                 {@const entry = assets.find((n) => n.id === output.asset)}
                 {@const named = entry !== undefined}
-                <span class="amount">{amountText(output.amount, output.asset, shownAssets)}</span>
+                <span class="amount">{amountText(output.amount, output.asset, shownAssets)}<AssetBadge {entry} size={14} /></span>
                 {#if assetSource(entry)}
                   <span class="muted small" data-asset-source>{assetSource(entry)} <code title={output.asset}>{shortAsset(output.asset)}</code></span>
                 {:else if !named}

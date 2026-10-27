@@ -1,6 +1,7 @@
 <script lang="ts">
   import { activityDays, activityKind, localDay, type ActivityKind } from "@ecx/wallet";
   import { assetSource, shortAsset } from "$lib/asset";
+  import AssetBadge from "$lib/AssetBadge.svelte";
   import type { ChainId, HistoryEntry } from "$lib/background";
   import type { Chains, ChainView } from "$lib/chains.svelte";
   import Deposits from "$lib/Deposits.svelte";
@@ -102,7 +103,7 @@
     {@const entry = view.info.assets.find((a) => a.id === asset)}
     {@const named = entry !== undefined}
     <span class="amount {size}" class:in={!amount.startsWith("-")} data-history-amount data-asset={asset}>
-      {signed(amount, amountText(amount, asset, view.info.assets))}
+      {signed(amount, amountText(amount, asset, view.info.assets))}<AssetBadge {entry} />
       {#if !named}
         <!-- A row has room for the words only; the details sheet shows which asset. -->
         <span class="muted tiny unknown" title={asset}>

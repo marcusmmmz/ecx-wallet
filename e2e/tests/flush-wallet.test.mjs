@@ -187,8 +187,11 @@ for (const browserName of BROWSERS) describe(browserName, () => {
         balance: e.querySelector("[data-balance]").textContent.replace(/\s+/g, " ").trim(),
         logo: e.querySelector("img").getAttribute("src").slice(0, 27),
         loaded: e.querySelector("img").naturalWidth > 0,
+        trust: e.querySelector("[data-asset-trust]")?.getAttribute("data-asset-trust"),
       }));
-      assert.deepEqual(shown, { ticker: "BROSEVELT", balance: "10 BROSEVELT", logo: "data:image/jpeg;base64,/9j/", loaded: true });
+      // A registration proves only what the asset calls itself: anyone may register a free ticker (docs/adr/0015).
+      assert.deepEqual(shown, { ticker: "BROSEVELT", balance: "10 BROSEVELT", logo: "data:image/jpeg;base64,/9j/", loaded: true, trust: "unverified" });
+      assert.equal(await page.$(`[data-account="99"] li[data-asset=""] [data-asset-trust]`), null, "ECX carries eCash's mark, no badge");
       await page.close();
     } finally {
       FLUSH.txs = txs;
