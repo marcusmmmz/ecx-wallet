@@ -37,6 +37,11 @@ pub enum RefusalCode {
     Dust,
     /// `asset_registration`: the transaction isn't the asset's registration, or names it no ticker.
     InvalidContract,
+    /// `parse_action`: a `flush:` link Flush's own app would refuse (its version, network, expiry
+    /// or parameters).
+    InvalidAction,
+    /// `parse_action`: an action of Flush this wallet doesn't build yet (docs/adr/0016).
+    UnsupportedAction,
 }
 
 pub(crate) fn refuse(code: RefusalCode, message: impl Into<String>) -> Refusal {
