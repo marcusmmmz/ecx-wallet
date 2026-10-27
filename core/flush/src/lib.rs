@@ -34,6 +34,7 @@ mod link;
 mod psbt;
 mod sign;
 mod tokens;
+mod trade;
 mod transfer;
 
 pub use chain_entry::{chain_entry, ChainEntry, NetworkEntry, ServerApi, SidechainServerEntry};
@@ -43,6 +44,7 @@ pub use link::{parse_action, Action, CLOCK_SKEW, MAX_LIFETIME, MAX_LINK_BYTES, M
 pub use psbt::{check, AssetAmount, OwnedInput, Refusal, RefusalCode};
 pub use sign::{finalize, sign, Finalized};
 pub use tokens::{asset_logo, asset_registration, output_tokens, CheckedLogo, CheckedRegistration, OutputToken, OutputTokens, TokenAmount, MAX_DECIMALS, MAX_LOGO_BYTES};
+pub use trade::{build_trade, CheckedTrade, PoolReport, Side, TradeBuilt, TradeOrder, MAX_FLOOR_SHORTFALL_PERCENT};
 pub use transfer::{build_transfer, Built, Coin, Payment, PaymentTo, Spent, TransferOrder};
 
 /// The network this build serves (betanet only, until mainnet: #32).

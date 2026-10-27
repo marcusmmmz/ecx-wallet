@@ -22,7 +22,7 @@ use bitcoin::absolute::LockTime;
 use bitcoin::consensus::encode::{deserialize_hex, serialize};
 use bitcoin::psbt::{Input, Output, Psbt};
 use bitcoin::transaction::Version;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use bitcoin::{Amount, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness};
 use serde::{Deserialize, Serialize};
@@ -42,7 +42,7 @@ const DUST_RELAY_FEE: u64 = 3000;
 /// (`DEFAULT_MIN_RELAY_TX_FEE`), and its explorer's `/fee-estimates` reports that floor while blocks
 /// have room, but Flush Core's own wallet pays 20. Provisional: the fee rate third-party wallets
 /// should use was asked of Flush's developer on 2026-10-25 (#56).
-const MIN_FEE_RATE: u64 = 1000;
+pub(crate) const MIN_FEE_RATE: u64 = 1000;
 
 /// What to send, and what to build it from.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -128,7 +128,7 @@ pub(crate) fn dust_threshold(txout: &TxOut) -> u64 {
 }
 
 /// One of the account's coins, read from its transaction.
-struct Spendable {
+pub(crate) struct Spendable {
     outpoint: OutPoint,
     tx: Transaction,
     txout: TxOut,
@@ -184,11 +184,39 @@ pub fn build_transfer(order_json: &str, starter: &str) -> Result<Built, Refusal>
         payments.push(txout);
     }
 
-    let mut coins: Vec<Spendable> = vec![];
-    // Coins of a sent asset, with the units each carries.
+    let wanted: BTreeSet<String> = need_tokens.keys().cloned().collect();
+    let (coins, mut token_coins) = read_coins(&order.coins, &keys, &wanted)?;
+
+    // Each asset's coins, largest first until they cover its payments; what's left over comes back.
+    let mut token_inputs: Vec<Spendable> = vec![];
+    let mut fixed = payments.clone();
+    let mut own = vec![];
+    for (asset, needed) in &need_tokens {
+        let (chosen, total) = select_tokens(token_coins.remove(asset).unwrap_or_default(), asset, *needed, "sends")?;
+        token_inputs.extend(chosen);
+        if total > *needed {
+            listed.push((fixed.len() as u32, asset.clone(), total - needed));
+            own.push((fixed.len(), 1, order.change_index));
+            fixed.push(TxOut { value: Amount::ZERO, script_pubkey: keys.script(1, order.change_index).map_err(starter_refusal)? });
+        }
+    }
+    if !listed.is_empty() {
+        listed.sort_by_key(|(n, _, _)| *n);
+        let entries: Vec<(u32, &str, u64)> = listed.iter().map(|(n, asset, units)| (*n, asset.as_str(), *units)).collect();
+        let marker = bast::transfer_marker(&entries).map_err(|e| malformed(format!("Can't write the transfer's marker: {e}.")))?;
+        fixed.push(TxOut { value: Amount::ZERO, script_pubkey: ScriptBuf::from_bytes(marker) });
+    }
+    complete(Draft { fixed, own, token_inputs, coins, need, fee_rate, change_index: order.change_index }, &keys)
+}
+
+/// The account's coins in `coins`, read from their transactions: those with value, largest first,
+/// and, per asset in `wanted`, the coins of value 0 carrying it with the units each carries (as
+/// that transaction's marker lists them, never as the server says).
+pub(crate) fn read_coins(coins: &[Coin], keys: &AccountKeys, wanted: &BTreeSet<String>) -> Result<(Vec<Spendable>, BTreeMap<String, Vec<(Spendable, u64)>>), Refusal> {
+    let mut valued: Vec<Spendable> = vec![];
     let mut token_coins: BTreeMap<String, Vec<(Spendable, u64)>> = BTreeMap::new();
     let mut outpoints = vec![];
-    for (i, coin) in order.coins.iter().enumerate() {
+    for (i, coin) in coins.iter().enumerate() {
         let tx = deserialize_hex::<Transaction>(&coin.tx).map_err(|e| malformed(format!("Coin {i}'s transaction isn't one: {e}")))?;
         let txout = tx.output.get(coin.vout as usize).cloned().ok_or_else(|| malformed(format!("Coin {i}'s transaction has no output {}.", coin.vout)))?;
         let ours = (coin.chain <= 1).then(|| keys.script(coin.chain, coin.index).ok()).flatten();
@@ -202,59 +230,70 @@ pub fn build_transfer(order_json: &str, starter: &str) -> Result<Built, Refusal>
         outpoints.push(outpoint);
         if txout.value == Amount::ZERO {
             // A token's output, or a block's empty fee output: spent only if it carries an asset
-            // this Send moves, as its transaction's marker says.
-            if need_tokens.is_empty() {
+            // this transaction moves, as its transaction's marker says.
+            if wanted.is_empty() {
                 continue;
             }
             let carried = tokens::listed_on(&tx, coin.vout)?.and_then(|l| l.token);
             if let Some(bast::Token { kind: TokenKind::Asset, id, amount }) = carried {
-                if need_tokens.contains_key(&id) {
+                if wanted.contains(&id) {
                     token_coins.entry(id).or_default().push((Spendable { outpoint, tx, txout, chain: coin.chain, index: coin.index }, amount));
                 }
             }
             continue;
         }
-        coins.push(Spendable { outpoint, tx, txout, chain: coin.chain, index: coin.index });
+        valued.push(Spendable { outpoint, tx, txout, chain: coin.chain, index: coin.index });
     }
-    coins.sort_by(|a, b| b.txout.value.cmp(&a.txout.value).then(a.outpoint.cmp(&b.outpoint)));
+    valued.sort_by(|a, b| b.txout.value.cmp(&a.txout.value).then(a.outpoint.cmp(&b.outpoint)));
+    Ok((valued, token_coins))
+}
 
-    let change_script = keys.script(1, order.change_index).map_err(starter_refusal)?;
+/// Coins of `asset`, largest first until they cover `needed` units: the coins, and what they carry.
+/// `verb` says what the transaction does with them, for the refusal ("sends").
+pub(crate) fn select_tokens(mut held: Vec<(Spendable, u64)>, asset: &str, needed: u64, verb: &str) -> Result<(Vec<Spendable>, u64), Refusal> {
+    held.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.outpoint.cmp(&b.0.outpoint)));
+    let available: u64 = held.iter().map(|(_, units)| units).sum();
+    if available < needed {
+        return Err(refuse(
+            RefusalCode::InsufficientFunds,
+            format!("Not enough of asset {asset}: this {verb} {needed} units, and the wallet can spend {available}."),
+        ));
+    }
+    let mut chosen = vec![];
+    let mut total = 0u64;
+    for (coin, units) in held {
+        if total >= needed {
+            break;
+        }
+        total += units;
+        chosen.push(coin);
+    }
+    Ok((chosen, total))
+}
+
+/// A transaction but for its ECX inputs and change.
+pub(crate) struct Draft {
+    /// Every output before the ECX change, in order.
+    pub fixed: Vec<TxOut>,
+    /// The `fixed` outputs that are the account's: (output, chain, index), for their derivation.
+    pub own: Vec<(usize, u32, u32)>,
+    /// The token coins it spends, first.
+    pub token_inputs: Vec<Spendable>,
+    /// The coins with value to choose from, largest first.
+    pub coins: Vec<Spendable>,
+    /// The ECX the `fixed` outputs take (what they pay, and what a marker carries).
+    pub need: u64,
+    /// Sats per 1000 vbytes.
+    pub fee_rate: u64,
+    pub change_index: u32,
+}
+
+/// `draft` funded from its coins, largest first, with ECX change unless it would be dust, which
+/// goes to the fee.
+pub(crate) fn complete(draft: Draft, keys: &AccountKeys) -> Result<Built, Refusal> {
+    let Draft { fixed, mut own, token_inputs, coins, need, fee_rate, change_index } = draft;
+    let change_script = keys.script(1, change_index).map_err(starter_refusal)?;
     let change_output = |value: u64| TxOut { value: Amount::from_sat(value), script_pubkey: change_script.clone() };
-
-    // Each asset's coins, largest first until they cover its payments; what's left over comes back.
-    let mut token_inputs: Vec<Spendable> = vec![];
-    let mut fixed = payments.clone();
-    for (asset, needed) in &need_tokens {
-        let mut held = token_coins.remove(asset).unwrap_or_default();
-        held.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.outpoint.cmp(&b.0.outpoint)));
-        let available: u64 = held.iter().map(|(_, units)| units).sum();
-        if available < *needed {
-            return Err(refuse(
-                RefusalCode::InsufficientFunds,
-                format!("Not enough of asset {asset}: this sends {needed} units, and the wallet can spend {available}."),
-            ));
-        }
-        let mut total = 0u64;
-        for (coin, units) in held {
-            if total >= *needed {
-                break;
-            }
-            total += units;
-            token_inputs.push(coin);
-        }
-        if total > *needed {
-            listed.push((fixed.len() as u32, asset.clone(), total - needed));
-            fixed.push(change_output(0));
-        }
-    }
-    let token_change: Vec<usize> = (payments.len()..fixed.len()).collect();
-    if !listed.is_empty() {
-        listed.sort_by_key(|(n, _, _)| *n);
-        let entries: Vec<(u32, &str, u64)> = listed.iter().map(|(n, asset, units)| (*n, asset.as_str(), *units)).collect();
-        let marker = bast::transfer_marker(&entries).map_err(|e| malformed(format!("Can't write the transfer's marker: {e}.")))?;
-        fixed.push(TxOut { value: Amount::ZERO, script_pubkey: ScriptBuf::from_bytes(marker) });
-    }
-
     let change_dust = dust_threshold(&change_output(0));
     let unsigned = |chosen: &[Spendable], change: Option<u64>| {
         let input = token_inputs
@@ -285,12 +324,12 @@ pub fn build_transfer(order_json: &str, starter: &str) -> Result<Built, Refusal>
         let with_change = fee(&unsigned(chosen, Some(0)));
         if let Some(change) = total.checked_sub(need + with_change).filter(|change| *change >= change_dust) {
             let tx = unsigned(chosen, Some(change));
-            let ecx_change = tx.output.len() - 1;
-            return psbt(tx, &inputs(&token_inputs, chosen), &[token_change.as_slice(), &[ecx_change]].concat(), order.change_index, &keys);
+            own.push((tx.output.len() - 1, 1, change_index));
+            return psbt(tx, &inputs(&token_inputs, chosen), &own, keys);
         }
         if total >= need + fee(&unsigned(chosen, None)) {
             // Change too small to relay goes to the fee.
-            return psbt(unsigned(chosen, None), &inputs(&token_inputs, chosen), &token_change, order.change_index, &keys);
+            return psbt(unsigned(chosen, None), &inputs(&token_inputs, chosen), &own, keys);
         }
     }
     let needed = need + fee(&unsigned(&coins, None));
@@ -300,9 +339,8 @@ pub fn build_transfer(order_json: &str, starter: &str) -> Result<Built, Refusal>
     ))
 }
 
-/// `tx` as a PSBT spending `chosen` (in input order), with the derivation of change address
-/// `change_index` on each of the `change` outputs.
-fn psbt(tx: Transaction, chosen: &[&Spendable], change: &[usize], change_index: u32, keys: &AccountKeys) -> Result<Built, Refusal> {
+/// `tx` as a PSBT spending `chosen` (in input order), with each `own` output's derivation.
+fn psbt(tx: Transaction, chosen: &[&Spendable], own: &[(usize, u32, u32)], keys: &AccountKeys) -> Result<Built, Refusal> {
     let mut psbt = Psbt::from_unsigned_tx(tx).map_err(|e| malformed(format!("Can't build the PSBT: {e}")))?;
     for (input, coin) in psbt.inputs.iter_mut().zip(chosen) {
         let pubkey = keys.public_key(coin.chain, coin.index).map_err(starter_refusal)?;
@@ -313,9 +351,9 @@ fn psbt(tx: Transaction, chosen: &[&Spendable], change: &[usize], change_index: 
             ..Input::default()
         };
     }
-    let pubkey = keys.public_key(1, change_index).map_err(starter_refusal)?;
-    for &index in change {
-        psbt.outputs[index] = Output { bip32_derivation: [(pubkey, keys.key_source(1, change_index))].into(), ..Output::default() };
+    for &(index, chain, at) in own {
+        let pubkey = keys.public_key(chain, at).map_err(starter_refusal)?;
+        psbt.outputs[index] = Output { bip32_derivation: [(pubkey, keys.key_source(chain, at))].into(), ..Output::default() };
     }
     let spent = chosen.iter().map(|coin| Spent { txid: coin.outpoint.txid.to_string(), vout: coin.outpoint.vout }).collect();
     Ok(Built { pset: psbt.to_string(), spent })
