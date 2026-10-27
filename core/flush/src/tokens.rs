@@ -28,6 +28,25 @@ pub struct OutputTokens {
     pub txid: String,
     /// Every output the marker lists, in output order; none if the transaction has no marker.
     pub outputs: Vec<OutputToken>,
+    /// A trade through pools (kind 21, `swap_pools`): its order, by which the wallet finds its outcome
+    /// and pairs its payout (docs/adr/0017).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub swap: Option<SwapOrder>,
+}
+
+/// A kind-21 order as its marker states it. What comes out is the pool's other asset.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwapOrder {
+    /// Display order.
+    pub asset_in: String,
+    /// Display order, in the order traded through.
+    pub pools: Vec<String>,
+    /// Base units, as decimal strings.
+    pub amount_in: String,
+    pub min_out: String,
+    /// The script ECX is paid out or back to (hex; empty when ECX is on neither side).
+    pub chn_to: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -106,18 +125,31 @@ pub(crate) fn marker(tx: &Transaction) -> Result<Option<(usize, Marker)>, Refusa
 
 pub fn output_tokens(tx_hex: &str) -> Result<OutputTokens, Refusal> {
     let tx = transaction(tx_hex)?;
-    let outputs = match marker(&tx)? {
-        None => vec![],
-        Some((_, marker)) => marker
-            .outputs
-            .into_iter()
-            .map(|listed| OutputToken {
-                vout: listed.n,
-                token: listed.token.map(|t| TokenAmount { kind: t.kind.name().into(), id: t.id, amount: t.amount.to_string() }),
-            })
-            .collect(),
+    let Some((_, marker)) = marker(&tx)? else {
+        return Ok(OutputTokens { txid: tx.compute_txid().to_string(), outputs: vec![], swap: None });
     };
-    Ok(OutputTokens { txid: tx.compute_txid().to_string(), outputs })
+    let swap = swap_order(&marker);
+    let outputs = marker
+        .outputs
+        .into_iter()
+        .map(|listed| OutputToken {
+            vout: listed.n,
+            token: listed.token.map(|t| TokenAmount { kind: t.kind.name().into(), id: t.id, amount: t.amount.to_string() }),
+        })
+        .collect();
+    Ok(OutputTokens { txid: tx.compute_txid().to_string(), outputs, swap })
+}
+
+/// A kind-21 marker's order; None for any other marker.
+fn swap_order(marker: &Marker) -> Option<SwapOrder> {
+    if marker.kind != 21 {
+        return None;
+    }
+    let f = &marker.fields;
+    let text = |key: &str| f.get(key).and_then(|v| v.as_str()).map(str::to_string);
+    let number = |key: &str| f.get(key).and_then(|v| v.as_u64()).map(|n| n.to_string());
+    let pools = f.get("pools")?.as_array()?.iter().map(|p| p.as_str().map(str::to_string)).collect::<Option<Vec<_>>>()?;
+    Some(SwapOrder { asset_in: text("asset_in")?, pools, amount_in: number("amount_in")?, min_out: number("min_out")?, chn_to: text("chn_to")? })
 }
 
 pub fn asset_registration(asset: &str, tx_hex: &str) -> Result<CheckedRegistration, Refusal> {

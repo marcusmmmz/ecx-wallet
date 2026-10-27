@@ -439,6 +439,21 @@ export interface OutputTokens {
   txid: string;
   /** Every output the transaction's marker lists; none without a marker. */
   outputs: OutputToken[];
+  /** A trade through pools (kind 21): its order, by which the wallet finds its outcome (docs/adr/0017). */
+  swap?: SwapOrder;
+}
+
+/** A kind-21 order as its marker states it. What comes out is the pool's other asset. */
+export interface SwapOrder {
+  /** Display hex. */
+  assetIn: string;
+  /** Display hex, in the order traded through. */
+  pools: string[];
+  /** Base units, decimal. */
+  amountIn: string;
+  minOut: string;
+  /** The script ECX is paid out or back to (hex; empty when ECX is on neither side). */
+  chnTo: string;
 }
 
 /** An asset's registration, checked by the module: its ticker hashes to the asset id. */

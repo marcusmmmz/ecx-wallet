@@ -43,7 +43,7 @@ pub use decode::{decode, decode_with_evidence, ClearInput, ClearOutput, ClearTra
 pub use link::{parse_action, Action, CLOCK_SKEW, MAX_LIFETIME, MAX_LINK_BYTES, MAX_SLIPPAGE_BPS};
 pub use psbt::{check, AssetAmount, OwnedInput, Refusal, RefusalCode};
 pub use sign::{finalize, sign, Finalized};
-pub use tokens::{asset_logo, asset_registration, output_tokens, CheckedLogo, CheckedRegistration, OutputToken, OutputTokens, TokenAmount, MAX_DECIMALS, MAX_LOGO_BYTES};
+pub use tokens::{asset_logo, asset_registration, output_tokens, CheckedLogo, CheckedRegistration, OutputToken, OutputTokens, SwapOrder, TokenAmount, MAX_DECIMALS, MAX_LOGO_BYTES};
 pub use trade::{build_trade, CheckedTrade, PoolReport, Side, TradeBuilt, TradeOrder, MAX_FLOOR_SHORTFALL_PERCENT};
 pub use transfer::{build_transfer, Built, Coin, Payment, PaymentTo, Spent, TransferOrder};
 

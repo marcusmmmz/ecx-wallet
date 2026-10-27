@@ -47,6 +47,7 @@ export {
   type CheckedRegistration,
   type OutputToken,
   type OutputTokens,
+  type SwapOrder,
   type TokenKind,
   type BuiltTrade,
   type ClearTrade,

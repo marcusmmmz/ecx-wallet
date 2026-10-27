@@ -7,7 +7,7 @@
 mod common;
 
 use bitcoin::hashes::{sha256, Hash};
-use ecx_flush::{asset_logo, asset_registration, output_tokens, RefusalCode, TokenAmount};
+use ecx_flush::{asset_logo, asset_registration, output_tokens, RefusalCode, SwapOrder, TokenAmount};
 use serde_json::Value;
 
 const BROSEVELT: &str = "7351ccd9fd2f091cce3f9d8e3cd0b95f278885f4610620784b8c64be8b0237c1";
@@ -95,4 +95,29 @@ fn a_logo_is_refused_from_a_transaction_that_sets_none_or_sets_another_assets() 
     assert_eq!(refused(BROSEVELT, REGISTRATION).code, RefusalCode::InvalidContract);
     assert!(refused(BROSEVELT, SWAP).message.contains("sets no logo"));
     assert!(refused(&"ab".repeat(32), SET_LOGO).message.contains("not abab"));
+}
+
+#[test]
+fn a_trade_through_pools_carries_its_order_and_nothing_else_does() {
+    // The live sale of 1,234 BROSEVELT (trade-fixtures.json), as the explorer's `/flush/tx` decodes it.
+    let fixtures: Value = serde_json::from_str(include_str!("trade-fixtures.json")).unwrap();
+    let sale = output_tokens(fixtures["sale"]["hex"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        sale.swap,
+        Some(SwapOrder {
+            asset_in: BROSEVELT.into(),
+            pools: vec!["2a1dbe3c10bc5781a59dd40e2f516dab62b1d15170c8788a7a5c87a4076cc7a9".into()],
+            amount_in: "123400".into(),
+            min_out: "1198073".into(),
+            chn_to: "001441005036893efdc78c77c4a8f6b621a6e6a2753b".into(),
+        })
+    );
+    let json = serde_json::to_value(&sale).unwrap();
+    assert_eq!(json["swap"]["amountIn"], "123400", "camelCase, amounts as decimal strings");
+
+    for txid in [REGISTRATION, ADD_LIQUIDITY, SET_LOGO] {
+        let listed = output_tokens(&tx(txid)).unwrap();
+        assert_eq!(listed.swap, None, "{txid}");
+        assert!(serde_json::to_value(&listed).unwrap().get("swap").is_none(), "absent, not null");
+    }
 }
