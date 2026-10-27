@@ -263,10 +263,13 @@
                       <span class="muted tiny meta">
                         {#if views.length > 1}<span>{chain.info.name} ·</span>{/if}
                         {@render status(entry)}
-                        <span data-trade-fee>· fee {amountText(t.fee, "", chain.info.assets)}</span>
                       </span>
                     </span>
-                    <span class="end">{@render amount(chain, { asset: t.given.asset, amount: `-${t.given.amount}` }, "in-row", {})}</span>
+                    <span class="end">
+                      {@render amount(chain, { asset: t.given.asset, amount: `-${t.given.amount}` }, "in-row", {})}
+                      <!-- Under what it paid for, so the left keeps every row's chain, time and badge on one line. -->
+                      <span class="muted tiny" data-trade-fee>fee {amountText(t.fee, "", chain.info.assets)}</span>
+                    </span>
                   </span>
                   <span class="half back" class:waiting={back.queued || back.amount === undefined}>
                     <span class="grow line small" data-trade-back>
