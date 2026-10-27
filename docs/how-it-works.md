@@ -99,10 +99,11 @@ The API this project defines, for a sidechain with no indexer. Its protocol draf
 **What the user sees** (#33): the Activity tabs. Home's merges every chain that's on, with a chip per chain to filter. Each chain's screen has its own.
 
 - **Order:** Deposits in progress first, then "Not yet confirmed", then one section per day (`activityDays`).
-- **Each row** says what the transaction did (`activityKind`: Received, Sent, "Fee, to yourself", "Deposit to <chain>", "Deposit from the main chain", "Asset issuance", "Asset reissuance"), and the wallet's net change per asset, fee included. Then its time, or a badge:
+- **Each row** says what the transaction did (`activityKind`: Received, Sent, "Fee, to yourself", "Deposit to <chain>", "Deposit from the main chain", "Asset issuance", "Asset reissuance"), and the wallet's net change per asset, fee included, each amount with its asset's mark and in red when it left the wallet. Then its time, or a badge:
   - **Pending:** trusted. It spends only the wallet's own coins, each confirmed or from a trusted transaction.
   - **Unconfirmed:** anything else, with a warning (for a Deposit's credit: the operator credited it, not in a block yet).
-- **Tapping a row** shows its status, when it was mined, the chain and its id, the txid with Copy, a Deposit's credit's main-chain txid, and who reported it.
+- **A Flush trade** (ADR 0017) is one row twice as tall: its title by outcome (Sold, Bought, "Selling" while its payout is queued, "Sale didn't fill"), its time and fee, and what it gave above; what came back below ("Paid", "Received", "Refunded", "Returned", a queued payout greyed with "≈"; before an outcome, "Settles once it's in a block", "Waiting for the market's index" or "Couldn't read the outcome"). Beside them, the asset given, a down arrow and the asset back. An amount only the market index vouches for is underlined dotted.
+- **Tapping a row** shows its status, when it was mined, the chain and its id, the txid with Copy, a Deposit's credit's main-chain txid, and who reported it. A trade's shows "You gave" with its fee and price, what came back, the coinbase that paid it, its pool, and Retry when its outcome couldn't be read.
 
 **How:**
 
@@ -113,7 +114,8 @@ The API this project defines, for a sidechain with no indexer. Its protocol draf
   - "Deposit to Slot N" for an M5 it funded to the Treasury script of a Slot it supports;
   - "Deposit from the main chain" for a transaction with an input claiming a Deposit (Esplora's `is_pegin`), whose `txid` is that Deposit's;
   - "+ confidential amounts not shown" for its outputs with no explicit value;
-  - on Flush, a value-0 coin it pays or spends counts as the asset token its creating transaction's marker lists, read by the module's `outputTokens` as the balance reads it (ADR 0013). A trade's row shows the tokens that left, its change netted. A coin the marker lists as a result adds "+ amounts only the node knows not shown" (`results`): what it carries is in the node's state. A sale's ECX comes in a later coinbase, so it shows as its own Received row.
+  - on Flush, a value-0 coin it pays or spends counts as the asset token its creating transaction's marker lists, read by the module's `outputTokens` as the balance reads it (ADR 0013). A trade's row shows the tokens that left, its change netted. A coin the marker lists as a result adds "+ amounts only the node knows not shown" (`results`): what it carries is in the node's state;
+  - a Flush trade through one pool, funded by the wallet and paying ECX to one of its addresses, gets `trade` (`wallet/src/flush-trades.ts`, ADR 0017). Its outcome comes from the market index (`/flush/market/pools/:id/trades`, paged back to its block): a fill, or a miss once the index (`/flush/market/status`) has passed its block. ECX coming back is the earliest unclaimed coinbase output to the order's `chn_to` of exactly that amount, at or after the trade's block, folded into the trade's entry; until then the payout is queued. The index's answer is cached for the session, and in `storage.local` once the trade's block is final.
 - **Paging:** History reads up to 3 older pages of an address's confirmed transactions past the first 25 (`HISTORY_PAGES`), with Blockstream's `/txs/chain/:txid` or, on mempool's fork (Flush's explorer), `?after_txid=` (ADR 0012). When pages remain past those, the mempool's list is full (50), or the server repeats a page, the screen says older transactions may not be shown.
 - **Trust needs each input's parent.** Over Esplora the wallet assumes a parent missing from the lists is confirmed. It paid a watched address, whose list has every one of its mempool transactions (up to 50), so only an older confirmed one can be missing.
 
