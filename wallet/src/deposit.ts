@@ -16,7 +16,7 @@ import { ChainModuleRefusal, type ChainEntry, type ClearView, type DepositCredit
 import { ErrorCode, ProviderRpcError } from "./errors";
 import { feeRate, LISTED_CONFIRMED_TXS, QUERIES_AT_ONCE, type EsploraClient, type EsploraTx } from "./esplora";
 import { WATCHED_CHANGE_ADDRESSES, WATCHED_RECEIVE_ADDRESSES } from "./pull-path";
-import { rejected, type SignPrompt, type SigningApproval } from "./signing";
+import { rejected, type ApprovalContext, type SignPrompt, type SigningApproval } from "./signing";
 import { SidechainServerError } from "./sidechain-server";
 import { findTreasury, TreasuryError } from "./treasury";
 
@@ -163,8 +163,8 @@ export interface DepositStore {
 export interface DepositDeps extends Keys, ChainModules {
   /** A client for `network`'s default server, which must speak Esplora. */
   esplora(entry: ChainEntry, network: NetworkEntry): EsploraClient;
-  /** A window for the approval of one request from `origin` for `chain`. */
-  openSigningApproval(context: { origin: string; chain: string }): SigningApproval;
+  /** A window for the approval of one request from `origin` for `chain`, or the page `host`. */
+  openSigningApproval(context: ApprovalContext): SigningApproval;
   isUnlocked(): Promise<boolean>;
   store: DepositStore;
   /**
@@ -318,9 +318,10 @@ export function createDeposits(deps: DepositDeps) {
   return {
     /**
      * Deposits `amount` sats of the wallet's confirmed eCash to `slot`, credited to the Slot's first
-     * receive address. Resolves once the M5 is broadcast; throws on refusal or rejection.
+     * receive address. Resolves once the M5 is broadcast; throws on refusal or rejection. `host`
+     * is the wallet page that shows the approval itself (`ApprovalContext`).
      */
-    async start(slot: number, amount: string): Promise<{ txid: string; server: string }> {
+    async start(slot: number, amount: string, host?: string): Promise<{ txid: string; server: string }> {
       if (!/^[1-9][0-9]*$/.test(amount)) throw refusal("The amount must be a whole number of sats.");
       const l1 = await routing.l1();
       const target = await routing.slot(slot);
@@ -359,7 +360,7 @@ export function createDeposits(deps: DepositDeps) {
       const psbt = await refusing(async () => l1.module.buildDeposit(order, key));
       await refusing(async () => l1.module.check(psbt));
 
-      const approval = deps.openSigningApproval({ origin: DEPOSIT_REQUESTER, chain: l1.chain });
+      const approval = deps.openSigningApproval({ origin: DEPOSIT_REQUESTER, chain: l1.chain, ...(host === undefined ? {} : { host }) });
       let approved = false;
       try {
         const sent = await approveAndSend();

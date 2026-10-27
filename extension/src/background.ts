@@ -43,10 +43,11 @@ import {
   type KeyValueStore,
   type PendingDeposit,
   type SessionCache,
+  type ApprovalContext,
   type SigningApproval,
   type VaultModule,
 } from "@ecx/wallet";
-import { ACTIVITY_PORT, type BackgroundMessage, type GrantChangedMessage, type ProviderResponse } from "./messages";
+import { ACTIVITY_PORT, APPROVAL_HOST_PORT, type ApprovalHostMessage, type BackgroundMessage, type GrantChangedMessage, type ProviderResponse } from "./messages";
 
 /** Error code for Vault failures reported to the wallet's own pages (wrong password, ...). */
 const VAULT_ERROR = -32000;
@@ -209,6 +210,11 @@ type ApprovalAnswer = { approved: boolean; blindSigning?: boolean } | null;
 class ApprovalWindow {
   readonly id = crypto.randomUUID();
   windowId?: number;
+  /** The wallet page showing it in place of a window, once open there (`APPROVAL_HOST_PORT`). */
+  private hostPort?: chrome.runtime.Port;
+
+  /** `host`: a wallet page that shows this approval itself, if it is still open. */
+  constructor(private readonly host?: string) {}
   private opened = false;
   private closed = false;
   private current = deferred<ApprovalPrompt | null>();
@@ -258,6 +264,14 @@ class ApprovalWindow {
     approvals.delete(this.id);
     this.settle(null);
     this.current.resolve(null);
+    if (this.hostPort !== undefined) {
+      try {
+        this.hostPort.postMessage({ id: null } satisfies ApprovalHostMessage);
+      } catch {
+        // The page is gone.
+      }
+      return;
+    }
     const windowId = this.windowId;
     if (windowId === undefined) return;
     const remove = () => chrome.windows.remove(windowId).catch(() => {});
@@ -269,6 +283,13 @@ class ApprovalWindow {
   private open(): void {
     this.opened = true;
     approvals.set(this.id, this);
+    const port = this.host === undefined ? undefined : approvalHosts.get(this.host);
+    if (port !== undefined) {
+      this.hostPort = port;
+      port.onDisconnect.addListener(() => this.close());
+      port.postMessage({ id: this.id } satisfies ApprovalHostMessage);
+      return;
+    }
     chrome.windows
       .create({ url: chrome.runtime.getURL(`index.html#/approve/${this.id}`), type: "popup", width: 420, height: 640 })
       .then((window) => {
@@ -285,6 +306,9 @@ function deferred<T>() {
 }
 
 const approvals = new Map<string, ApprovalWindow>();
+
+/** Wallet pages that show their own request's approval, by the `host` they connected as. */
+const approvalHosts = new Map<string, chrome.runtime.Port>();
 
 /** How long a page told there's nothing left to approve has to close itself before it's closed. */
 const CLOSE_GRACE_MS = 1_000;
@@ -317,8 +341,8 @@ async function askToTurnOn(prompt: TurnOnPrompt): Promise<boolean> {
   }
 }
 
-function openSigningApproval(context: { origin: string; chain: string }): SigningApproval {
-  const approval = new ApprovalWindow();
+function openSigningApproval(context: ApprovalContext): SigningApproval {
+  const approval = new ApprovalWindow(context.host);
   return {
     unlock: async () => (await approval.ask({ kind: "unlock", ...context }))?.approved === true,
     confirm: async (prompt) => (await approval.ask({ kind: "sign", ...prompt }))?.approved === true,
@@ -461,6 +485,9 @@ function fromWalletPage(sender: chrome.runtime.MessageSender): boolean {
   return sender.id === chrome.runtime.id && (sender.url?.startsWith(chrome.runtime.getURL("")) ?? false);
 }
 
+/** The page a wallet page's request names to show its approval (`APPROVAL_HOST_PORT`), if any. */
+const hostOf = (message: { host?: unknown }) => (typeof message.host === "string" && message.host !== "" ? message.host : undefined);
+
 /** A wallet page's `slot`, if the wallet has a Chain Module for it. */
 function supportedSlot(slot: unknown): number {
   const n = Number(slot);
@@ -600,7 +627,7 @@ async function route(message: BackgroundMessage, sender: chrome.runtime.MessageS
     case "send.start":
       // The wallet's own Send: resolves once broadcast, or once a `/v1` server accepted it.
       if (!fromWalletPage(sender)) throw new ProviderRpcError(ErrorCode.Unauthorized, "Unknown requester.");
-      return sends.send(await onSlot(message.slot), { outputs: Array.isArray(message.outputs) ? (message.outputs as TransferOutput[]) : [] });
+      return sends.send(await onSlot(message.slot), { outputs: Array.isArray(message.outputs) ? (message.outputs as TransferOutput[]) : [] }, undefined, hostOf(message));
     case "send.spendable":
       // What a Send on the Slot can spend now, per asset.
       if (!fromWalletPage(sender)) throw new ProviderRpcError(ErrorCode.Unauthorized, "Unknown requester.");
@@ -616,7 +643,7 @@ async function route(message: BackgroundMessage, sender: chrome.runtime.MessageS
     case "deposit.start":
       // Resolves once the M5 is broadcast (after the user's approval).
       if (!fromWalletPage(sender)) throw new ProviderRpcError(ErrorCode.Unauthorized, "Unknown requester.");
-      return deposits.start(await onSlot(message.slot), String(message.amount ?? ""));
+      return deposits.start(await onSlot(message.slot), String(message.amount ?? ""), hostOf(message));
     case "deposit.list":
       if (!fromWalletPage(sender)) throw new ProviderRpcError(ErrorCode.Unauthorized, "Unknown requester.");
       return deposits.list(supportedSlot(message.slot));
@@ -675,8 +702,13 @@ async function routeVault(message: Extract<BackgroundMessage, { kind: `vault.${s
 // Someone using a wallet page counts as activity for the auto-lock. Over a port, not a message: a
 // page may close mid-report (the approval window does, right after a click), and nothing replies.
 chrome.runtime.onConnect.addListener((port) => {
-  if (port.name !== ACTIVITY_PORT || port.sender === undefined || !fromWalletPage(port.sender)) return;
-  port.onMessage.addListener(() => vault.touch().catch(console.error));
+  if (port.sender === undefined || !fromWalletPage(port.sender)) return;
+  if (port.name === ACTIVITY_PORT) port.onMessage.addListener(() => vault.touch().catch(console.error));
+  if (port.name.startsWith(APPROVAL_HOST_PORT)) {
+    const host = port.name.slice(APPROVAL_HOST_PORT.length);
+    approvalHosts.set(host, port);
+    port.onDisconnect.addListener(() => approvalHosts.delete(host));
+  }
 });
 
 chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendResponse) => {

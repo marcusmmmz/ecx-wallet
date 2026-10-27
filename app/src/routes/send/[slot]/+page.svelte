@@ -2,7 +2,8 @@
   import { page } from "$app/state";
   import { parseAmount } from "@ecx/wallet";
   import { assetTrust, shortAsset } from "$lib/asset";
-  import { listChains, spendable, startSend, type AssetAmount, type ChainInfo, type SendResult } from "$lib/background";
+  import { hostApprovals, listChains, spendable, startSend, type AssetAmount, type ChainInfo, type SendResult } from "$lib/background";
+  import Approval from "$lib/Approval.svelte";
   import Icon from "$lib/Icon.svelte";
   import TopBar from "$lib/TopBar.svelte";
   import { amountText, unit } from "$lib/unit.svelte";
@@ -24,6 +25,8 @@
   let nextId = 0;
   let rows = $state<Row[]>([]);
   let busy = $state(false);
+  /** The approval of this screen's own request, shown in place of the form while it waits. */
+  let approvalId = $state<string | null>(null);
   let done = $state<SendResult | undefined>(undefined);
   let copied = $state(false);
   let error = $state("");
@@ -101,11 +104,13 @@
       return;
     }
     busy = true;
+    const approvals = hostApprovals((id) => (approvalId = id));
     try {
-      done = await startSend(slot, outputs);
+      done = await startSend(slot, outputs, approvals.host);
     } catch (err) {
       error = (err as Error).message;
     } finally {
+      approvals.stop();
       busy = false;
     }
   }
@@ -119,6 +124,10 @@
   const shortTxid = (txid: string) => `${txid.slice(0, 10)}…${txid.slice(-8)}`;
 </script>
 
+{#if approvalId !== null}
+  <!-- This screen's own request, approved in place: a window would close the toolbar popup. -->
+  {#key approvalId}<Approval id={approvalId} hosted ondone={() => (approvalId = null)} />{/key}
+{:else}
 <main class="screen" data-screen-ready={loaded ? "" : undefined}>
   <TopBar title="Send on {info?.name ?? `Slot ${slot}`}" back="#/chain/{slot}" />
 
@@ -188,6 +197,7 @@
 
   {#if error}<p class="error" role="alert" data-error>{error}</p>{/if}
 </main>
+{/if}
 
 <style>
   .row-head {

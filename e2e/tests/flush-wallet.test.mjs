@@ -10,7 +10,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { encodeTx, parseTx } from "@ecx/stub-server/bitcoin-tx";
-import { ABANDON, activitySettled, BROWSERS, DIST, homeSettled, importWallet, launchWallet, openWalletPage, ROOT, serveFlushEsplora, serveL1Esplora, setUpWallet } from "../harness.mjs";
+import { ABANDON, activitySettled, answerIn, approvalIn, BROWSERS, DIST, homeSettled, importWallet, launchWallet, openWalletPage, ROOT, serveFlushEsplora, serveL1Esplora, setUpWallet } from "../harness.mjs";
 
 const wallet = await importWallet();
 const [vault, flush] = await Promise.all([
@@ -113,7 +113,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
     await page.close();
   });
 
-  test("Send on Flush: built from the wallet's ECX, reviewed in the approval window, broadcast, and shown with its txid", async () => {
+  test("Send on Flush: built from the wallet's ECX, reviewed in place, broadcast, and shown with its txid", async () => {
     const page = await openWalletPage(session, "#/send/99");
     await page.waitForSelector('[data-send-asset] option[value=""]', { timeout: 20_000 });
     const option = await page.$eval('[data-send-row="0"] [data-send-asset] option[value=""]', (e) => e.textContent.trim());
@@ -124,7 +124,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
     const before = stub.broadcasts().length;
     await page.click("[data-send-submit]");
 
-    const approval = await session.waitForApprovalWindow({ timeout: 20_000 });
+    const approval = await approvalIn(page, { timeout: 20_000 });
     await approval.waitForSelector("[data-output]");
     const review = await approval.evaluate(() => ({
       origin: document.querySelector("[data-origin]").textContent.trim(),
@@ -133,7 +133,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
     assert.equal(review.origin, "This wallet (Send on Flush)");
     assert.equal(review.destinations[0], PAY_TO);
     assert.equal(review.destinations.length, 2, "and change");
-    await approval.click("[data-approve]");
+    await answerIn(approval, "[data-approve]");
 
     await page.waitForSelector("[data-send-done], [data-error]", { timeout: 20_000 });
     assert.equal(await page.$eval("[data-error]", (e) => e.textContent).catch(() => null), null);

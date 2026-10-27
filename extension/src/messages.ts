@@ -85,12 +85,12 @@ export type BackgroundMessage =
   | { kind: "history.reported"; slot?: number }
   | { kind: "history.cached"; slot?: number }
   // The wallet's own Send (pull path): wallet pages only.
-  | { kind: "send.start"; slot: number; outputs: { asset: string; amount: string; to: { address: string } }[] }
+  | { kind: "send.start"; slot: number; outputs: { asset: string; amount: string; to: { address: string } }[]; host?: string }
   | { kind: "send.spendable"; slot: number }
   | { kind: "send.refused"; slot: number }
   | { kind: "send.dismissRefused"; slot: number }
   // Deposit from the main chain to a Slot, and the Slot's pending Deposits: wallet pages only.
-  | { kind: "deposit.start"; slot: number; amount: string }
+  | { kind: "deposit.start"; slot: number; amount: string; host?: string }
   | { kind: "deposit.list"; slot: number }
   | { kind: "deposit.dismiss"; txid: string }
   | { kind: "deposit.refused"; slot: number }
@@ -105,3 +105,16 @@ export type BackgroundMessage =
 
 /** The port wallet pages report use on (activity for the auto-lock): one "used" message per use. */
 export const ACTIVITY_PORT = "vault.activity";
+
+/**
+ * A wallet page that shows its own request's approval (the Send or Deposit screen, in the toolbar
+ * popup, which closes if a window takes focus) connects as `approval.host:<host>` and passes the
+ * same `host` with the request. The background posts `ApprovalHostMessage`s on it instead of
+ * opening a window; the page disconnecting counts as closing that window.
+ */
+export const APPROVAL_HOST_PORT = "approval.host:";
+
+/** An approval for the hosting page to show (`id`), or none left to show (`id` null). */
+export interface ApprovalHostMessage {
+  id: string | null;
+}

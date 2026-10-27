@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, test } from "node:test";
 import { addressScript, encodeTx, parseTx, scripthash } from "@ecx/stub-server/bitcoin-tx";
-import { activitySettled, BROWSERS, homeSettled, importWallet, launchWallet, openWalletPage, serveEsplora, serveL1Esplora, setUpWallet } from "../harness.mjs";
+import { activitySettled, answerIn, approvalIn, BROWSERS, homeSettled, importWallet, launchWallet, openWalletPage, serveEsplora, serveL1Esplora, setUpWallet } from "../harness.mjs";
 
 const GENESIS = "a7754ce0debc40baddbd8c47e79d19209685f22c63edaaf8b69cf54116374d7f";
 const POLICY_ASSET = "5836dcc06130dcf6a65b6ac493813fd65559955283e44cc3f07966294eccb2c8";
@@ -232,7 +232,8 @@ for (const browserName of BROWSERS) describe(browserName, () => {
 
     test("the Clear View shows the Deposit, credited to the wallet's own Slot 24 address, and the Treasury it grows", async () => {
       const page = await startDeposit(session, "50000");
-      const approval = await session.waitForApprovalWindow({ timeout: 20_000 });
+      const approval = await approvalIn(page, { timeout: 20_000 });
+      assert.equal((await session.approvalWindows()).length, 0, "the Deposit screen shows its approval itself: a window would close the popup");
       const shown = await readDepositView(approval);
 
       assert.equal(shown.clearView, true);
@@ -334,9 +335,9 @@ for (const browserName of BROWSERS) describe(browserName, () => {
       });
       Object.assign(L1, l1Config([FUNDING, TREASURY_TX, pending]));
       const page = await startDeposit(session, "5000");
-      const approval = await session.waitForApprovalWindow({ timeout: 20_000 });
+      const approval = await approvalIn(page, { timeout: 20_000 });
       assert.match((await readDepositView(approval)).treasury, /Treasury: 0\.0012 ECX → 0\.00125 ECX/);
-      await approval.click("[data-reject]");
+      await answerIn(approval, "[data-reject]");
       assert.equal((await outcome(page)).error, "The user rejected the request.");
       await page.close();
       const fetched = l1Stub.requests().filter((r) => r === `/tx/${FUNDING.txid}/hex`).length;
@@ -379,7 +380,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
 
     test("a Deposit the server no longer knows can be stopped tracking", async () => {
       const page = await startDeposit(session, "5000");
-      await (await session.waitForApprovalWindow({ timeout: 20_000 })).click("[data-approve]");
+      await answerIn(await approvalIn(page, { timeout: 20_000 }), "[data-approve]");
       const { txid } = await outcome(page);
       await page.close();
       L1.txs = L1.txs.filter((t) => parseTx(t.hex).txid !== txid); // dropped from the server's mempool
@@ -408,7 +409,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
       // Answering truthfully now, it gets the real one: the lie wasn't kept.
       L1.txHexOverrides = {};
       const retry = await startDeposit(session, "5000");
-      await (await session.approvalWindows().then(() => session.waitForApprovalWindow({ timeout: 20_000 }))).click("[data-reject]");
+      await answerIn(await approvalIn(retry, { timeout: 20_000 }), "[data-reject]");
       assert.equal((await outcome(retry)).error, "The user rejected the request.");
       await retry.close();
       assert.equal((await session.approvalWindows()).length, 0);
@@ -419,14 +420,14 @@ for (const browserName of BROWSERS) describe(browserName, () => {
       L1.txs = [FUNDING];
       const broadcasts = l1Stub.broadcasts().length;
       const page = await startDeposit(session, "5000");
-      const approval = await session.waitForApprovalWindow({ timeout: 20_000 });
+      const approval = await approvalIn(page, { timeout: 20_000 });
       const shown = await readDepositView(approval);
       assert.equal(shown.dangerous.length, 2);
       assert.match(shown.dangerous.join("\n"), /no Treasury on the main chain's server, so this is its first Deposit.*funds can be lost/);
       assert.match(shown.treasury, /Treasury: 0 ECX → 0\.00005 ECX/);
       assert.ok(shown.inputs.every((i) => !/Treasury/.test(i)), "no Treasury is spent");
 
-      await approval.click("[data-reject]");
+      await answerIn(approval, "[data-reject]");
       assert.equal((await outcome(page)).error, "The user rejected the request.");
       assert.equal(l1Stub.broadcasts().length, broadcasts);
       await page.close();
@@ -435,7 +436,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
     test("a refused broadcast says nothing was sent, and how to try again", async () => {
       L1.refuseBroadcast = 'sendrawtransaction RPC error: {"code":-26,"message":"bad-txns-inputs-missingorspent"}';
       const page = await startDeposit(session, "5000");
-      await (await session.waitForApprovalWindow({ timeout: 20_000 })).click("[data-approve]");
+      await answerIn(await approvalIn(page, { timeout: 20_000 }), "[data-approve]");
       const { error } = await outcome(page);
       assert.match(error, /missingorspent.*Nothing was sent\. If another Deposit to Slot 24 took its Treasury first, start again/);
       assert.deepEqual(await readDeposits(session), []);
@@ -453,9 +454,8 @@ for (const browserName of BROWSERS) describe(browserName, () => {
     Object.assign(L1, l1Config([FUNDING, TREASURY_TX]));
     L1.refuseBroadcast = 'sendrawtransaction RPC error: {"code":-26,"message":"min relay fee not met"}';
     const page = await startDeposit(session, "5000");
-    const approval = await session.waitForApprovalWindow({ timeout: 20_000 });
+    await answerIn(await approvalIn(page, { timeout: 20_000 }), "[data-approve]");
     await page.close();
-    await approval.click("[data-approve]");
 
     const home = await session.openPage("index.html#/");
     await home.waitForSelector("[data-deposit-refused]", { timeout: 20_000 });

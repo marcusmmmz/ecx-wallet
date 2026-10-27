@@ -1,7 +1,8 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { parseAmount } from "@ecx/wallet";
-  import { l1Cached, l1Reported, listChains, showReport, startDeposit, type ChainInfo, type ChainReport, type ShownReport } from "$lib/background";
+  import { hostApprovals, l1Cached, l1Reported, listChains, showReport, startDeposit, type ChainInfo, type ChainReport, type ShownReport } from "$lib/background";
+  import Approval from "$lib/Approval.svelte";
   import Icon from "$lib/Icon.svelte";
   import TopBar from "$lib/TopBar.svelte";
   import { amountText, unit } from "$lib/unit.svelte";
@@ -17,6 +18,8 @@
   let shown = $state<ShownReport>({ refreshing: true });
   let amount = $state("");
   let busy = $state(false);
+  /** The approval of this screen's own request, shown in place of the form while it waits. */
+  let approvalId = $state<string | null>(null);
   let done = $state<{ txid: string; server: string } | undefined>(undefined);
   let error = $state("");
 
@@ -35,16 +38,22 @@
     busy = true;
     error = "";
     done = undefined;
+    const approvals = hostApprovals((id) => (approvalId = id));
     try {
-      done = await startDeposit({ slot, amount: parseAmount(amount, coin.find((a) => a.id === ""), unit.value) });
+      done = await startDeposit({ slot, amount: parseAmount(amount, coin.find((a) => a.id === ""), unit.value) }, approvals.host);
     } catch (err) {
       error = (err as Error).message;
     } finally {
+      approvals.stop();
       busy = false;
     }
   }
 </script>
 
+{#if approvalId !== null}
+  <!-- This screen's own request, approved in place: a window would close the toolbar popup. -->
+  {#key approvalId}<Approval id={approvalId} hosted ondone={() => (approvalId = null)} />{/key}
+{:else}
 <main class="screen" data-screen-ready>
   <TopBar title="Deposit to {target}" back="#/" />
 
@@ -105,6 +114,7 @@
   {/if}
   {#if error}<p class="error" role="alert" data-error>{error}</p>{/if}
 </main>
+{/if}
 
 <style>
   .amount {

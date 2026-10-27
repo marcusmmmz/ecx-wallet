@@ -17,6 +17,17 @@ export interface SignPrompt {
   hints?: SigningRequest["hints"];
 }
 
+/**
+ * Where an approval shows: `host` names a wallet page that asked for it and shows it itself (the
+ * wallet's own Send or Deposit, in the toolbar popup, which closes if another window takes focus);
+ * without one, it opens its own window.
+ */
+export interface ApprovalContext {
+  origin: string;
+  chain: string;
+  host?: string;
+}
+
 /** One approval window for one Signing Request; it opens on the first thing it has to show. */
 export interface SigningApproval {
   /** Asks the user to unlock; true once the wallet is unlocked, false if they close the window. */
@@ -33,7 +44,7 @@ export interface SigningDeps {
   /** The Slot's Chain Module (only called for a supported Slot). */
   chainModule(slot: number): Promise<ChainModule> | undefined;
   /** A window for the approval of one Signing Request from `origin` for `chain`. */
-  openSigningApproval(context: { origin: string; chain: string }): SigningApproval;
+  openSigningApproval(context: ApprovalContext): SigningApproval;
   isUnlocked(): Promise<boolean>;
   /** The Slot's Starter; throws while locked. */
   starter(slot: number): Promise<Starter>;

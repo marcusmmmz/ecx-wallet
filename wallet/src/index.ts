@@ -12,7 +12,7 @@ export {
   type SigningApproval,
   type SignPrompt,
 } from "./provider";
-export { chainModuleFor, reviewAndSign, type SigningDeps } from "./signing";
+export { chainModuleFor, reviewAndSign, type ApprovalContext, type SigningDeps } from "./signing";
 export { parseSigningRequest, SUPPORTED_MAJOR, type SigningRequest } from "./signing-request";
 export { CoreModule, CoreModuleError, type CoreArg } from "./wasm";
 export { loadVaultModule, type KdfParams, type VaultModule } from "./vault-module";

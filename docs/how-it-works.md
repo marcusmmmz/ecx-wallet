@@ -22,7 +22,8 @@ website → client discovery → injected Provider (inpage.ts, main world)
 ```
 
 - The background takes the requester's origin from the browser's `sender`, never from the request.
-- The approval window is the app page at `#/approve/<id>`. It talks to the background only through `runtime.sendMessage`.
+- The approval window is the app page at `#/approve/<id>` (`app/src/lib/Approval.svelte`). It talks to the background only through `runtime.sendMessage`.
+- **The wallet's own Send and Deposit approve in place.** The toolbar popup closes whenever another window takes focus, so those screens don't open a window: each connects a port (`approval.host:<host>`, `hostApprovals`) and passes `host` with its request, and the background posts the approval's id on that port. The screen then shows the same `Approval` component where its form was. Closing the popup disconnects the port, which rejects the request, as closing an approval window does. An app's request, and a `/v1` server's, still get a window.
 - Wallet pages (home, Send, Settings…) talk to the background the same way, one message kind per action (`vault.*`, `send.start`, `history.reported`…). The extension's router is in `extension/src/background.ts`.
 
 ## Vault
@@ -137,7 +138,7 @@ A ticker of the Chain Entry's, in any case, is refused, with the reason shown. A
 1. It gathers the **Spendable** coins: confirmed coins, plus outputs of trusted unconfirmed transactions, less held coins.
 2. It picks the first unused change address (else `/1/19`) and the fee rate.
 3. The Slot's module builds it (`build_transfer`): largest coins first, dust change goes to the fee. `elements.wasm` builds a PSET from the coins as reported, and refuses confidential destinations. `flush.wasm` builds a PSBT from each coin's whole transaction (`/tx/:txid/hex`) and pays at least 1 sat/vB. A Send of ECX never spends a value-0 output. A Send of an asset spends only confirmed coins carrying that asset, as their transactions' markers say, and lists its tokens with a transfer marker (ADR 0013). The wallet refuses to go on if it spends an outpoint the server never listed.
-4. The module's Clear View goes to the approval window as "This wallet (Send on <chain>)". It must be exactly the payments asked for, plus outputs back to the wallet (`isTransferAskedFor`).
+4. The module's Clear View is shown in place, on the Send screen, as "This wallet (Send on <chain>)". It must be exactly the payments asked for, plus outputs back to the wallet (`isTransferAskedFor`).
 5. After approval: `sign`, `finalize`, `POST /tx`. If Flush's explorer refuses with the node's code alone, the reason comes from `POST /txs/test`.
 6. The coins it spent are **held** in `storage.local` (`held:<txid>`) until it confirms (on Flush: any block, preconf included), or until the server hasn't known it for 6 blocks.
 
@@ -145,7 +146,7 @@ A ticker of the Chain Entry's, in any case, is refused, with the reason shown. A
 
 **One Send per Slot at a time**, the wallet's own or a website's (`sendTransfer`, below), so two never pick the same coins.
 
-**A Send that fails after approval:** the toolbar popup closes when the approval window opens, so the screen that asked may be gone. The failure is kept for the session (`send.refused`) and shown in the Activity feed with "Try again" until closed.
+**A Send that fails after approval:** the screen that asked may be gone by then (the user closed the popup). The failure is kept for the session (`send.refused`) and shown in the Activity feed with "Try again" until closed.
 
 ## Deposit
 
@@ -156,7 +157,7 @@ A ticker of the Chain Entry's, in any case, is refused, with the reason shown. A
 1. The Slot's Chain Module says what the Deposit credits (`depositDestination`). For Elements, that's its first receive address as UTF-8, with a minimum of 3,000 sats, credited exactly the value. For Flush, it's `s99_<address>_<checksum>` on betanet (the checksum is the first 6 hex digits of the SHA-256 of `s99_<address>_`), with a minimum of 294 sats; `flush.wasm` declares it only while its Chain Entry pins its Slot's activation (ADR 0004).
 2. `treasury.ts` finds the Slot's Treasury on eCash's Esplora by #15's strict exactly-one rule (`/scripthash/:h/utxo`, following pending M5s). With none, only a pinned `activation` in the Slot's Chain Entry allows a first Deposit.
 3. `l1.wasm`'s `build_deposit` builds the M5 from the account's confirmed coins: largest first, the fee at the 6-block estimate, change to the first unused change address. Every input carries its previous transaction, so the module checks every value itself. It refuses an M5 eCash won't relay: over 10,000 vB, or over 1,000 vB when the Treasury it spends is a pending M5's, and a destination over 100 bytes (Backbone's limits, #57).
-4. The L1 Decoder's Clear View goes to the approval window. After approval: `sign`, `finalize`, `POST /tx`.
+4. The L1 Decoder's Clear View is shown in place, on the Deposit screen. After approval: `sign`, `finalize`, `POST /tx`.
 
 **The replay marker:** `l1.wasm` refuses to check, decode, sign or finalize any spend without it: betanet's `nLockTime` 499999999 and a non-final `nSequence`.
 

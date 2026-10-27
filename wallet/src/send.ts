@@ -29,7 +29,7 @@ import {
 import { ErrorCode, ProviderRpcError } from "./errors";
 import { feeRate, QUERIES_AT_ONCE, type EsploraClient } from "./esplora";
 import { checkedOrder, isTransferAskedFor, WATCHED_CHANGE_ADDRESSES, WATCHED_RECEIVE_ADDRESSES, type PullPath, type SendResult } from "./pull-path";
-import { rejected, type SignPrompt, type SigningApproval } from "./signing";
+import { rejected, type ApprovalContext, type SignPrompt, type SigningApproval } from "./signing";
 import { speaksEsplora } from "./server-api";
 import { SidechainServerError, type TransferOrder } from "./sidechain-server";
 
@@ -60,7 +60,7 @@ export interface SendDeps extends Keys, ChainModules {
   pullPath: PullPath;
   /** A client for `network`'s default server, when it speaks Esplora. */
   esplora(entry: ChainEntry, network: NetworkEntry): EsploraClient;
-  openSigningApproval(context: { origin: string; chain: string }): SigningApproval;
+  openSigningApproval(context: ApprovalContext): SigningApproval;
   isUnlocked(): Promise<boolean>;
   held: HeldStore;
   /** Where the Slot's last Send refused after approval is kept for the session. */
@@ -209,7 +209,7 @@ export function createSends(deps: SendDeps) {
   }
 
   /** One Send, once the Slot's previous one is done. */
-  async function sendNow(slot: number, order: TransferOrder, from: { origin: string } | undefined): Promise<SendResult> {
+  async function sendNow(slot: number, order: TransferOrder, from: { origin: string } | undefined, host: string | undefined): Promise<SendResult> {
     const checked = checkedOrder(order);
     const target = await routing.slot(slot);
     const server = esplora(target);
@@ -226,7 +226,7 @@ export function createSends(deps: SendDeps) {
     }
 
     const requester = from?.origin ?? sendRequester(target.entry.name);
-    const approval = deps.openSigningApproval({ origin: requester, chain: target.chain });
+    const approval = deps.openSigningApproval({ origin: requester, chain: target.chain, ...(host === undefined ? {} : { host }) });
     let approved = false;
     let broadcast = false;
     try {
@@ -316,11 +316,12 @@ export function createSends(deps: SendDeps) {
     /**
      * Sends `order` from the Slot. Resolves once broadcast (or accepted by a `/v1` server); throws on
      * refusal or rejection. `from` is the Sidechain App that asked (`sendTransfer`): the approval
-     * names it, and a failure after approval goes back to it rather than to the Activity feed. One
-     * Send per Slot at a time, so two never pick the same coins.
+     * names it, and a failure after approval goes back to it rather than to the Activity feed.
+     * `host` is the wallet page that shows the approval itself (`ApprovalContext`). One Send per
+     * Slot at a time, so two never pick the same coins.
      */
-    send(slot: number, order: TransferOrder, from?: { origin: string }): Promise<SendResult> {
-      const run = () => sendNow(slot, order, from);
+    send(slot: number, order: TransferOrder, from?: { origin: string }, host?: string): Promise<SendResult> {
+      const run = () => sendNow(slot, order, from, host);
       const result = (queues.get(slot) ?? Promise.resolve()).then(run, run);
       queues.set(slot, result.catch(() => {}));
       return result;

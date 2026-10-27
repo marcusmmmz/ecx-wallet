@@ -95,6 +95,27 @@ export function activityReporter(): { used(): void; stop(): void } {
   };
 }
 
+/** The background's prefix for a page that shows its own request's approval (extension/src/messages.ts). */
+const APPROVAL_HOST_PORT = "approval.host:";
+
+/**
+ * Shows this page's own request's approval here, not in a window, which would take focus and close
+ * the toolbar popup: pass `host` with the request; `onshow` gets each approval's id, and null once
+ * there's none to show. `stop` once the request settles; closing the page rejects it.
+ */
+export function hostApprovals(onshow: (id: string | null) => void): { host: string; stop(): void } {
+  const host = crypto.randomUUID();
+  const port = chrome.runtime.connect({ name: `${APPROVAL_HOST_PORT}${host}` });
+  port.onMessage.addListener((message: { id?: string | null }) => onshow(message?.id ?? null));
+  return {
+    host,
+    stop() {
+      port.disconnect();
+      onshow(null);
+    },
+  };
+}
+
 /** Calls `onchange` with each new auto-lock deadline the background announces (null once locked); returns the unsubscribe. */
 export function onLockDeadline(onchange: (locksAt: number | null) => void): () => void {
   const listener = (message: unknown) => {
@@ -198,8 +219,8 @@ export const cachedHistory = (slot?: number) => send<ChainHistory | null>({ kind
  * the transfer (over Esplora) or its Sidechain Server does (`/v1`), the user reviews it in an
  * approval window, the wallet signs it and broadcasts or submits it. Throws on refusal or rejection.
  */
-export const startSend = (slot: number, outputs: { asset: string; amount: string; to: { address: string } }[]) =>
-  send<SendResult>({ kind: "send.start", slot, outputs });
+export const startSend = (slot: number, outputs: { asset: string; amount: string; to: { address: string } }[], host?: string) =>
+  send<SendResult>({ kind: "send.start", slot, outputs, host });
 
 /** Per asset, what a Send on the Slot can spend now (confirmed, plus the wallet's own trusted change). */
 export const spendable = (slot: number) => send<AssetAmount[]>({ kind: "send.spendable", slot });
@@ -214,8 +235,8 @@ export const dismissRefusedSend = (slot: number) => send<null>({ kind: "send.dis
  * Deposits `amount` sats of confirmed eCash to the Slot: the wallet builds the M5, the user reviews
  * it in an approval window, the wallet signs and broadcasts it. Throws on refusal or rejection.
  */
-export const startDeposit = (order: { slot: number; amount: string }) =>
-  send<{ txid: string; server: string }>({ kind: "deposit.start", ...order });
+export const startDeposit = (order: { slot: number; amount: string }, host?: string) =>
+  send<{ txid: string; server: string }>({ kind: "deposit.start", ...order, host });
 
 /** The Slot's pending Deposits and where each stands. */
 export const listDeposits = (slot: number) => send<DepositStatus[]>({ kind: "deposit.list", slot });

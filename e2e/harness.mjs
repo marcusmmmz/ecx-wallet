@@ -427,6 +427,24 @@ export async function turnOnChain(page, slot, on = true) {
 }
 
 /**
+ * The approval a wallet page shows in place of itself (its own Send or Deposit: a window would
+ * close the toolbar popup), once rendered. Returns `page`, to use as the approval window was.
+ */
+export async function approvalIn(page, { timeout = 10_000 } = {}) {
+  await page.waitForSelector("[data-approval-ready]", { timeout });
+  return page;
+}
+
+/**
+ * Answers the approval `page` shows in place with `button` (`[data-approve]`, `[data-reject]`) and
+ * waits until the page is back to its own screen, so closing it can't cut the answer off.
+ */
+export async function answerIn(page, button) {
+  await page.click(button);
+  await page.waitForFunction(() => document.querySelector("[data-approval-ready]") === null, { timeout: 10_000 });
+}
+
+/**
  * Waits until the home page's Activity tab has read its history: not refreshing, and showing
  * entries, "No transactions yet" or why it couldn't read them. Close the page only after, as with
  * `homeSettled` (which waits for the Home tab's cards, not shown here).
