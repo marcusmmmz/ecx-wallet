@@ -609,16 +609,107 @@ pub fn transfer_marker(outputs: &[(u32, &str, u64)]) -> Result<Vec<u8>, String> 
     let mut body = TAG.to_vec();
     body.extend([0, 0, outputs.len() as u8]);
     for &(n, id, amount) in outputs {
-        let mut internal: Vec<u8> = (0..id.len()).step_by(2).map(|i| u8::from_str_radix(id.get(i..i + 2).unwrap_or("x"), 16)).collect::<Result<_, _>>().map_err(|_| "an asset id is hex")?;
-        if internal.len() != 32 {
-            return Err("an asset id is 32 bytes".into());
-        }
-        internal.reverse();
         body.extend(varint(n as u64));
         body.push(TokenKind::Asset as u8);
-        body.extend(internal);
+        body.extend(internal(id)?);
         body.extend(varint(amount));
     }
+    marker_script(body)
+}
+
+/// A trade's marker (kind 21, `swap_pools`, as the node's `swaproute`, `buyfromlaunch` and
+/// `selltolaunch` write it): `amount_in` of `asset_in` through `pools`, at least `min_out` out, ECX
+/// paid out or back to `chn_to` (a script; empty when ECX is on neither side). `outputs` lists, in
+/// increasing `n`, a token change `(asset id, amount)` or `None` for a result.
+pub fn swap_pools_marker(asset_in: &str, pools: &[&str], amount_in: u64, min_out: u64, chn_to: &[u8], outputs: &[(u32, Option<(&str, u64)>)]) -> Result<Vec<u8>, String> {
+    if outputs.len() > MAX_LISTED {
+        return Err(format!("more than {MAX_LISTED} listed outputs"));
+    }
+    if outputs.windows(2).any(|w| w[0].0 >= w[1].0) {
+        return Err("listed outputs out of order".into());
+    }
+    if pools.is_empty() || pools.len() > 0xFC || chn_to.len() > 0xFC {
+        return Err("1 to 252 pools, and a short chn_to".into());
+    }
+    let mut body = TAG.to_vec();
+    body.extend([0, 21]);
+    body.extend(internal(asset_in)?);
+    body.push(pools.len() as u8);
+    for pool in pools {
+        body.extend(internal(pool)?);
+    }
+    body.extend(varint(amount_in));
+    body.extend(varint(min_out));
+    body.push(chn_to.len() as u8);
+    body.extend(chn_to);
+    body.push(outputs.len() as u8);
+    for &(n, token) in outputs {
+        body.extend(varint(n as u64));
+        match token {
+            Some((id, amount)) => {
+                body.push(TokenKind::Asset as u8);
+                body.extend(internal(id)?);
+                body.extend(varint(amount));
+            }
+            None => body.push(0xFF),
+        }
+    }
+    marker_script(body)
+}
+
+/// A pool's kind (`PoolParams`, backbone-flush `state.h`), as `getpool` reports it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PoolKind {
+    /// 0 constant product, 1 stable, 2 weighted, 3 a launch's curve, 4 concentrated, 5 an order book.
+    pub curve: u8,
+    /// Millionths.
+    pub fee: u32,
+    /// Stable pools' amplification; else 0.
+    pub amp: u32,
+    /// Weighted pools: the weight, in percent, of the asset whose id is lower (internal order); else 0.
+    pub weight0: u8,
+    /// Bit 0: the fee follows the pool's volatility.
+    pub flags: u8,
+}
+
+/// The fee of every pool `addliquidity` makes (`LEGACY_FEE`: 0.3 %).
+const LEGACY_FEE: u32 = 3000;
+
+/// The id of the pool of `a` and `b` (display order, either way round) of `kind` (`PoolIdOf`,
+/// backbone-flush `curves.cpp`), display order: SHA-256 of "Layers pool", the two ids lower first,
+/// and the kind; for the kind `addliquidity` makes, of "BitAssets pool" and the ids (`PoolId`).
+pub fn pool_id(a: &str, b: &str, kind: &PoolKind) -> Result<String, String> {
+    let (a, b) = (internal(a)?, internal(b)?);
+    let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+    let legacy = kind.curve == 0 && kind.fee == LEGACY_FEE && kind.flags == 0;
+    let tag: &[u8] = if legacy { b"BitAssets pool" } else { b"Layers pool" };
+    let mut data = vec![tag.len() as u8];
+    data.extend(tag);
+    data.extend(lo);
+    data.extend(hi);
+    if !legacy {
+        data.push(kind.curve);
+        data.extend(kind.fee.to_le_bytes());
+        data.extend(kind.amp.to_le_bytes());
+        data.extend([kind.weight0, kind.flags]);
+    }
+    let mut digest = sha256::Hash::hash(&data).to_byte_array();
+    digest.reverse();
+    Ok(crate::hex(&digest))
+}
+
+/// An id in display hex, in internal order.
+fn internal(id: &str) -> Result<Vec<u8>, String> {
+    let mut bytes: Vec<u8> = (0..id.len()).step_by(2).map(|i| u8::from_str_radix(id.get(i..i + 2).unwrap_or("x"), 16)).collect::<Result<_, _>>().map_err(|_| "an id is hex")?;
+    if bytes.len() != 32 {
+        return Err("an id is 32 bytes".into());
+    }
+    bytes.reverse();
+    Ok(bytes)
+}
+
+/// `OP_RETURN` and the minimal push of `body` (`MarkerScript`).
+fn marker_script(body: Vec<u8>) -> Result<Vec<u8>, String> {
     let mut script = vec![0x6A];
     match body.len() {
         0..=75 => script.push(body.len() as u8),

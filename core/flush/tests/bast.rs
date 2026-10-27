@@ -3,7 +3,7 @@
 //! `bast-vectors.json`: 12 live Slot 99 transactions (kinds 1, 2, 7, 18, 20, 21, 23, 24, 25, 26, 27,
 //! 35), recorded 2026-10-25 with the reference decoder of #58, whose listed outputs match the
 //! explorer's `/flush/tx`. The hand-built vectors are #59's (a kind-0 transfer, a control coin).
-use ecx_flush::bast::{asset_id, is_marker, parse, transfer_marker, TokenKind};
+use ecx_flush::bast::{asset_id, is_marker, parse, pool_id, swap_pools_marker, transfer_marker, PoolKind, TokenKind};
 use serde_json::Value;
 
 const VECTORS: &str = include_str!("bast-vectors.json");
@@ -186,4 +186,43 @@ fn a_transfer_marker_is_written_as_the_node_writes_it() {
     assert_eq!(one[1] as usize, one.len() - 2, "a short marker is a direct push");
     assert_eq!(parse(&one).unwrap().outputs[0].n, 3);
     assert!(transfer_marker(&[(1, brosevelt, 1), (0, brosevelt, 1)]).is_err());
+}
+
+#[test]
+fn a_trades_marker_is_written_as_the_node_writes_it() {
+    // Two live launch buys (kind 21 through one pool, ECX in): their result output, then the marker.
+    let ecx = "00".repeat(32);
+    let fork_pool = "2b16f8c06c0f98034bacfe23cec9e36ce96b3d1282766dd957901435354b402a";
+    let chn_to = unhex("0014d2b71e70a5dbfa36767c62f0b169ca766b4189bf");
+    let script = swap_pools_marker(&ecx, &[fork_pool], 50_000, 220_187, &chn_to, &[(0, None)]).unwrap();
+    assert_eq!(
+        script,
+        unhex("6a4c674241535400150000000000000000000000000000000000000000000000000000000000000000012a404b3535149057d96d7682123d6be96ce3c9ce23feac4b03980f6cc0f8162b8285508cb71b160014d2b71e70a5dbfa36767c62f0b169ca766b4189bf0100ff"),
+        "0f18f338…4e33"
+    );
+    let live = vectors().into_iter().find(|v| v["decoded"]["kind"] == 21).unwrap();
+    let f = &live["decoded"]["fields"];
+    let pools = [f["pools"][0].as_str().unwrap()];
+    let script = swap_pools_marker(&ecx, &pools, f["amount_in"].as_u64().unwrap(), f["min_out"].as_u64().unwrap(), &unhex(f["chn_to"].as_str().unwrap()), &[(0, None)]).unwrap();
+    assert_eq!(script, unhex(live["marker_hex"].as_str().unwrap()), "{}", live["txid"]);
+    // Token change of what goes in is listed first, with its amount; no ECX either side: no chn_to.
+    let fork = "6bb2ae6e23e626cd2fba1f8845d8bbc047aeb9a8f4690ee9a21b5d04584dfb03";
+    let sale = parse(&swap_pools_marker(fork, &[fork_pool], 7, 1, &[], &[(0, Some((fork, 3))), (1, None)]).unwrap()).unwrap();
+    assert_eq!(sale.to_json()["fields"]["chn_to"], "");
+    assert_eq!(sale.to_json()["outputs"], serde_json::json!([{ "n": 0, "carries": "asset", "id": fork, "amount": 3 }, { "n": 1, "carries": "result" }]));
+    assert!(swap_pools_marker(&ecx, &[fork_pool], 1, 1, &[], &[(1, None), (0, None)]).is_err());
+}
+
+#[test]
+fn a_pools_id_is_its_assets_and_kind_hashed() {
+    // Live betanet pools, each read with getpool: a launch curve, a legacy pool, a concentrated one with a dynamic fee.
+    let ecx = "00".repeat(32);
+    let flush = "617a6ad47771d6161d35023a90e7b5134ee6317c4f3d38475ec2cde540acb04f";
+    let brosevelt = "7351ccd9fd2f091cce3f9d8e3cd0b95f278885f4610620784b8c64be8b0237c1";
+    let kind = |curve, fee, flags| PoolKind { curve, fee, amp: 0, weight0: 0, flags };
+    assert_eq!(pool_id(flush, &ecx, &kind(3, 5000, 0)).unwrap(), "6e1ead05c56c42bf7be20de55a3ab44e824c32d5e229960b5d700fcd99c728fa");
+    assert_eq!(pool_id(&ecx, brosevelt, &kind(0, 3000, 0)).unwrap(), "de3e837a20bb43ff7d876ac8f981debcd0ef7eae5ee212546c753264095044c2");
+    assert_eq!(pool_id(brosevelt, &ecx, &kind(4, 500, 1)).unwrap(), "2a1dbe3c10bc5781a59dd40e2f516dab62b1d15170c8788a7a5c87a4076cc7a9");
+    // Another kind or fee is another pool.
+    assert_ne!(pool_id(flush, &ecx, &kind(3, 3000, 0)).unwrap(), "6e1ead05c56c42bf7be20de55a3ab44e824c32d5e229960b5d700fcd99c728fa");
 }
