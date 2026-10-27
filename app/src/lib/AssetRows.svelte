@@ -31,7 +31,7 @@
     </p>
   {/if}
   <ul>
-    {#each assetsOf(report) as { asset, amount, unconfirmed, unverified } (asset)}
+    {#each assetsOf(report) as { asset, amount, unconfirmed, unverified, preconfirmed } (asset)}
       {@const entry = view.info.assets.find((a) => a.id === asset)}
       <li class="asset" data-asset={asset}>
         <ChainMark {...assetMark(entry)} size={30} />
@@ -46,6 +46,15 @@
         </span>
         <span class="amounts">
           <strong class="amount" data-balance data-asset={asset}>{amountText(amount, asset, view.info.assets)}</strong>
+          {#if preconfirmed !== undefined}
+            <span
+              class="tiny muted"
+              data-preconfirmed
+              data-asset={asset}
+              title="In a {view.info.name} block that no eCash block anchors yet. It counts and can be spent; until an anchor covers it, {view.info.name} may still replace that block."
+              >{preconfirmed === amount ? "" : `${amountText(preconfirmed, asset, view.info.assets)} `}preconf</span
+            >
+          {/if}
           {#if unconfirmed !== undefined}
             <span class="tiny pending" data-unconfirmed data-asset={asset}>+{amountText(unconfirmed, asset, view.info.assets)} unconfirmed</span>
           {/if}

@@ -1,4 +1,4 @@
-# Flush's explorer is its own Server API, and a Flush block is confirmed once anchored
+# Flush's explorer is its own Server API, and a Flush block is confirmed at once, preconfirmed until anchored
 
 Flush (Slot 99 on betanet, ADR 0014; #56) is read from its explorer, `explorer.blockfab.org/betanet/flush/api`. That explorer is mempool.space's backend, whose electrs fork serves most of what ADR 0002's `"esplora"` covers, plus routes of its own under `/flush/`. Two things about Flush don't fit `"esplora"`:
 
@@ -13,7 +13,7 @@ So the Chain Entry names its server's API as `"flush"`:
 
 `"flush"` is `"esplora"` with these rules added (`esploraConfig` in `wallet/src/server-api.ts`):
 
-- **Confirmed means anchored.** A transaction in a block short of `anchored` counts as unconfirmed everywhere the wallet reads a status: the balance (it shows as "+N unconfirmed"), the history, which coins a Send may spend, and when a Send's held coins are released. A block known to be `final` isn't asked about again.
+- **Any block confirms; a soft one preconfirms.** A transaction in a block counts as confirmed everywhere the wallet reads a status: the balance, the history, which coins a Send may spend, and when a Send's held coins are released. While its block is `soft`, it is **preconfirmed** ("preconf"): the report names the preconf part of each balance (`preconfirmed`), home shows it as "N preconf" under the balance, and Activity marks the transaction "Preconf". A transaction in a block the server no longer knows (a replaced soft block) is unconfirmed again. A block known to be `final` isn't asked about again. (Until 2026-10-27, confirmed meant anchored; see below.)
 - **Stalled** after 5 minutes without a block (`FLUSH_STALL_SECONDS`, 20 slots), from `GET /blocks`'s tip timestamp. The report carries `stalledSince`, and the wallet shows it on home and on Flush's screen.
 
 Some of what the live explorer does differently applies to any Esplora server, so the client now handles it for every chain:
@@ -27,7 +27,8 @@ Flush's module builds from whole transactions (its format is `psbt`, as L1's Dep
 
 - **Keep `"esplora"` and let Flush's module declare finality as a capability:** rejected. `/flush/blocks` is the explorer's route, not something the module computes, and a chain served by a plain electrs would have no way to answer.
 - **Confirmed at `final`:** not for now. Three anchors take about 30 minutes, three times what an eCash confirmation takes, and the wallet already treats one eCash confirmation as enough elsewhere. Whether wallets should wait for `final` was asked of Flush's developer on 2026-10-25. `CONFIRMED_AT` in `wallet/src/esplora.ts` is the one place to change.
-- **Count every block as confirmed, as `"esplora"` does:** rejected. Someone else's payment in a soft block would be spendable, and a replaced block would take it back.
+- **Confirmed means anchored** (the first rule, 2026-10-25 to 2026-10-27): replaced. On betanet an anchor can be over an hour away (314 blocks, about 78 minutes, on 2026-10-27; Flush halts only after 24 hours), so every payment received showed as "unconfirmed" and couldn't be spent for that long. Flush's mempool already treats a soft block's outputs as confirmed (a token in one may be spent). The cost of preconf is that a replaced soft block takes back a payment received in it, and whatever spent it: about what one confirmation risks on any chain. Whether a soft block is replaced in practice is still asked of Flush's developer.
+- **Count every block as confirmed, with no mark:** rejected. It would hide that a soft block can still be replaced.
 - **A stall threshold of one eCash block (10 minutes):** rejected. Flush's own blocks come every 15 seconds; 5 minutes without one is already 20 missed slots.
 - **The explorer's `/flush/status.halted` as the stall signal** (block-fabric/explorer `58882ec`, 2026-10-25): not for now. `halted` is true when blocks of stake have stopped, either because PoS is inactive or because no anchor has covered the chain for `maxUnanchoredSlots` (24 hours). With PoS inactive, Flush still makes BMM blocks, one per eCash block, and they confirm transactions. So `halted` doesn't mean "nothing confirms", which is what "Stalled" tells the user. The tip's age measures that directly. `slotsUntilHalt` could warn before a halt; nothing shows it yet.
 
@@ -35,5 +36,5 @@ Flush's module builds from whole transactions (its format is `psbt`, as L1's Dep
 
 - Flush's explorer had no unconfirmed incoming outputs on `/address/*` (recorded 2026-10-25). A payment to the wallet showed only once it was in a block, and a Send's change only then too. Its `58882ec` merges the mempool into `/address/*` and adds Blockstream's `/txs/chain/:txid`, so the client's `?after_txid=` fallback stops being needed. Neither was observable live: the mempool was empty, and `/address/:a/txs*` returned 502 from 2026-10-25 20:16 UTC (#55). Fixed by 2026-10-27, with `POST /tx` now reaching the node.
 - A refused broadcast carries the node's code alone (`sendrawtransaction RPC error: {"code":-26}`). The wallet then asks the explorer's `POST /txs/test` (the node's `testmempoolaccept`) for the reason, and shows the code alone if that doesn't answer.
-- A Send's held coins are released once its block is anchored, or once the server has forgotten it for 6 blocks (`HOLD_BLOCKS`), which on Flush is 90 seconds.
+- A Send's held coins are released once it is in a block (soft included), or once the server has forgotten it for 6 blocks (`HOLD_BLOCKS`), which on Flush is 90 seconds.
 - If mainnet's Flush (Slot 46) is served by a different explorer, this ADR changes with it.

@@ -79,8 +79,12 @@ What a Send on a chain can spend now, per asset: confirmed coins, plus change fr
 _Avoid_: Available balance
 
 **Finality**:
-How settled a block is on a chain that reports it, as Flush's explorer does: `soft` until an eCash block anchors it, `anchored` by one anchor, `final` by three. On Flush the Wallet Base counts a transaction as confirmed once its block is anchored (docs/adr/0012).
+How settled a block is on a chain that reports it, as Flush's explorer does: `soft` until an eCash block anchors it, `anchored` by one anchor, `final` by three. On Flush any block confirms, and a transaction in a `soft` one is Preconf (docs/adr/0012).
 _Avoid_: Confirmations, depth (on Flush, a deep block can still be soft)
+
+**Preconf**:
+On Flush, a transaction in a block no eCash block anchors yet (a `soft` block): it counts as confirmed and can be spent, but Flush may still replace that block until an anchor covers it (docs/adr/0012).
+_Avoid_: Soft-confirmed, pending
 
 **Stalled**:
 What the Wallet Base shows for a chain that has made no block for longer than its Server API allows (5 minutes on Flush), measured from the age of the chain's tip: nothing on it confirms until it moves again.

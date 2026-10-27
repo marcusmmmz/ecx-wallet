@@ -6,7 +6,7 @@
 //
 // Coins a broadcast Send spent are held back from later ones until it confirms, or until the server
 // has forgotten it for HOLD_BLOCKS blocks: the server may not list the spend in its mempool yet. On
-// Flush "confirms" means its block is anchored (esplora.ts, `CONFIRMED_AT`).
+// On Flush any block confirms, a soft one (preconf) included (esplora.ts, `CONFIRMED_AT`).
 //
 // A Chain Module whose format is `psbt` (Flush) builds from whole transactions, as L1's Deposits do:
 // the wallet fetches each coin's, and the module reads its value from it, never from the server.

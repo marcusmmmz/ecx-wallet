@@ -40,10 +40,12 @@ export type Finality = "soft" | "anchored" | "final";
 const FINALITIES: readonly Finality[] = ["soft", "anchored", "final"];
 
 /**
- * The finality at which the wallet counts a Flush block as confirmed. Provisional: whether wallets
- * should wait for `final` was asked of Flush's developer on 2026-10-25 (#56).
+ * The finality at which the wallet counts a Flush block as confirmed: any block, `soft` included.
+ * A transaction in a soft block is **preconfirmed** (preconf): it counts and can be spent, and
+ * screens mark it until an anchor covers it (docs/adr/0012). An anchor may still replace a soft
+ * block; a transaction in a block the server no longer knows is unconfirmed again.
  */
-export const CONFIRMED_AT: Finality = "anchored";
+export const CONFIRMED_AT: Finality = "soft";
 
 /** Block hashes `/flush/blocks` takes at once. */
 const FINALITY_BATCH = 30;
@@ -69,7 +71,7 @@ export interface EsploraServerConfig {
   chainName: string;
   /** Where a passed identity check is remembered for the session. */
   cache?: SessionCache;
-  /** The server reports how final a block is (`/flush/blocks`): a block counts as confirmed only from `CONFIRMED_AT`. */
+  /** The server reports how final a block is (`/flush/blocks`): a block counts as confirmed from `CONFIRMED_AT`, and as preconfirmed while `soft`. */
   finality?: boolean;
   /** Seconds without a block after which the chain counts as stalled; never, if absent. */
   stallAfter?: number;
@@ -93,6 +95,8 @@ export interface EsploraUtxo {
   /** Elements only; absent on a chain without assets. */
   asset?: string;
   confirmed: boolean;
+  /** Flush: confirmed in a block no eCash anchor covers yet. */
+  preconfirmed?: true;
 }
 
 /** Where a transaction stands. */
@@ -102,6 +106,8 @@ export interface EsploraTxStatus {
   blockHash?: string;
   /** The block's time, in seconds since the epoch. */
   blockTime?: number;
+  /** Flush: its block is `soft`, not yet anchored (`CONFIRMED_AT`). */
+  preconfirmed?: true;
 }
 
 /**
@@ -128,6 +134,9 @@ export interface EsploraTx {
 }
 
 export type EsploraClient = ReturnType<typeof esploraClient>;
+
+/** An output the wallet holds, as `state` adds it up. */
+type Held = AssetAmount & { confirmed: boolean; preconfirmed: boolean };
 
 const HEX = /^[0-9a-f]*$/;
 const HASH = /^[0-9a-f]{64}$/;
@@ -256,7 +265,7 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
       return { txid, vout, ...(value === undefined ? {} : { value }), ...(asset === undefined ? {} : { asset }), status: status(utxo.status) };
     });
     const settled = await settle(parsed.map((u) => u.status));
-    return parsed.map(({ status: _, ...utxo }, i) => ({ ...utxo, confirmed: settled[i].confirmed }));
+    return parsed.map(({ status: _, ...utxo }, i) => ({ ...utxo, confirmed: settled[i].confirmed, ...(settled[i].preconfirmed ? { preconfirmed: true as const } : {}) }));
   }
 
   /** Blocks known to be final: that never changes, so they aren't asked about again. */
@@ -291,7 +300,8 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
 
   /**
    * The statuses as the wallet counts them. On a server that reports finality, a transaction in a
-   * block short of `CONFIRMED_AT` (or one the server no longer knows) is still unconfirmed.
+   * block short of `CONFIRMED_AT` (or one the server no longer knows) is still unconfirmed, and one
+   * in a `soft` block is preconfirmed.
    */
   async function settle(statuses: EsploraTxStatus[]): Promise<EsploraTxStatus[]> {
     if (!finality) return statuses;
@@ -302,7 +312,11 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
       const block = known.get(hash);
       return block !== undefined && FINALITIES.indexOf(block) >= FINALITIES.indexOf(CONFIRMED_AT);
     };
-    return statuses.map((s) => (s.confirmed && !enough(s.blockHash!) ? { confirmed: false } : s));
+    return statuses.map((s) => {
+      if (!s.confirmed) return s;
+      if (!enough(s.blockHash!)) return { confirmed: false };
+      return known.get(s.blockHash!) === "soft" ? { ...s, preconfirmed: true as const } : s;
+    });
   }
 
   async function settled(txs: EsploraTx[]): Promise<EsploraTx[]> {
@@ -559,8 +573,8 @@ export function esploraServer(config: EsploraServerConfig, fetchFn: Fetch): Side
    * (Flush), a coin of value 0 is the asset token its creating transaction lists on it, if any;
    * `results` says whether the address holds one whose token only the server can tell.
    */
-  async function explicitOutputs(address: string, read: Map<string, Promise<OutputTokens | undefined>>): Promise<{ outputs: (AssetAmount & { confirmed: boolean })[]; results: boolean }> {
-    const outputs: (AssetAmount & { confirmed: boolean })[] = [];
+  async function explicitOutputs(address: string, read: Map<string, Promise<OutputTokens | undefined>>): Promise<{ outputs: Held[]; results: boolean }> {
+    const outputs: Held[] = [];
     let results = false;
     const utxos = await client.addressUtxos(address);
     const tokens = new Map<string, OutputTokens | undefined>();
@@ -568,15 +582,15 @@ export function esploraServer(config: EsploraServerConfig, fetchFn: Fetch): Side
       const txids = [...new Set(utxos.filter((u) => u.value === 0).map((u) => u.txid))];
       (await Promise.all(txids.map((txid) => outputTokens(txid, read)))).forEach((t, i) => tokens.set(txids[i], t));
     }
-    for (const { txid, vout, value, asset, confirmed } of utxos) {
+    for (const { txid, vout, value, asset, confirmed, preconfirmed = false } of utxos) {
       if (value === undefined) continue;
       if (value === 0 && config.tokens !== undefined) {
         const listed: OutputToken | undefined = tokens.get(txid)?.outputs.find((o) => o.vout === vout);
         if (listed !== undefined && listed.token === undefined) results = true;
-        if (listed?.token?.kind === "asset") outputs.push({ asset: listed.token.id, amount: listed.token.amount, confirmed });
+        if (listed?.token?.kind === "asset") outputs.push({ asset: listed.token.id, amount: listed.token.amount, confirmed, preconfirmed });
         continue;
       }
-      outputs.push({ asset: asset ?? NATIVE_COIN, amount: String(value), confirmed });
+      outputs.push({ asset: asset ?? NATIVE_COIN, amount: String(value), confirmed, preconfirmed });
     }
     return { outputs, results };
   }
@@ -585,7 +599,7 @@ export function esploraServer(config: EsploraServerConfig, fetchFn: Fetch): Side
    * What `holdings` says the address has beyond the asset tokens the wallet read itself: the
    * tokens on its result outputs, as the server alone reports them (docs/adr/0013).
    */
-  async function unverifiedTokens(address: string, readable: (AssetAmount & { confirmed: boolean })[]): Promise<AssetAmount[]> {
+  async function unverifiedTokens(address: string, readable: Held[]): Promise<AssetAmount[]> {
     const read = new Map<string, bigint>();
     for (const { asset, amount } of readable) read.set(asset, (read.get(asset) ?? 0n) + BigInt(amount));
     return (await client.holdings(address)).flatMap(({ asset, amount }) => {
@@ -631,13 +645,14 @@ export function esploraServer(config: EsploraServerConfig, fetchFn: Fetch): Side
       : undefined;
     const depositFrom = tx.vin.find((input) => input.claimsDeposit)?.txid;
     const issuance = tx.vin.find((input) => input.issues !== undefined && isOurs(input.prevout))?.issues;
-    const { confirmed, blockTime } = tx.status;
+    const { confirmed, blockTime, preconfirmed } = tx.status;
     return {
       txid: tx.txid,
       amounts: listed(new Map([...net].filter(([, amount]) => amount !== 0n))),
       confirmed,
       ...(confirmed && blockTime !== undefined ? { time: blockTime } : {}),
       ...(confirmed ? {} : { trusted: trusted(tx) }),
+      ...(preconfirmed ? { preconfirmed } : {}),
       ...(hidden ? { hidden } : {}),
       ...(toSelf ? { toSelf } : {}),
       ...(depositTo === undefined ? {} : { depositTo }),
@@ -664,19 +679,22 @@ export function esploraServer(config: EsploraServerConfig, fetchFn: Fetch): Side
       const confirmed = new Map<string, bigint>();
       const unconfirmed = new Map<string, bigint>();
       const unverified = new Map<string, bigint>();
+      const preconfirmed = new Map<string, bigint>();
       const read = new Map<string, Promise<OutputTokens | undefined>>();
       const byAddress = (address: string) =>
         explicitOutputs(address, read).then(async (held) => ({ ...held, unverified: held.results ? await unverifiedTokens(address, held.outputs) : [] }));
       const [held, stalledSince] = await Promise.all([eachAddress(watch, byAddress), stalled()]);
-      for (const { asset, amount, confirmed: isConfirmed } of held.flatMap((h) => h.outputs)) {
+      for (const { asset, amount, confirmed: isConfirmed, preconfirmed: isPreconfirmed } of held.flatMap((h) => h.outputs)) {
         const totals = isConfirmed ? confirmed : unconfirmed;
         totals.set(asset, (totals.get(asset) ?? 0n) + BigInt(amount));
+        if (isConfirmed && isPreconfirmed) preconfirmed.set(asset, (preconfirmed.get(asset) ?? 0n) + BigInt(amount));
       }
       for (const { asset, amount } of held.flatMap((h) => h.unverified)) unverified.set(asset, (unverified.get(asset) ?? 0n) + BigInt(amount));
       return {
         balances: listed(confirmed),
         unconfirmed: listed(unconfirmed),
         ...(unverified.size === 0 ? {} : { unverified: listed(unverified) }),
+        ...(preconfirmed.size === 0 ? {} : { preconfirmed: listed(preconfirmed) }),
         ...(stalledSince === undefined ? {} : { stalledSince }),
       };
     },

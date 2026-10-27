@@ -25,6 +25,11 @@ export interface ReportedState {
    */
   unverified?: AssetAmount[];
   /**
+   * The part of `balances` in blocks no eCash anchor covers yet (Flush's `soft`, docs/adr/0012):
+   * counted and spendable, but an anchor may still replace them. Absent if none.
+   */
+  preconfirmed?: AssetAmount[];
+  /**
    * When the chain's last block was mined (seconds since the epoch), if it's been longer than the
    * chain ever goes without one: nothing confirms until it moves again. Flush only (docs/adr/0012).
    */
@@ -37,6 +42,8 @@ export interface HistoryEntry {
   /** The watch's net change per asset: base units, negative for what left it. */
   amounts: AssetAmount[];
   confirmed: boolean;
+  /** Confirmed in a Flush block no eCash anchor covers yet (`soft`, docs/adr/0012). */
+  preconfirmed?: true;
   /** When its block was mined, in seconds since the epoch; only once confirmed. */
   time?: number;
   /**

@@ -151,7 +151,7 @@ describe("Flush", () => {
     }
   });
 
-  test("the balance counts Deposit payouts in coinbases, and a block only once anchored", async () => {
+  test("the balance counts Deposit payouts in coinbases, and a soft block's as preconf", async () => {
     fund([
       { hex: coinbase(100, [["", 0], [RECEIVE_0.scriptPubkey, 100_000_000]]), blockHeight: 100, blockHash: FINAL },
       { hex: coinbase(490, [[RECEIVE_1.scriptPubkey, 2_000]]), blockHeight: 490, blockHash: ANCHORED },
@@ -161,12 +161,19 @@ describe("Flush", () => {
     ]);
     config.finality = { [SOFT]: "soft", [ANCHORED]: "anchored" };
     const report = await pullPathWith().pullPath.reportedState(99);
-    assert.deepEqual(report.balances, [{ asset: "", amount: "100002000" }]);
-    assert.deepEqual(report.unconfirmed, [{ asset: "", amount: "5000" }], "a soft block isn't confirmed yet");
+    assert.deepEqual(report.balances, [{ asset: "", amount: "100007000" }], "a soft block's payment counts");
+    assert.deepEqual(report.preconfirmed, [{ asset: "", amount: "5000" }], "and is marked preconf until anchored");
+    assert.deepEqual(report.unconfirmed, []);
     assert.equal(report.stalledSince, undefined);
+    const history = await pullPathWith().pullPath.history(99);
+    assert.deepEqual(
+      history.entries.map((e) => [e.amounts[0]?.amount, e.confirmed, e.preconfirmed]),
+      [["5000", true, true], ["2000", true, undefined], [undefined, true, undefined], ["100000000", true, undefined]],
+    );
 
     config.finality = {};
-    assert.deepEqual((await pullPathWith().pullPath.reportedState(99)).balances, [{ asset: "", amount: "100007000" }]);
+    const anchored = await pullPathWith().pullPath.reportedState(99);
+    assert.deepEqual([anchored.balances, anchored.preconfirmed], [[{ asset: "", amount: "100007000" }], undefined]);
   });
 
   test("the history lists coinbase receipts and pages with after_txid past the first 25", async () => {
@@ -207,12 +214,10 @@ describe("Flush", () => {
     assert.deepEqual(held, [{ slot: 99, txid: tx.txid, spent: [{ txid: parseTx(coin).txid, vout: 0 }], tipHeight: 500 }]);
   });
 
-  test("a coin someone else paid in a soft block isn't spent until its block is anchored", async () => {
+  test("a coin someone else paid in a soft block (preconf) can be spent", async () => {
     fund([{ hex: paying("d1", [[RECEIVE_0.scriptPubkey, 70_000]]), blockHeight: 499, blockHash: SOFT }]);
     config.finality = { [SOFT]: "soft" };
     try {
-      assert.deepEqual(await sendsWith().sends.spendable(99), []);
-      config.finality = { [SOFT]: "anchored" };
       assert.deepEqual(await sendsWith().sends.spendable(99), [{ asset: "", amount: "70000" }]);
     } finally {
       config.finality = {};

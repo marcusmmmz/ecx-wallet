@@ -39,10 +39,11 @@ export function amountText(amount: string, id: string, assets: AssetEntry[]): st
  * Each asset's confirmed amount ("0" if it only has unconfirmed coins or unverified tokens), what's
  * unconfirmed, and what only its server vouches for (Flush's result outputs, docs/adr/0013), if any.
  */
-export function assetsOf(report: ChainReport): { asset: string; amount: string; unconfirmed?: string; unverified?: string }[] {
+export function assetsOf(report: ChainReport): { asset: string; amount: string; unconfirmed?: string; unverified?: string; preconfirmed?: string }[] {
   const pending = new Map(report.unconfirmed.map((u) => [u.asset, u.amount]));
   const vouched = new Map((report.unverified ?? []).map((u) => [u.asset, u.amount]));
+  const preconf = new Map((report.preconfirmed ?? []).map((u) => [u.asset, u.amount]));
   const rows = new Map(report.balances.map(({ asset, amount }) => [asset, { asset, amount }]));
   for (const asset of [...pending.keys(), ...vouched.keys()]) if (!rows.has(asset)) rows.set(asset, { asset, amount: "0" });
-  return [...rows.values()].map((row) => ({ ...row, unconfirmed: pending.get(row.asset), unverified: vouched.get(row.asset) }));
+  return [...rows.values()].map((row) => ({ ...row, unconfirmed: pending.get(row.asset), unverified: vouched.get(row.asset), preconfirmed: preconf.get(row.asset) }));
 }

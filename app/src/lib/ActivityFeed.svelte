@@ -30,6 +30,9 @@
 
   /** The chain the chips narrow the transactions to; Deposits in progress show under every chip. */
   let only = $state<ChainId | "all">("all");
+  /** What a preconfirmed transaction is (Flush's soft blocks, docs/adr/0012). */
+  const PRECONF = "In a block that no eCash block anchors yet. It counts and can be spent; until an anchor covers it, the chain may still replace that block.";
+
   const shown = $derived(views.filter((v) => only === "all" || v.info.id === only));
   const days = $derived(
     activityDays(
@@ -125,6 +128,7 @@
     <span data-history-status>
       {#if entry.time !== undefined}<time datetime={new Date(entry.time * 1000).toISOString()}>{timeOf(entry.time)}</time>{:else}Confirmed{/if}
     </span>
+    {#if entry.preconfirmed}<span class="pill" title={PRECONF} data-history-preconfirmed>Preconf</span>{/if}
   {:else if entry.trusted}
     <span class="pill" data-history-status>Pending</span>
   {:else}
@@ -210,7 +214,7 @@
     <dl class="facts">
       <dt>Status</dt>
       <dd>
-        {#if entry.confirmed}Confirmed{:else if entry.trusted}Pending{:else}Unconfirmed: {unconfirmedWhy(entry)}{/if}
+        {#if entry.preconfirmed}Preconfirmed. {PRECONF}{:else if entry.confirmed}Confirmed{:else if entry.trusted}Pending{:else}Unconfirmed: {unconfirmedWhy(entry)}{/if}
       </dd>
       {#if entry.time !== undefined}<dt>Mined</dt><dd data-details-mined>{minedAt(entry.time)}</dd>{/if}
       <dt>Chain</dt>

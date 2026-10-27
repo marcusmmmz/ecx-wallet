@@ -29,7 +29,7 @@ const PAYOUT = encodeTx({
   inputs: [{ txid: "00".repeat(32), vout: 0xffffffff, script: "03e40c00" }],
   outputs: [{ value: 0, script: "" }, { value: 100_000, script: RECEIVE_0.scriptPubkey }],
 });
-/** Someone's 0.00005 ECX to the wallet, in a block not yet anchored. */
+/** Someone's 0.00005 ECX to the wallet, in a block not yet anchored: preconf. */
 const PAYMENT = encodeTx({ inputs: [{ txid: "e1".repeat(32), vout: 0 }], outputs: [{ value: 5_000, script: RECEIVE_0.scriptPubkey }] });
 /** A token's output at the wallet's address: value 0. */
 const TOKEN = encodeTx({ inputs: [{ txid: "e2".repeat(32), vout: 0 }], outputs: [{ value: 0, script: RECEIVE_0.scriptPubkey }] });
@@ -89,7 +89,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
     await l1Stub?.close();
   });
 
-  test("home shows Flush's ECX, its soft block's payment apart as unconfirmed", async () => {
+  test("home shows Flush's ECX, its soft block's payment counted and marked preconf", async () => {
     const page = await openHome(session);
     const shown = await page.evaluate(() => {
       const text = (e) => e?.textContent.replace(/\s+/g, " ").trim();
@@ -97,11 +97,12 @@ for (const browserName of BROWSERS) describe(browserName, () => {
       return {
         name: text(card.querySelector("[data-chain-link] strong")),
         balance: text(card.querySelector('[data-balance][data-asset=""]')),
-        unconfirmed: text(card.querySelector('[data-unconfirmed][data-asset=""]')),
+        preconf: text(card.querySelector('[data-preconfirmed][data-asset=""]')),
+        unconfirmed: card.querySelector('[data-unconfirmed][data-asset=""]') !== null,
         stalled: card.querySelector("[data-stalled]") !== null,
       };
     });
-    assert.deepEqual(shown, { name: "Flush", balance: "0.001 ECX", unconfirmed: "+0.00005 ECX unconfirmed", stalled: false });
+    assert.deepEqual(shown, { name: "Flush", balance: "0.00105 ECX", preconf: "0.00005 ECX preconf", unconfirmed: false, stalled: false });
     await page.close();
   });
 
@@ -116,7 +117,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
     const page = await openWalletPage(session, "#/send/99");
     await page.waitForSelector('[data-send-asset] option[value=""]', { timeout: 20_000 });
     const option = await page.$eval('[data-send-row="0"] [data-send-asset] option[value=""]', (e) => e.textContent.trim());
-    assert.equal(option, "ECX (0.001 ECX spendable)", "anchored only: someone's payment in a soft block isn't spendable yet");
+    assert.equal(option, "ECX (0.00105 ECX spendable)", "someone's payment in a soft block (preconf) included");
 
     await page.type('[data-send-row="0"] [data-send-amount]', "0.0004");
     await page.type('[data-send-row="0"] [data-send-destination]', PAY_TO);
