@@ -287,6 +287,70 @@ describe("Flush", () => {
     }
   });
 
+  test("the history nets token outputs, paid or spent, as their markers list them, and notes a result (a live sale)", async () => {
+    const tokens = async (tx) => flush.outputTokens(tx);
+    /** A live transaction's outputs re-addressed to `script`, its marker kept; spending `inputs` if given. */
+    const readdressed = ({ hex }, script, inputs) => {
+      const tx = parseTx(hex);
+      const outputs = tx.outputs.map(({ value, script: s }) => ({ value, script: s.startsWith("6a") ? s : script }));
+      return encodeTx({ version: tx.version, locktime: tx.locktime, inputs: inputs ?? tx.inputs, outputs });
+    };
+    // The sale spent output 1 of its input (50,000 BROSEVELT) and 23,999,524 sat; it paid 48,766
+    // BROSEVELT back (output 0), a result (1), its marker (2) and the ECX change (3).
+    const saleInput = readdressed(TRADE.saleInput, RECEIVE_0.scriptPubkey);
+    const ecxCoin = paying("c1", [[RECEIVE_1.scriptPubkey, 23_999_524]]);
+    const sale = readdressed(TRADE.sale, RECEIVE_0.scriptPubkey, [
+      { txid: parseTx(saleInput).txid, vout: 1 },
+      { txid: parseTx(ecxCoin).txid, vout: 0 },
+    ]);
+    // A token Send: 1,000 of 1,500 BROSEVELT units paid out, 500 back as change, the fee in ECX.
+    const received = paying("c2", [[RECEIVE_0.scriptPubkey, 0], [marker(0, [], [{ n: 0, asset: BROSEVELT, amount: 1_500 }]), 0]]);
+    const feeCoin = paying("c3", [[RECEIVE_1.scriptPubkey, 10_000]]);
+    const send = encodeTx({
+      inputs: [{ txid: parseTx(received).txid, vout: 0 }, { txid: parseTx(feeCoin).txid, vout: 0 }],
+      outputs: [
+        { script: flush.deriveAccount(FOREIGN, { receive: 1 }).receive[0].scriptPubkey, value: 0 },
+        { script: RECEIVE_0.scriptPubkey, value: 0 },
+        { script: marker(0, [], [{ n: 0, asset: BROSEVELT, amount: 1_000 }, { n: 1, asset: BROSEVELT, amount: 500 }]), value: 0 },
+        { script: RECEIVE_1.scriptPubkey, value: 9_700 },
+      ],
+    });
+    fund([
+      { hex: saleInput, blockHeight: 400, blockHash: FINAL },
+      { hex: ecxCoin, blockHeight: 401, blockHash: FINAL },
+      { hex: sale, blockHeight: 402, blockHash: FINAL },
+      { hex: received, blockHeight: 410, blockHash: FINAL },
+      { hex: feeCoin, blockHeight: 411, blockHash: FINAL },
+      { hex: send, confirmed: false },
+    ]);
+    const byTxid = (history) => new Map(history.entries.map((e) => [e.txid, e]));
+
+    const read = byTxid(await pullPathWith({ tokens }).pullPath.history(99));
+    const saleEntry = read.get(parseTx(sale).txid);
+    assert.deepEqual(saleEntry.amounts, [
+      { asset: BROSEVELT, amount: "-123400" },
+      { asset: "", amount: "-393" },
+    ], "1,234 BROSEVELT and the fee left");
+    assert.equal(saleEntry.results, true, "the result's token is the node's to tell");
+    assert.deepEqual(read.get(parseTx(saleInput).txid).amounts, [
+      { asset: BROSEVELT, amount: "10000000" },
+      { asset: "", amount: "24999665" },
+    ], "its two BROSEVELT outputs and its ECX change, all re-addressed to the wallet");
+    assert.equal(read.get(parseTx(saleInput).txid).results, undefined);
+    assert.deepEqual(read.get(parseTx(received).txid).amounts, [{ asset: BROSEVELT, amount: "1500" }]);
+    const sendEntry = read.get(parseTx(send).txid);
+    assert.deepEqual(sendEntry.amounts, [
+      { asset: BROSEVELT, amount: "-1000" },
+      { asset: "", amount: "-300" },
+    ]);
+    assert.equal(sendEntry.results, undefined);
+
+    // Without the module's reading, a token output adds nothing, as before.
+    const plain = byTxid(await pullPathWith().pullPath.history(99));
+    assert.deepEqual(plain.get(parseTx(sale).txid).amounts, [{ asset: "", amount: "-393" }]);
+    assert.equal(plain.get(parseTx(sale).txid).results, undefined);
+  });
+
   test("a server that sends another transaction for a token output reports nothing", async () => {
     const transfer = paying("f3", [[RECEIVE_0.scriptPubkey, 0], [marker(0, [], [{ n: 0, asset: BROSEVELT, amount: 1 }]), 0]]);
     fund([{ hex: transfer, blockHeight: 300, blockHash: FINAL }]);

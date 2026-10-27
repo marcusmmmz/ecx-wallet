@@ -66,6 +66,16 @@ const BROSEVELT_IN = encodeTx({
   ],
 });
 
+/** A ClaimLaunch (kind 23) whose result output pays the wallet: what it carries only the node knows. */
+const CLAIM = encodeTx({
+  inputs: [{ txid: "e5".repeat(32), vout: 0 }],
+  outputs: [
+    { value: 0, script: RECEIVE_0.scriptPubkey },
+    // OP_RETURN "BAST" v0 kind 23, a 32-byte field, one listed output: n 0, a result (0xff).
+    { value: 0, script: `6a29${Buffer.from("BAST").toString("hex")}0017${"cd".repeat(32)}0100ff` },
+  ],
+});
+
 /** FORK, a live launch on Slot 99: its registration and its launch's pool, as getpool answers (core/flush/tests). */
 const TRADE = JSON.parse(await readFile(path.join(ROOT, "core/flush/tests/trade-fixtures.json"), "utf8"));
 const FORK = "6bb2ae6e23e626cd2fba1f8845d8bbc047aeb9a8f4690ee9a21b5d04584dfb03";
@@ -222,6 +232,40 @@ for (const browserName of BROWSERS) describe(browserName, () => {
     } finally {
       FLUSH.txs = txs;
       FLUSH.utxos[RECEIVE_0.address] = utxos;
+      FLUSH.flushAssets = undefined;
+    }
+  });
+
+  test("Flush's Activity shows a token transfer's amount, and notes a result's as the node's alone", async () => {
+    const txs = FLUSH.txs;
+    FLUSH.txs = [
+      ...txs,
+      { hex: BROSEVELT_IN, blockHeight: 3260, blockHash: FINAL },
+      { hex: CLAIM, blockHeight: 3270, blockHash: FINAL },
+      { hex: LIVE_TXS[REGISTRATION], blockHeight: 604, blockHash: FINAL },
+    ];
+    FLUSH.flushAssets = { [BROSEVELT]: { asset: BROSEVELT, registered: 604, registration: REGISTRATION } };
+    try {
+      const page = await openWalletPage(session, "#/chain/99/activity");
+      const row = (tx) => `[data-history-entry="${parseTx(tx).txid}"]`;
+      await page.waitForSelector(`${row(BROSEVELT_IN)} [data-history-amount][data-asset="${BROSEVELT}"]`, { timeout: 20_000 });
+      await activitySettled(page);
+      const shown = await page.evaluate(
+        (rows) =>
+          rows.map((r) => {
+            const e = document.querySelector(r);
+            const text = (x) => x?.textContent.replace(/\s+/g, " ").trim();
+            return { amounts: [...e.querySelectorAll("[data-history-amount]")].map(text), results: text(e.querySelector("[data-history-results]")) ?? null };
+          }),
+        [row(BROSEVELT_IN), row(CLAIM)],
+      );
+      assert.deepEqual(shown, [
+        { amounts: ["+10 BROSEVELT"], results: null },
+        { amounts: [], results: "+ amounts only the node knows not shown" },
+      ]);
+      await page.close();
+    } finally {
+      FLUSH.txs = txs;
       FLUSH.flushAssets = undefined;
     }
   });

@@ -55,6 +55,11 @@ export interface HistoryEntry {
   toSelf?: boolean;
   /** Some of the wallet's outputs it pays or spends are confidential: their amounts aren't in `amounts`. */
   hidden?: boolean;
+  /**
+   * It pays or spends a result output of the wallet's (Flush, docs/adr/0013): what that carries is
+   * in the node's state, not the transaction, so it isn't in `amounts`.
+   */
+  results?: true;
   /** The wallet's M5 to this Slot's Treasury (eCash only). */
   depositTo?: number;
   /** A Deposit's credit on a Slot (an input claims the Deposit): the Deposit's parent-chain txid. */

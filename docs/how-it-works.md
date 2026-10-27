@@ -112,7 +112,8 @@ The API this project defines, for a sidechain with no indexer. Its protocol draf
   - "Fee, to yourself" when every output is the wallet's;
   - "Deposit to Slot N" for an M5 it funded to the Treasury script of a Slot it supports;
   - "Deposit from the main chain" for a transaction with an input claiming a Deposit (Esplora's `is_pegin`), whose `txid` is that Deposit's;
-  - "+ confidential amounts not shown" for its outputs with no explicit value.
+  - "+ confidential amounts not shown" for its outputs with no explicit value;
+  - on Flush, a value-0 coin it pays or spends counts as the asset token its creating transaction's marker lists, read by the module's `outputTokens` as the balance reads it (ADR 0013). A trade's row shows the tokens that left, its change netted. A coin the marker lists as a result adds "+ amounts only the node knows not shown" (`results`): what it carries is in the node's state. A sale's ECX comes in a later coinbase, so it shows as its own Received row.
 - **Paging:** History reads up to 3 older pages of an address's confirmed transactions past the first 25 (`HISTORY_PAGES`), with Blockstream's `/txs/chain/:txid` or, on mempool's fork (Flush's explorer), `?after_txid=` (ADR 0012). When pages remain past those, the mempool's list is full (50), or the server repeats a page, the screen says older transactions may not be shown.
 - **Trust needs each input's parent.** Over Esplora the wallet assumes a parent missing from the lists is confirmed. It paid a watched address, whose list has every one of its mempool transactions (up to 50), so only an older confirmed one can be missing.
 

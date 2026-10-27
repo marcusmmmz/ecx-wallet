@@ -122,6 +122,10 @@
       {entry.amounts.length > 0 ? "+ confidential amounts not shown" : "Amount hidden (confidential)"}
     </span>
   {/if}
+  {#if entry.results}
+    <!-- A Flush result: what it carries is in the node's state, not the transaction (docs/adr/0013). -->
+    <span class="muted tiny" data-history-results>+ amounts only the node knows not shown</span>
+  {/if}
 {/snippet}
 
 {#snippet status(entry: HistoryEntry)}

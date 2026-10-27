@@ -649,22 +649,38 @@ export function esploraServer(config: EsploraServerConfig, fetchFn: Fetch): Side
   /**
    * The wallet's view of a transaction: its net change per asset, from the outputs it pays and
    * spends of the watch's scripts; whether it's the wallet's Deposit (an M5 it funded); and whether
-   * it's a Deposit's credit (on a Slot, an input claiming the Deposit).
+   * it's a Deposit's credit (on a Slot, an input claiming the Deposit). With `tokens` (Flush), a
+   * coin of value 0 is the asset token its creating transaction lists on it (`markers`, by txid).
    */
-  function entry(tx: EsploraTx, ours: Set<string>, treasuries: TreasuryScript[], trusted: (tx: EsploraTx) => boolean): HistoryEntry {
+  function entry(
+    tx: EsploraTx,
+    ours: Set<string>,
+    treasuries: TreasuryScript[],
+    trusted: (tx: EsploraTx) => boolean,
+    markers: Map<string, OutputTokens | undefined>,
+  ): HistoryEntry {
     const net = new Map<string, bigint>();
     let hidden = false;
-    const add = ({ value, asset }: EsploraOutput, sign: bigint) => {
+    let results = false;
+    const add = ({ value, asset }: EsploraOutput, sign: bigint, txid: string, vout: number) => {
       if (value === undefined) {
         hidden = true;
+        return;
+      }
+      if (value === 0 && config.tokens !== undefined) {
+        const listed: OutputToken | undefined = markers.get(txid)?.outputs.find((o) => o.vout === vout);
+        if (listed !== undefined && listed.token === undefined) results = true;
+        if (listed?.token?.kind === "asset") net.set(listed.token.id, (net.get(listed.token.id) ?? 0n) + sign * BigInt(listed.token.amount));
         return;
       }
       const key = asset ?? NATIVE_COIN;
       net.set(key, (net.get(key) ?? 0n) + sign * BigInt(value));
     };
     const isOurs = (output: EsploraOutput | null) => output !== null && ours.has(output.scriptpubkey);
-    for (const { prevout } of tx.vin) if (isOurs(prevout)) add(prevout!, -1n);
-    for (const output of tx.vout) if (isOurs(output)) add(output, 1n);
+    for (const { txid, vout, prevout } of tx.vin) if (isOurs(prevout)) add(prevout!, -1n, txid, vout);
+    tx.vout.forEach((output, vout) => {
+      if (isOurs(output)) add(output, 1n, tx.txid, vout);
+    });
     // Elements' fee is an output with an empty script.
     const toSelf = tx.vin.every(({ prevout }) => isOurs(prevout)) && tx.vout.every((o) => o.scriptpubkey === "" || isOurs(o));
     const funded = tx.vin.some(({ prevout }) => isOurs(prevout));
@@ -682,6 +698,7 @@ export function esploraServer(config: EsploraServerConfig, fetchFn: Fetch): Side
       ...(confirmed ? {} : { trusted: trusted(tx) }),
       ...(preconfirmed ? { preconfirmed } : {}),
       ...(hidden ? { hidden } : {}),
+      ...(results ? { results } : {}),
       ...(toSelf ? { toSelf } : {}),
       ...(depositTo === undefined ? {} : { depositTo }),
       ...(depositFrom === undefined ? {} : { depositFrom }),
@@ -752,7 +769,23 @@ export function esploraServer(config: EsploraServerConfig, fetchFn: Fetch): Side
       };
       const height = ({ status }: EsploraTx) => (status.confirmed ? (status.blockHeight ?? 0) : Number.MAX_SAFE_INTEGER);
       const newestFirst = [...txs.values()].sort((a, b) => height(b) - height(a));
-      return { entries: newestFirst.map((tx) => entry(tx, ours, treasuries, trusted)), partial };
+      // The markers that list the wallet's value-0 coins: those it pays, and those it spends.
+      const markers = new Map<string, OutputTokens | undefined>();
+      if (config.tokens !== undefined) {
+        const zero = (output: EsploraOutput | null) => output !== null && output.value === 0 && ours.has(output.scriptpubkey);
+        const txids = new Set<string>();
+        for (const tx of newestFirst) {
+          if (tx.vout.some(zero)) txids.add(tx.txid);
+          for (const { txid, prevout } of tx.vin) if (zero(prevout)) txids.add(txid);
+        }
+        const read = new Map<string, Promise<OutputTokens | undefined>>();
+        const all = [...txids];
+        for (let i = 0; i < all.length; i += QUERIES_AT_ONCE) {
+          const batch = all.slice(i, i + QUERIES_AT_ONCE);
+          (await Promise.all(batch.map((txid) => outputTokens(txid, read)))).forEach((t, j) => markers.set(batch[j], t));
+        }
+      }
+      return { entries: newestFirst.map((tx) => entry(tx, ours, treasuries, trusted, markers)), partial };
     },
     buildTransfer: async () => {
       throw notHere();
