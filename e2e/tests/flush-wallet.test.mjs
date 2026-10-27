@@ -76,6 +76,38 @@ const CLAIM = encodeTx({
   ],
 });
 
+/** Core's VARINT (serialize.h), as a `BAST` marker writes amounts. */
+function varint(n) {
+  let x = BigInt(n);
+  const bytes = [Number(x & 0x7fn)];
+  while (x > 0x7fn) {
+    x = (x >> 7n) - 1n;
+    bytes.unshift(Number((x & 0x7fn) | 0x80n));
+  }
+  return bytes;
+}
+const internal = (id) => [...Buffer.from(id, "hex").reverse()];
+/** A `BAST` marker's script: `kind` with `fields`, listing `{ n, asset, amount }` (a token) or `{ n }` (a result). */
+function bast(kind, fields, listed) {
+  const body = [...Buffer.from("BAST"), 0, kind, ...fields, listed.length];
+  for (const { n, asset, amount } of listed) body.push(...varint(n), ...(asset === undefined ? [0xff] : [0, ...internal(asset), ...varint(amount)]));
+  return Buffer.from([0x6a, ...(body.length <= 75 ? [body.length] : [0x4c, body.length]), ...body]).toString("hex");
+}
+/** A sale of 12.34 BROSEVELT (1,234 units) through POOL for 0.000121 ECX, and the coinbase that paid it (docs/adr/0017). */
+const POOL = "77".repeat(32);
+const SALE_TOKENS = encodeTx({ inputs: [{ txid: "e6".repeat(32), vout: 0 }], outputs: [{ value: 0, script: RECEIVE_0.scriptPubkey }, { value: 0, script: bast(0, [], [{ n: 0, asset: BROSEVELT, amount: 5_000 }]) }] });
+const SALE_ECX = encodeTx({ inputs: [{ txid: "e7".repeat(32), vout: 0 }], outputs: [{ value: 10_000, script: RECEIVE_0.scriptPubkey }] });
+const SALE = encodeTx({
+  inputs: [{ txid: parseTx(SALE_TOKENS).txid, vout: 0 }, { txid: parseTx(SALE_ECX).txid, vout: 0 }],
+  outputs: [
+    { value: 0, script: RECEIVE_0.scriptPubkey },
+    { value: 0, script: RECEIVE_0.scriptPubkey },
+    { value: 0, script: bast(21, [...internal(BROSEVELT), 1, ...internal(POOL), ...varint(1_234), ...varint(1_000), 22, ...Buffer.from(RECEIVE_0.scriptPubkey, "hex")], [{ n: 0, asset: BROSEVELT, amount: 3_766 }, { n: 1 }]) },
+    { value: 9_600, script: RECEIVE_0.scriptPubkey },
+  ],
+});
+const SALE_PAYOUT = encodeTx({ inputs: [{ txid: "00".repeat(32), vout: 0xffffffff, script: "03e80c00" }], outputs: [{ value: 0, script: "" }, { value: 12_100, script: RECEIVE_0.scriptPubkey }] });
+
 /** FORK, a live launch on Slot 99: its registration and its launch's pool, as getpool answers (core/flush/tests). */
 const TRADE = JSON.parse(await readFile(path.join(ROOT, "core/flush/tests/trade-fixtures.json"), "utf8"));
 const FORK = "6bb2ae6e23e626cd2fba1f8845d8bbc047aeb9a8f4690ee9a21b5d04584dfb03";
@@ -267,6 +299,56 @@ for (const browserName of BROWSERS) describe(browserName, () => {
     } finally {
       FLUSH.txs = txs;
       FLUSH.flushAssets = undefined;
+    }
+  });
+
+  test("Flush's Activity shows a trade as one double row, the coinbase that paid it folded in", async () => {
+    const txs = FLUSH.txs;
+    FLUSH.txs = [
+      ...txs,
+      { hex: SALE_TOKENS, blockHeight: 3280, blockHash: FINAL },
+      { hex: SALE_ECX, blockHeight: 3281, blockHash: FINAL },
+      { hex: SALE, blockHeight: 3290, blockHash: FINAL },
+      { hex: SALE_PAYOUT, blockHeight: 3291, blockHash: FINAL },
+      { hex: LIVE_TXS[REGISTRATION], blockHeight: 604, blockHash: FINAL },
+    ];
+    FLUSH.flushAssets = { [BROSEVELT]: { asset: BROSEVELT, registered: 604, registration: REGISTRATION } };
+    FLUSH.poolTrades = { [POOL]: [{ txid: parseTx(SALE).txid, height: 3290, amount_in_units: "1234", amount_out_units: "12100" }] };
+    FLUSH.flushRpc = { getpool: () => ({ asset_a_id: BROSEVELT, asset_b_id: "00".repeat(32) }) };
+    const utxos = FLUSH.utxos[RECEIVE_0.address];
+    // The sale's BROSEVELT change, as a coin: home names an asset from its registration once a balance shows it.
+    FLUSH.utxos[RECEIVE_0.address] = [...utxos, { txid: parseTx(SALE).txid, vout: 0, value: 0, confirmed: true, blockHash: FINAL }];
+    try {
+      const home = await openHome(session);
+      await home.waitForFunction((asset) => document.querySelector(`[data-account="99"] li[data-asset="${asset}"] .name strong`)?.textContent.trim() === "BROSEVELT", { timeout: 20_000 }, BROSEVELT);
+      await home.close();
+      const page = await openWalletPage(session, "#/chain/99/activity");
+      const row = `[data-history-entry="${parseTx(SALE).txid}"]`;
+      await page.waitForSelector(`${row}[data-trade-state="filled"] [data-history-amount][data-asset="${BROSEVELT}"]`, { timeout: 20_000 });
+      await activitySettled(page);
+      const shown = await page.$eval(row, (e) => {
+        const text = (x) => x?.textContent.replace(/\s+/g, " ").trim();
+        return {
+          label: text(e.querySelector("[data-history-label]")),
+          fee: text(e.querySelector("[data-trade-fee]")),
+          amounts: [...e.querySelectorAll("[data-history-amount]")].map(text),
+          back: text(e.querySelector("[data-trade-back]")),
+          reported: e.querySelector("[data-reported]") !== null,
+          red: getComputedStyle(e.querySelector(".amount.out")).color,
+        };
+      });
+      assert.deepEqual({ ...shown, red: undefined }, { label: "Sold BROSEVELT", fee: "· fee 0.000004 ECX", amounts: ["−12.34 BROSEVELT", "+0.000121 ECX"], back: "Paid", reported: false, red: undefined });
+      assert.equal(shown.red, "rgb(196, 35, 43)", "what left the wallet is red");
+      assert.equal(await page.$(`[data-history-entry="${parseTx(SALE_PAYOUT).txid}"]`), null, "the payout has no row of its own");
+
+      await page.click(row);
+      await page.waitForSelector("[data-details-payout]");
+      assert.equal(await page.$eval("[data-details-payout]", (e) => e.textContent.trim()), parseTx(SALE_PAYOUT).txid);
+      await page.close();
+    } finally {
+      FLUSH.txs = txs;
+      FLUSH.utxos[RECEIVE_0.address] = utxos;
+      FLUSH.flushAssets = FLUSH.poolTrades = FLUSH.flushRpc = undefined;
     }
   });
 

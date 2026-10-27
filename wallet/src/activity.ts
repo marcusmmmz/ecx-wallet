@@ -3,9 +3,10 @@
 import type { HistoryEntry } from "./sidechain-server";
 
 /** What a transaction did for the wallet. */
-export type ActivityKind = "received" | "sent" | "toSelf" | "deposit" | "depositCredit" | "issuance" | "reissuance" | "confidential";
+export type ActivityKind = "received" | "sent" | "toSelf" | "deposit" | "depositCredit" | "issuance" | "reissuance" | "confidential" | "trade";
 
 export function activityKind(entry: HistoryEntry): ActivityKind {
+  if (entry.trade !== undefined) return "trade";
   if (entry.depositTo !== undefined) return "deposit";
   if (entry.depositFrom !== undefined) return "depositCredit";
   if (entry.issuance !== undefined) return entry.issuance === "new" ? "issuance" : "reissuance";

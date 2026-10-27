@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { activityDays, activityKind, localDay, type ActivityKind } from "@ecx/wallet";
+  import { activityDays, activityKind, localDay, type ActivityKind, type AssetAmount, type TradeEntry } from "@ecx/wallet";
   import { assetSource, shortAsset } from "$lib/asset";
   import AssetBadge from "$lib/AssetBadge.svelte";
   import type { ChainId, HistoryEntry } from "$lib/background";
-  import type { Chains, ChainView } from "$lib/chains.svelte";
+  import ChainMark from "$lib/ChainMark.svelte";
+  import { assetMark, type Chains, type ChainView } from "$lib/chains.svelte";
   import Deposits from "$lib/Deposits.svelte";
   import Icon from "$lib/Icon.svelte";
   import Sheet from "$lib/Sheet.svelte";
@@ -57,6 +58,7 @@
     issuance: "Asset issuance",
     reissuance: "Asset reissuance",
     confidential: "Confidential transaction",
+    trade: "Trade",
   };
   const ICONS: Record<ActivityKind, "receive" | "send" | "refresh" | "deposit" | "plus" | "eye_off"> = {
     received: "receive",
@@ -67,6 +69,7 @@
     issuance: "plus",
     reissuance: "plus",
     confidential: "eye_off",
+    trade: "refresh",
   };
   function label(entry: HistoryEntry): string {
     const kind = activityKind(entry);
@@ -91,6 +94,40 @@
     entry.depositFrom !== undefined ? "credited by the chain's operator, not in a block yet" : "sent by someone else, it may still not arrive";
   const signed = (amount: string, text: string) => (amount.startsWith("-") ? text : `+${text}`);
 
+  // Flush trades (docs/adr/0017): one row twice as tall, what it gave above and what came back below.
+  const tickerOf = (view: ChainView, asset: string) => view.info.assets.find((a) => a.id === asset)?.ticker ?? "Unknown asset";
+  function tradeTitle(view: ChainView, { given, outcome }: TradeEntry): string {
+    const selling = given.asset !== "";
+    if (outcome.state === "missed") return selling ? "Sale didn't fill" : "Buy didn't fill";
+    if (outcome.state !== "filled" || outcome.payout === "queued") return selling ? `Selling ${tickerOf(view, given.asset)}` : "Buying";
+    if (!selling) return `Bought ${tickerOf(view, outcome.back.asset)}`;
+    return outcome.back.asset === "" ? `Sold ${tickerOf(view, given.asset)}` : `Swapped ${tickerOf(view, given.asset)}`;
+  }
+  /**
+   * What came back, as the row's second half: `reported` while only the market index vouches for
+   * it (a coinbase paying it exactly is the chain's word), `queued` until a coinbase pays it.
+   */
+  function tradeBack(entry: HistoryEntry, { outcome }: TradeEntry): { label: string; amount?: AssetAmount; time?: number; queued?: true; reported?: true } {
+    if (outcome.state === "settling") return { label: entry.confirmed ? "Waiting for the market's index" : "Settles once it's in a block" };
+    if (outcome.state === "unknown") return { label: "Couldn't read the outcome" };
+    const filled = outcome.state === "filled";
+    const { back: amount, payout } = outcome;
+    if (payout === "queued") return { label: filled ? "Payout" : "Refund", amount, queued: true, reported: true };
+    if (payout !== undefined) return { label: filled ? "Paid" : "Refunded", amount, ...(payout.time === undefined ? {} : { time: payout.time }) };
+    return { label: filled ? "Received" : "Returned", amount, reported: true };
+  }
+  const REPORTED = "Reported by the market's index: what a trade's result holds is only in the node's state.";
+  /** A fill between ECX and a token, as ECX per whole token. */
+  function tradePrice(view: ChainView, { given, outcome }: TradeEntry): string | undefined {
+    if (outcome.state !== "filled") return undefined;
+    const [ecx, token] = given.asset === "" ? [given, outcome.back] : outcome.back.asset === "" ? [outcome.back, given] : [];
+    if (ecx === undefined || token === undefined || BigInt(token.amount) === 0n) return undefined;
+    const decimals = view.info.assets.find((a) => a.id === token.asset)?.decimals;
+    if (decimals === undefined) return undefined;
+    const each = Number(ecx.amount) / 1e8 / (Number(token.amount) / 10 ** decimals);
+    return `${each.toPrecision(3)} ECX each`;
+  }
+
   function copy(txid: string) {
     navigator.clipboard.writeText(txid).catch(() => {});
     copied = true;
@@ -98,12 +135,25 @@
   }
 </script>
 
-{#snippet amounts(view: ChainView, entry: HistoryEntry, size: "in-row" | "in-sheet")}
-  {#each entry.amounts as { asset, amount } (asset)}
-    {@const entry = view.info.assets.find((a) => a.id === asset)}
-    {@const named = entry !== undefined}
-    <span class="amount {size}" class:in={!amount.startsWith("-")} data-history-amount data-asset={asset}>
-      {signed(amount, amountText(amount, asset, view.info.assets))}<AssetBadge {entry} />
+{#snippet amount(view: ChainView, { asset, amount }: AssetAmount, size: "in-row" | "in-sheet", how: { reported?: true; queued?: true })}
+  {@const entry = view.info.assets.find((a) => a.id === asset)}
+  {@const named = entry !== undefined}
+  {@const out = amount.startsWith("-")}
+  <!-- The asset's mark sits beside the amount, so a lettered one isn't read as part of it. -->
+  <span class="amount-line">
+    <span class="mark" aria-hidden="true"><ChainMark {...assetMark(entry)} size={size === "in-row" ? 16 : 24} /></span>
+    <span
+      class="amount {size}"
+      class:in={!out && !how.queued}
+      class:out
+      class:queued={how.queued}
+      class:reported={how.reported}
+      title={how.reported ? REPORTED : undefined}
+      data-history-amount
+      data-asset={asset}
+      data-reported={how.reported ? "" : undefined}
+    >
+      {how.queued ? "≈ " : ""}{signed(amount, amountText(amount, asset, view.info.assets))}<AssetBadge {entry} />
       {#if !named}
         <!-- A row has room for the words only; the details sheet shows which asset. -->
         <span class="muted tiny unknown" title={asset}>
@@ -116,6 +166,12 @@
         <span class="muted tiny" title={asset} data-asset-source>{assetSource(entry)} <code>{shortAsset(asset)}</code></span>
       {/if}
     </span>
+  </span>
+{/snippet}
+
+{#snippet amounts(view: ChainView, entry: HistoryEntry, size: "in-row" | "in-sheet")}
+  {#each entry.amounts as a (a.asset)}
+    {@render amount(view, a, size, {})}
   {/each}
   {#if entry.hidden}
     <span class="muted tiny" data-history-hidden>
@@ -175,6 +231,55 @@
       <ul>
         {#each items as { chain, entry } (`${chain.info.id}:${entry.txid}`)}
           {@const kind = activityKind(entry)}
+          {#if entry.trade}
+            {@const t = entry.trade}
+            {@const back = tradeBack(entry, t)}
+            {@const given = chain.info.assets.find((a) => a.id === t.given.asset)}
+            <li>
+              <button
+                class="row trade"
+                onclick={() => (inspecting = { chain, entry })}
+                data-history-entry={entry.txid}
+                data-history-chain={chain.info.id}
+                data-history-state={entry.confirmed ? "confirmed" : entry.trusted ? "pending" : "unconfirmed"}
+                data-trade-state={t.outcome.state}
+              >
+                <!-- What it gave, an arrow, what came back: each beside its half of the row. -->
+                <span class="pair" aria-hidden="true">
+                  <ChainMark {...assetMark(given)} size={22} />
+                  <span class="pair-arrow"><Icon name="chevron" size={12} /></span>
+                  {#if t.outcome.state === "missed"}
+                    <span class="pair-end returned"><Icon name="refresh" size={12} /></span>
+                  {:else if back.amount}
+                    <span class="pair-end" class:faded={back.queued}><ChainMark {...assetMark(chain.info.assets.find((a) => a.id === back.amount?.asset))} size={22} /></span>
+                  {:else}
+                    <span class="pair-end waiting"><Icon name="history" size={12} /></span>
+                  {/if}
+                </span>
+                <span class="halves">
+                  <span class="half">
+                    <span class="grow">
+                      <strong class="small" data-history-label>{tradeTitle(chain, t)}</strong>
+                      <span class="muted tiny meta">
+                        {#if views.length > 1}<span>{chain.info.name} ·</span>{/if}
+                        {@render status(entry)}
+                        <span data-trade-fee>· fee {amountText(t.fee, "", chain.info.assets)}</span>
+                      </span>
+                    </span>
+                    <span class="end">{@render amount(chain, { asset: t.given.asset, amount: `-${t.given.amount}` }, "in-row", {})}</span>
+                  </span>
+                  <span class="half back" class:waiting={back.queued || back.amount === undefined}>
+                    <span class="grow line small" data-trade-back>
+                      {back.label}{#if back.queued}{" "}<span class="pill">Queued</span>{:else if back.time !== undefined && entry.time !== undefined && timeOf(back.time) !== timeOf(entry.time)}<span class="muted tiny"> · {timeOf(back.time)}</span>{/if}
+                    </span>
+                    {#if back.amount}
+                      <span class="end">{@render amount(chain, back.amount, "in-row", { ...(back.reported ? { reported: true as const } : {}), ...(back.queued ? { queued: true as const } : {}) })}</span>
+                    {/if}
+                  </span>
+                </span>
+              </button>
+            </li>
+          {:else}
           <li>
             <button
               class="row"
@@ -194,6 +299,7 @@
               <span class="end">{@render amounts(chain, entry, "in-row")}</span>
             </button>
           </li>
+          {/if}
         {/each}
       </ul>
     </section>
@@ -214,8 +320,24 @@
 
 {#if inspecting}
   {@const { chain, entry } = inspecting}
-  <Sheet title={label(entry)} onclose={() => (inspecting = undefined)} data-activity-details>
-    <div class="sheet-amounts">{@render amounts(chain, entry, "in-sheet")}</div>
+  <Sheet title={entry.trade ? tradeTitle(chain, entry.trade) : label(entry)} onclose={() => (inspecting = undefined)} data-activity-details>
+    {#if entry.trade}
+      {@const t = entry.trade}
+      {@const back = tradeBack(entry, t)}
+      {@const price = tradePrice(chain, t)}
+      <div class="sheet-amounts" data-trade-sheet>
+        <span class="muted tiny">You gave</span>
+        {@render amount(chain, { asset: t.given.asset, amount: `-${t.given.amount}` }, "in-sheet", {})}
+        <span class="muted tiny">fee {amountText(t.fee, "", chain.info.assets)}{price ? ` · ${price}` : ""}</span>
+        <span class="sheet-arrow" aria-hidden="true"><Icon name="chevron" size={16} /></span>
+        <span class="muted tiny">{back.label}{back.time !== undefined ? ` at ${timeOf(back.time)}` : ""}</span>
+        {#if back.amount}
+          {@render amount(chain, back.amount, "in-sheet", { ...(back.reported ? { reported: true as const } : {}), ...(back.queued ? { queued: true as const } : {}) })}
+        {/if}
+      </div>
+    {:else}
+      <div class="sheet-amounts">{@render amounts(chain, entry, "in-sheet")}</div>
+    {/if}
     <dl class="facts">
       <dt>Status</dt>
       <dd>
@@ -231,11 +353,32 @@
           <Icon name={copied ? "check" : "copy"} size={14} />
         </button>
       </dd>
+      {#if entry.trade && "payout" in entry.trade.outcome && typeof entry.trade.outcome.payout === "object"}
+        <dt>{entry.trade.outcome.state === "filled" ? "Paid by" : "Refunded by"}</dt>
+        <dd class="txid"><code title="The coinbase output that paid it: the wallet paired it by its address and amount" data-details-payout>{entry.trade.outcome.payout.txid}</code></dd>
+      {/if}
+      {#if entry.trade}
+        <dt>Pool</dt>
+        <dd class="txid"><code>{entry.trade.pool}</code></dd>
+      {/if}
       {#if entry.depositFrom !== undefined}
         <dt>Deposit</dt>
         <dd class="txid"><code title="The Deposit's transaction on the main chain" data-details-deposit-from>{entry.depositFrom}</code></dd>
       {/if}
     </dl>
+    {#if entry.trade?.outcome.state === "unknown"}
+      <p class="problem small" data-trade-error>
+        <span>Couldn't read the outcome: {entry.trade.outcome.error}</span>
+        <button class="link" onclick={() => chains.readHistory([chain.info.id])}><Icon name="refresh" size={12} /> Retry</button>
+      </p>
+    {/if}
+    {#if entry.trade && "payout" in entry.trade.outcome && entry.trade.outcome.payout !== undefined}
+      <p class="muted small">
+        {entry.trade.outcome.payout === "queued"
+          ? "Flush pays this from a queue, in a coinbase to come. The amount is the market's index's word."
+          : "Nothing on the chain links a coinbase to its trade: the wallet paired them by the trade's payout address and the exact amount."}
+      </p>
+    {/if}
     {#if chain.history?.report}
       <p class="reported" data-details-reported-by>Reported by {chain.history.report.server}. This wallet doesn't verify it.</p>
     {/if}
@@ -328,9 +471,104 @@
     align-items: flex-end;
     text-align: right;
   }
+  .amount-line {
+    display: inline-flex;
+    align-items: baseline;
+    justify-content: flex-end;
+    gap: 4px;
+  }
+  .amount-line .mark {
+    display: inline-flex;
+    align-self: center;
+  }
+  /* In the sheet, where an asset's name comes from goes under its amount, not beside it. */
+  .sheet-amounts .amount-line {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .amount.in-sheet [data-asset-source] {
+    display: block;
+  }
   .amount {
     font-weight: 600;
     font-variant-numeric: tabular-nums;
+  }
+  .amount.out {
+    color: var(--danger);
+  }
+  .amount.queued {
+    color: var(--muted);
+    font-weight: 500;
+  }
+  .amount.reported {
+    text-decoration: underline dotted;
+    text-underline-offset: 3px;
+    cursor: help;
+  }
+  /* A trade (docs/adr/0017): twice a row's height, what it gave above and what came back below. */
+  .row.trade {
+    min-height: 80px;
+    align-items: stretch;
+  }
+  .pair {
+    flex: none;
+    width: 36px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 0 4px;
+  }
+  .pair-arrow {
+    display: inline-flex;
+    color: var(--muted);
+  }
+  .pair-end {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    min-height: 22px;
+    border-radius: 50%;
+  }
+  .pair-end.faded {
+    opacity: 0.45;
+  }
+  .pair-end.returned {
+    background: var(--warn-bg);
+    color: var(--warn);
+  }
+  .pair-end.waiting {
+    background: var(--surface-2);
+    color: var(--muted);
+  }
+  .halves {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .half {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 40px;
+  }
+  .half.back {
+    min-height: 30px;
+    border-top: 1px dashed var(--border);
+  }
+  .half.waiting {
+    color: var(--muted);
+  }
+  .line {
+    flex: 1;
+    min-width: 0;
+  }
+  .sheet-arrow {
+    display: inline-flex;
+    color: var(--muted);
+    padding: 2px 0;
   }
   .amount.in-row {
     font-size: 0.85rem;

@@ -18,6 +18,8 @@ describe("activityKind", () => {
     assert.equal(activityKind(entry("a", ["-120"], { toSelf: true })), "toSelf");
     assert.equal(activityKind(entry("a", ["-41000"], { depositTo: 24 })), "deposit");
     assert.equal(activityKind(entry("a", [], { hidden: true })), "confidential", "nothing but confidential amounts");
+    const trade = { pool: "77".repeat(32), given: { asset: "", amount: "100000" }, fee: "400", outcome: { state: "settling" } };
+    assert.equal(activityKind(entry("a", ["-100400"], { trade })), "trade", "a Flush trade is a trade, whatever left");
   });
 });
 

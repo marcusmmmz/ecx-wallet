@@ -9,7 +9,8 @@
   let { kind, label = "", image, size = 32 }: { kind: "ecash" | "chain" | "asset" | "unknown"; label?: string; image?: string; size?: number } = $props();
 </script>
 
-<span class="mark {kind}" style:width="{size}px" style:height="{size}px" style:font-size="{Math.round(size * 0.36)}px">
+<!-- A letter at a third of the disc reads at 32 px; below about 28 px it needs a floor of 10 px. -->
+<span class="mark {kind}" style:width="{size}px" style:height="{size}px" style:font-size="{Math.max(Math.round(size * 0.36), 10)}px">
   {#if image !== undefined && image.startsWith("data:image/")}
     <img src={image} alt="" width={size} height={size} />
   {:else if kind === "ecash"}
