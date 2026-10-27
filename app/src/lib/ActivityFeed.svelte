@@ -267,8 +267,8 @@
                     </span>
                     <span class="end">
                       {@render amount(chain, { asset: t.given.asset, amount: `-${t.given.amount}` }, "in-row", {})}
-                      <!-- Under what it paid for, so the left keeps every row's chain, time and badge on one line. -->
-                      <span class="muted tiny" data-trade-fee>fee {amountText(t.fee, "", chain.info.assets)}</span>
+                      <!-- The fee is an amount like any other that left the wallet, so a Send and a trade read alike. -->
+                      {#if BigInt(t.fee) > 0n}{@render amount(chain, { asset: "", amount: `-${t.fee}` }, "in-row", {})}{/if}
                     </span>
                   </span>
                   <span class="half back" class:waiting={back.queued || back.amount === undefined}>
@@ -460,15 +460,24 @@
     display: flex;
     flex-direction: column;
   }
+  /*
+   * Amounts never wrap or shrink. On a narrow screen the label is cut short, and its small text wraps
+   * between items (a badge drops to its own line, whole).
+   */
+  .grow > strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .meta {
     display: flex;
+    flex-wrap: wrap;
     white-space: nowrap;
     align-items: center;
-    gap: 4px;
+    gap: 0 4px;
   }
   .end {
     flex: none;
-    max-width: 55%;
     display: flex;
     flex-direction: column;
     align-items: flex-end;
@@ -575,6 +584,7 @@
   }
   .amount.in-row {
     font-size: 0.85rem;
+    white-space: nowrap;
   }
   .amount.in-sheet {
     font-size: 1.5rem;

@@ -330,14 +330,13 @@ for (const browserName of BROWSERS) describe(browserName, () => {
         const text = (x) => x?.textContent.replace(/\s+/g, " ").trim();
         return {
           label: text(e.querySelector("[data-history-label]")),
-          fee: text(e.querySelector("[data-trade-fee]")),
           amounts: [...e.querySelectorAll("[data-history-amount]")].map(text),
           back: text(e.querySelector("[data-trade-back]")),
           reported: e.querySelector("[data-reported]") !== null,
           red: getComputedStyle(e.querySelector(".amount.out")).color,
         };
       });
-      assert.deepEqual({ ...shown, red: undefined }, { label: "Sold BROSEVELT", fee: "fee 0.000004 ECX", amounts: ["−12.34 BROSEVELT", "+0.000121 ECX"], back: "Paid", reported: false, red: undefined });
+      assert.deepEqual({ ...shown, red: undefined }, { label: "Sold BROSEVELT", amounts: ["−12.34 BROSEVELT", "−0.000004 ECX", "+0.000121 ECX"], back: "Paid", reported: false, red: undefined });
       assert.equal(shown.red, "rgb(196, 35, 43)", "what left the wallet is red");
       assert.equal(await page.$(`[data-history-entry="${parseTx(SALE_PAYOUT).txid}"]`), null, "the payout has no row of its own");
 
