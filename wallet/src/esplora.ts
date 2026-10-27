@@ -497,10 +497,22 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
       return Object.fromEntries(rates) as Record<string, number>;
     },
 
-    /** Broadcasts a raw transaction (hex); returns the txid the server reports. */
+    /**
+     * Broadcasts a raw transaction (hex); returns the txid the server reports. Flush's explorer
+     * refuses with the node's code alone (`{"code":-26}`): the reason is then asked of its
+     * `POST /txs/test` (the node's `testmempoolaccept`), and left out if that doesn't answer it.
+     */
     async broadcast(tx: string): Promise<string> {
       const answer = await response("/tx", { method: "POST", body: tx, headers: { "Content-Type": "text/plain" } });
-      if (!answer.ok) throw refused(answer);
+      if (!answer.ok) {
+        const error = refused(answer);
+        if (!/RPC error: \{"code":-?[0-9]+\}$/.test(error.message)) throw error;
+        const reason = await response("/txs/test", { method: "POST", body: JSON.stringify([tx]), headers: { "Content-Type": "application/json" } })
+          .then((test) => (test.ok ? (JSON.parse(test.body) as Record<string, unknown>[])?.[0]?.["reject-reason"] : undefined))
+          .catch(() => undefined);
+        if (typeof reason !== "string" || reason === "") throw error;
+        throw new SidechainServerError(url, `${error.message}: ${reason.slice(0, 200)}`);
+      }
       const txid = answer.body.trim();
       if (!HASH.test(txid)) throw malformed("txid");
       return txid;

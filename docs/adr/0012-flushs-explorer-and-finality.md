@@ -33,6 +33,7 @@ Flush's module builds from whole transactions (its format is `psbt`, as L1's Dep
 
 ## Consequences
 
-- Flush's explorer had no unconfirmed incoming outputs on `/address/*` (recorded 2026-10-25). A payment to the wallet showed only once it was in a block, and a Send's change only then too. Its `58882ec` merges the mempool into `/address/*` and adds Blockstream's `/txs/chain/:txid`, so the client's `?after_txid=` fallback stops being needed. Neither was observable live: the mempool was empty, and `/address/:a/txs*` returned 502 from 2026-10-25 20:16 UTC (#55).
+- Flush's explorer had no unconfirmed incoming outputs on `/address/*` (recorded 2026-10-25). A payment to the wallet showed only once it was in a block, and a Send's change only then too. Its `58882ec` merges the mempool into `/address/*` and adds Blockstream's `/txs/chain/:txid`, so the client's `?after_txid=` fallback stops being needed. Neither was observable live: the mempool was empty, and `/address/:a/txs*` returned 502 from 2026-10-25 20:16 UTC (#55). Fixed by 2026-10-27, with `POST /tx` now reaching the node.
+- A refused broadcast carries the node's code alone (`sendrawtransaction RPC error: {"code":-26}`). The wallet then asks the explorer's `POST /txs/test` (the node's `testmempoolaccept`) for the reason, and shows the code alone if that doesn't answer.
 - A Send's held coins are released once its block is anchored, or once the server has forgotten it for 6 blocks (`HOLD_BLOCKS`), which on Flush is 90 seconds.
 - `"flush"` is provisional with the rest of Slot 46's Chain Entry. If Slot 46's explorer differs from today's Slot 99 one, this ADR changes with it.

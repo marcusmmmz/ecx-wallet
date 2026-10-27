@@ -429,4 +429,20 @@ describe("Flush", () => {
     await assert.rejects(client.tx("ab".repeat(32)), /refused: No such mempool or blockchain transaction$/);
     await assert.rejects(client.blockHash(99_999), /refused: Failed to get block at height$/);
   });
+
+  test("a refused broadcast names the node's reason, asked of testmempoolaccept", async () => {
+    const client = wallet.esploraClient(wallet.esploraConfig(module().chainEntry(), module().chainEntry().networks.betanet), (...args) => fetch(...args));
+    const tx = paying("c9", [[RECEIVE_0.scriptPubkey, 1_000]]);
+    config.refuseBroadcast = 'sendrawtransaction RPC error: {"code":-26}';
+    try {
+      config.rejectReason = "min relay fee not met";
+      await assert.rejects(client.broadcast(tx), /refused: sendrawtransaction RPC error: \{"code":-26\}: min relay fee not met$/);
+      assert.ok(stub.requests().includes("POST /txs/test"));
+      // No reason to add: the code alone, as the explorer said it.
+      config.rejectReason = undefined;
+      await assert.rejects(client.broadcast(tx), /refused: sendrawtransaction RPC error: \{"code":-26\}$/);
+    } finally {
+      config.refuseBroadcast = config.rejectReason = undefined;
+    }
+  });
 });

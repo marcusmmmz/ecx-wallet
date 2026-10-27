@@ -20,7 +20,7 @@ import { parseElementsTx } from "./elements-tx.mjs";
  *   txStatuses?: Record<string, { confirmed: boolean, blockHeight?: number, blockHash?: string }>,
  *   broadcastTxid?: string, assets?: Record<string, object>, flush?: boolean,
  *   finality?: Record<string, "soft" | "anchored" | "final">, tipTime?: number,
- *   flushAssets?: Record<string, object>, holdings?: Record<string, object[]> }} EsploraStubConfig
+ *   flushAssets?: Record<string, object>, holdings?: Record<string, object[]>, rejectReason?: string }} EsploraStubConfig
  */
 
 /** How many confirmed transactions an address's list holds per page, as both electrs forks list them. */
@@ -59,7 +59,8 @@ const PAGE = 25;
  * height past the tip is HTTP 500; errors are JSON `{ error }`, and unknown routes an HTML 404.
  * `/flush/rpc/getasset?args=["0x<id>"]` answers `config.flushAssets[id]` (getasset's JSON), else 404
  * `{ error: "Not found" }`; `/flush/market/addresses/{address}/holdings` answers
- * `{ items: config.holdings[address] ?? [], address }`.
+ * `{ items: config.holdings[address] ?? [], address }`; `POST /txs/test` answers each transaction
+ * `allowed`, or refused with `config.rejectReason` as its `reject-reason`.
  */
 export function createEsploraStub(config) {
   /** Every request, in order: its path, or `POST <path>`. */
@@ -122,7 +123,7 @@ export function createEsploraStub(config) {
 
   function route(method, pathname, body, query) {
     if (method === "POST" && pathname === "/tx") {
-      if (config.refuseBroadcast) return [400, config.refuseBroadcast];
+      if (config.refuseBroadcast) return error(400, config.refuseBroadcast);
       let tx;
       try {
         tx = config.elements ? parseElementsTx(body.trim()) : parseTx(body.trim());
@@ -134,6 +135,10 @@ export function createEsploraStub(config) {
       else (config.txs ??= []).push({ hex: body.trim(), confirmed: false });
       // `config.broadcastTxid` answers another txid than the one broadcast, as a lying server would.
       return [200, config.broadcastTxid ?? tx.txid];
+    }
+    if (config.flush && method === "POST" && pathname === "/txs/test") {
+      const reason = config.rejectReason;
+      return [200, JSON.parse(body).map((hex) => ({ txid: parseTx(hex).txid, allowed: !reason, ...(reason && { "reject-reason": reason }) }))];
     }
     if (method !== "GET") return [405, "Method not allowed"];
 
