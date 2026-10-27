@@ -183,6 +183,7 @@ What a Sidechain App calls (`wallet/src/provider.ts`). It finds the Provider wit
 | `getAddresses({ slot })` | yes | `[{ chain, address, publicKey }]`: the Slot's receive address, its CAIP-2 chain id, and the 33-byte compressed key the address pays, in hex. Older wallets don't send `publicKey`. While locked, it opens a window to unlock first. |
 | `signTransaction(request)` | yes | Signs a Signing Request (a PSET) after approval and returns it signed. It doesn't broadcast. |
 | `sendTransfer({ slot, outputs })` | yes | The wallet makes a Send for the app and returns `{ txid }`. |
+| `sendAction({ slot, action })` | yes (`sendTransfer`'s) | The wallet builds the chain's action (on Flush, the trade a `flush:` link asks for) and returns `{ txid }`. See below. |
 | `suggestAsset({ slot, asset, contract \| label })` | yes | Suggests a name for an asset; once the user approves, returns what the wallet stored. See below. |
 
 **Grants** are per origin, stored in `storage.local`, and listed on the Grants screen (`#/grants`), where they can be revoked. The connect prompt also has the **Blind Signing opt-in**, a checkbox that is off by default.
@@ -229,6 +230,24 @@ The wallet's own [Send](#send), for an app (#39, ADR 0006): the app names the ou
 - **Errors go to the app**, not into Activity:
   - not enough spendable, dust, a confidential address → -32602 over Esplora;
   - over `/v1`, the server's refusals and anything wrong with what it built → -32001.
+
+### sendAction and `window.flush`
+
+A chain's action, built by the wallet (#60, ADR 0016). On Flush, `action` is a `flush:` link as flush.markets writes it: a `swap`, `buy` or `sell` (any other Flush action is 4200). `sendTransfer`'s Grant covers it.
+
+**`window.flush`**: flush.markets finds a wallet only there, so the in-page script also defines `window.flush` (`isFlush: true`, and `request({ method, params })` for its two methods), unless the page already has one. Both go through the same relay as the Provider:
+
+- `flush_requestAddress` → `{ network: "ecashbeta", address }`: the given-out address of the Flush Slot on the wallet's network, with the network as a link names it. It's the site's first call, so without a Grant it asks for one (`getAddresses` and `sendTransfer` on that Slot).
+- `flush_submit({ uri })` → `{ txid }`: `sendAction` on that Slot.
+- A rejection reads exactly "User rejected.", which the site takes quietly; any other error's message is shown to the user there.
+
+**The trade** (`wallet/src/send.ts`, `trade`), in the Slot's queue with its Sends:
+
+1. The module reads the link (`parseAction`): its version, network and expiry as Flush's own app checks them. A link that already ran this session is refused: its SHA-256 is kept in `storage.session`.
+2. From the explorer: the node's quote (`getswapquote`; a buy or sale trades on the launch's curve), the pool (`getpool`), each token's registration transaction (`getasset`'s `registration`) and the least ECX the node pays out (`getbitassetsinfo`). A server failure here is -32001.
+3. After unlocking, the module builds it (`buildTrade`) from the account's coins: one `swap_pools` marker through the pool, its result, token change and `chn_to` at the given-out address. It recomputes the pool's id from what the explorer reported, takes the token's decimals from its checked registration, and refuses a floor the quote doesn't meet or one more than 10% below it (-32602).
+4. The Decoder explains it with the pool as evidence; anything but a Clear View of exactly the trade built, every output back to the wallet, is a wallet bug, refused before the user sees it. The approval shows the trade: what goes in, at least what comes out with the node's quote, where it goes, and when the link expires.
+5. It's broadcast with `?maxburnamount=` the ECX its marker carries, its coins are held as a Send's, and the link is kept as run.
 
 ### suggestAsset
 

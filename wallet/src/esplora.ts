@@ -498,6 +498,22 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
     },
 
     /**
+     * A read of Flush's node through the explorer's allowlist (`/flush/rpc/:method?args=`): its JSON,
+     * or undefined if the node doesn't know what was asked (404). The explorer's word only: whoever
+     * uses it checks what it can (docs/adr/0016).
+     */
+    async flushRpc(method: string, args: unknown[] = []): Promise<unknown> {
+      const answer = await response(`/flush/rpc/${method}?args=${encodeURIComponent(JSON.stringify(args))}`);
+      if (answer.status === 404) return undefined;
+      if (!answer.ok) throw refused(answer);
+      try {
+        return JSON.parse(answer.body);
+      } catch {
+        throw malformed(`${method} answer`);
+      }
+    },
+
+    /**
      * A Flush address's asset tokens as the node's DEX API counts them (`/flush/market/addresses/:a/holdings`),
      * results included: the server's word only, with no outpoints (docs/adr/0013).
      */

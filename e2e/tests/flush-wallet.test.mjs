@@ -10,7 +10,24 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { encodeTx, parseTx } from "@ecx/stub-server/bitcoin-tx";
-import { ABANDON, activitySettled, answerIn, approvalIn, BROWSERS, DIST, homeSettled, importWallet, launchWallet, openWalletPage, ROOT, serveFlushEsplora, serveL1Esplora, setUpWallet } from "../harness.mjs";
+import {
+  ABANDON,
+  activitySettled,
+  answerIn,
+  approvalIn,
+  BROWSERS,
+  DIST,
+  homeSettled,
+  importWallet,
+  launchWallet,
+  openTestApp,
+  openWalletPage,
+  ROOT,
+  serveFlushEsplora,
+  serveL1Esplora,
+  serveTestApp,
+  setUpWallet,
+} from "../harness.mjs";
 
 const wallet = await importWallet();
 const [vault, flush] = await Promise.all([
@@ -49,6 +66,13 @@ const BROSEVELT_IN = encodeTx({
   ],
 });
 
+/** FORK, a live launch on Slot 99: its registration and its launch's pool, as getpool answers (core/flush/tests). */
+const TRADE = JSON.parse(await readFile(path.join(ROOT, "core/flush/tests/trade-fixtures.json"), "utf8"));
+const FORK = "6bb2ae6e23e626cd2fba1f8845d8bbc047aeb9a8f4690ee9a21b5d04584dfb03";
+const FORK_POOL = "2b16f8c06c0f98034bacfe23cec9e36ce96b3d1282766dd957901435354b402a";
+/** 0.0005 ECX to the wallet, for the trade alone. */
+const FOR_TRADE = encodeTx({ inputs: [{ txid: "e4".repeat(32), vout: 0 }], outputs: [{ value: 50_000, script: RECEIVE_0.scriptPubkey }] });
+
 const utxo = (hex, value, blockHash) => ({ txid: parseTx(hex).txid, vout: hex === PAYOUT ? 1 : 0, value, confirmed: true, blockHash });
 
 /** What the Flush stub holds (read on every request). */
@@ -79,14 +103,16 @@ for (const browserName of BROWSERS) describe(browserName, () => {
   let session;
   let stub;
   let l1Stub;
+  let app;
   before(async () => {
-    [session, stub, l1Stub] = await Promise.all([launchWallet(browserName), serveFlushEsplora(FLUSH), serveL1Esplora(L1_ESPLORA)]);
+    [session, stub, l1Stub, app] = await Promise.all([launchWallet(browserName), serveFlushEsplora(FLUSH), serveL1Esplora(L1_ESPLORA), serveTestApp()]);
     await setUpWallet(session, { on: [99] });
   });
   after(async () => {
     await session?.close();
     await stub?.close();
     await l1Stub?.close();
+    await app?.close();
   });
 
   test("home shows Flush's ECX, its soft block's payment counted and marked preconf", async () => {
@@ -197,6 +223,62 @@ for (const browserName of BROWSERS) describe(browserName, () => {
       FLUSH.txs = txs;
       FLUSH.utxos[RECEIVE_0.address] = utxos;
       FLUSH.flushAssets = undefined;
+    }
+  });
+
+  test("flush.markets finds the wallet at window.flush, gets its address once granted, and a buy is approved in a trade Clear View", async () => {
+    const { txs, utxos } = { txs: FLUSH.txs, utxos: FLUSH.utxos[RECEIVE_0.address] };
+    FLUSH.txs = [...txs, { hex: FOR_TRADE, blockHeight: 3260, blockHash: FINAL }, { hex: TRADE.forkRegistration.hex, blockHeight: 7790, blockHash: FINAL }];
+    // Only this coin: earlier tests' spends may still hold the others.
+    FLUSH.utxos[RECEIVE_0.address] = [utxo(FOR_TRADE, 50_000, FINAL)];
+    FLUSH.flushAssets = { [FORK]: { asset: FORK, registered: 7790, registration: TRADE.forkRegistration.txid } };
+    FLUSH.flushRpc = {
+      getswapquote: () => ({ pools: [{ pool: FORK_POOL, curve: "launch", amount_out: 0.044482 }], best_pool: FORK_POOL }),
+      getpool: ([id]) => (id === FORK_POOL ? TRADE.forkPool : undefined),
+      getbitassetsinfo: { min_chn_payout: 0.00005, small_payout_height: 9000 },
+    };
+    try {
+      const page = await openTestApp(session, app, "dex.localhost");
+      assert.equal(await page.evaluate(() => window.flush?.isFlush), true);
+      const asking = page.evaluate(() => window.flush.request({ method: "flush_requestAddress" }));
+      const grant = await session.waitForApprovalWindow();
+      assert.deepEqual(await grant.$$eval("[data-method]", (e) => e.map((m) => m.textContent.trim())), ["getAddresses", "sendTransfer"]);
+      await grant.click("[data-approve]");
+      assert.deepEqual(await asking, { network: "ecashbeta", address: RECEIVE_0.address });
+
+      const link = `flush:buy?v=1&network=ecashbeta&exp=${Math.floor(Date.now() / 1000) + 600}&launch=FORK&asset=${FORK}&ecx=0.0001&min_tokens=0.044`;
+      const before = stub.broadcasts().length;
+      const submitting = page.evaluate(
+        (uri) => window.flush.request({ method: "flush_submit", params: { uri } }).catch((e) => ({ code: e.code, message: e.message })),
+        link,
+      );
+      const approval = await session.waitForApprovalWindow({ timeout: 20_000 });
+      const shown = await approval.$eval("[data-trade]", (e) => {
+        const text = (q) => e.querySelector(q)?.textContent.replace(/\s+/g, " ").trim();
+        return { title: text("h2"), pay: text("[data-trade-pay]"), receive: text("[data-trade-receive]"), quote: text("[data-trade-quote]"), to: text("[data-trade-to]"), warnings: e.querySelectorAll("[data-trade-warning]").length };
+      });
+      assert.deepEqual(shown, {
+        title: "Buy on Flush",
+        pay: "Pay 0.00010000 ECX",
+        receive: "Receive at least 0.044000 FORK",
+        quote: "The pool gives 0.044482 FORK now, by the node's own quote.",
+        to: RECEIVE_0.address,
+        warnings: 0,
+      });
+      await approval.click("[data-approve]");
+      const answer = await submitting;
+      assert.equal(stub.broadcasts().length, before + 1);
+      assert.deepEqual(answer, { txid: parseTx(stub.broadcasts().at(-1)).txid });
+      assert.equal(stub.burnAllowances().at(-1), "0.0001");
+
+      // The same link again: refused, with the reason for the site to show.
+      const again = await page.evaluate((uri) => window.flush.request({ method: "flush_submit", params: { uri } }).catch((e) => ({ code: e.code, message: e.message })), link);
+      assert.deepEqual(again, { code: -32602, message: "This link has already run: ask the site for a fresh one." });
+      await page.close();
+    } finally {
+      FLUSH.txs = txs;
+      FLUSH.utxos[RECEIVE_0.address] = utxos;
+      FLUSH.flushAssets = FLUSH.flushRpc = undefined;
     }
   });
 

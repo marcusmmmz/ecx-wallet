@@ -39,6 +39,7 @@ import {
   type HeldSpend,
   type HeldStore,
   type TransferOutput,
+  type UsedLinks,
   type GrantStore,
   type KeyValueStore,
   type PendingDeposit,
@@ -413,6 +414,7 @@ const handleProviderRequest = createProviderHandler({
   chains: chainsOn,
   receiveAddresses: (slot) => accounts.receiveAddresses(slot),
   send: (slot, order, from) => sends.send(slot, order, from),
+  sendAction: (slot, action, from) => sends.trade(slot, action, from),
   askToNameAsset,
   async assetSuggestion(slot, origin, suggestion) {
     const module = await chainModule(slot)!;
@@ -471,7 +473,13 @@ const deposits = createDeposits({
 });
 
 // The wallet's own Send: over Esplora the Slot's module builds it; a `/v1` server builds its own.
-const sends = createSends({ ...keys, chainModule, l1Module, pullPath, esplora, openSigningApproval, isUnlocked: signing.isUnlocked, held: heldStore, cache: sessionCache, now: () => Date.now() });
+/** Links whose trade went out (docs/adr/0016): `storage.session`, so kept across lock and forgotten when the browser closes. */
+const usedLinks: UsedLinks = {
+  has: async (digest) => (await chrome.storage.session.get(`usedLink:${digest}`))[`usedLink:${digest}`] !== undefined,
+  add: (digest) => chrome.storage.session.set({ [`usedLink:${digest}`]: true }),
+};
+
+const sends = createSends({ ...keys, chainModule, l1Module, pullPath, esplora, openSigningApproval, isUnlocked: signing.isUnlocked, held: heldStore, usedLinks, cache: sessionCache, now: () => Date.now() });
 
 /** The requester's web origin as the browser reports it for a content-script message. */
 function requesterOrigin(sender: chrome.runtime.MessageSender): string | undefined {

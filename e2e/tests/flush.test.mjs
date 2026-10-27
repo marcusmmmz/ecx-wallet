@@ -49,6 +49,11 @@ const BROSEVELT_REGISTRATION = "24fc101fccc71bc60845e190c2ad1e07b332fe7a6de99af3
 /** BROSEVELT's SetLogo: the whole JPEG in its marker. */
 const BROSEVELT_LOGO = "7958bc9b161e2bacc98e66bd7c6a01457809817a4c0cfcecc749504ad38e8d44";
 const LIVE_TXS = JSON.parse(await readFile(path.join(ROOT, "core/flush/tests/token-txs.json"), "utf8"));
+/** FORK, a live launch on Slot 99: its registration and its launch's pool, as getpool answers (core/flush/tests). */
+const TRADE = JSON.parse(await readFile(path.join(ROOT, "core/flush/tests/trade-fixtures.json"), "utf8"));
+const FORK = "6bb2ae6e23e626cd2fba1f8845d8bbc047aeb9a8f4690ee9a21b5d04584dfb03";
+const FORK_POOL = "2b16f8c06c0f98034bacfe23cec9e36ce96b3d1282766dd957901435354b402a";
+const DEX = "https://flush.markets";
 
 /** Core's VARINT (serialize.h): base 128, most significant group first, one less per continuation byte. */
 function varint(n) {
@@ -126,7 +131,7 @@ describe("Flush", () => {
     return { pullPath: wallet.createPullPath(deps), deps, prompts };
   }
 
-  function sendsWith({ held = [] } = {}) {
+  function sendsWith({ held = [], used = new Set() } = {}) {
     const { pullPath, deps, prompts } = pullPathWith();
     const sends = wallet.createSends({
       ...deps,
@@ -137,9 +142,10 @@ describe("Flush", () => {
         put: async (h) => void held.push(h),
         remove: async (txid) => void held.splice(held.findIndex((h) => h.txid === txid), 1),
       },
+      usedLinks: { has: async (d) => used.has(d), add: async (d) => void used.add(d) },
       now: () => Date.now(),
     });
-    return { sends, prompts, held };
+    return { sends, prompts, held, used };
   }
 
   test("a server on another Flush chain fails the identity check", async () => {
@@ -496,4 +502,80 @@ describe("Flush", () => {
     await client.broadcast(paying("cc", [[RECEIVE_0.scriptPubkey, 1_000]]), "2100000000000000");
     assert.deepEqual(stub.burnAllowances().slice(before), [null, "0.0001", "21000000"]);
   });
+
+  describe("a flush.markets trade (sendAction, docs/adr/0016)", () => {
+    const link = (verb, params, exp = Math.floor(Date.now() / 1000) + 600) => `flush:${verb}?v=1&network=ecashbeta&exp=${exp}&${params}`;
+    const buy = (ecx = "0.0001", minTokens = "0.044") => link("buy", `launch=FORK&asset=${FORK}&ecx=${ecx}&min_tokens=${minTokens}`);
+
+    /** A confirmed 0.001 ECX coin, FORK known to the stub's node, its pool quoting `quote` FORK for what goes in. */
+    function market(quote = 0.044482) {
+      const coin = paying("d1", [[RECEIVE_1.scriptPubkey, 100_000]]);
+      fund([
+        { hex: coin, blockHeight: 400, blockHash: FINAL },
+        { hex: TRADE.forkRegistration.hex, blockHeight: 7790, blockHash: FINAL },
+      ]);
+      config.flushAssets = { [FORK]: { asset: FORK, registered: 7790, registration: TRADE.forkRegistration.txid } };
+      config.flushRpc = {
+        getswapquote: () => ({ pools: [{ pool: FORK_POOL, curve: "launch", amount_out: quote }], best_pool: FORK_POOL }),
+        getpool: ([id]) => (id === FORK_POOL ? TRADE.forkPool : undefined),
+        getbitassetsinfo: { min_chn_payout: 0.00005, small_payout_height: 9000 },
+      };
+      config.flushRpcStatus = {};
+    }
+
+    after(() => {
+      config.flushAssets = config.flushRpc = config.flushRpcStatus = undefined;
+    });
+
+    test("a launch buy is built, approved Clear, broadcast with its marker's ECX allowed, and its link won't run twice", async () => {
+      market();
+      const { sends, prompts, held, used } = sendsWith();
+      const before = stub.broadcasts().length;
+      const uri = buy();
+      const result = await sends.trade(99, uri, { origin: DEX });
+
+      assert.equal(prompts.length, 1);
+      const { context, prompt } = prompts[0];
+      assert.deepEqual(context, { origin: DEX, chain: CHAIN });
+      assert.equal(prompt.decoded.kind, "clear");
+      const { trade } = prompt.decoded.view;
+      assert.deepEqual([trade.pool, trade.assetIn, trade.amountIn, trade.assetOut, trade.minOut, trade.warnings], [FORK_POOL, "", "10000", FORK, "44000", []]);
+      assert.deepEqual([prompt.trade.verb, prompt.trade.quote, prompt.trade.assetOut.ticker, prompt.trade.assetOut.decimals], ["buy", "44482", "FORK", 6]);
+
+      assert.equal(stub.broadcasts().length, before + 1);
+      assert.equal(stub.burnAllowances().at(-1), "0.0001", "exactly the ECX its marker locks");
+      const tx = parseTx(stub.broadcasts().at(-1));
+      assert.equal(result.txid, tx.txid);
+      assert.deepEqual([tx.outputs[0].value, tx.outputs[0].script], [0, RECEIVE_0.scriptPubkey], "the result, at the given-out address");
+      assert.equal(tx.outputs[1].value, 10_000);
+      assert.equal(held.length, 1);
+      assert.equal(used.size, 1);
+
+      await assert.rejects(sends.trade(99, uri, { origin: DEX }), (e) => e.code === -32602 && /already run/.test(e.message));
+      assert.equal(prompts.length, 1, "refused before any window");
+    });
+
+    test("what the wallet won't build is refused, and never shown", async () => {
+      const cases = [
+        ["a floor the pool can't meet", () => market(0.04), buy(), -32602, /less than the link's floor/],
+        ["a floor far below the quote", () => market(0.06), buy(), -32602, /more than 10% below/],
+        ["an expired link", () => market(), link("buy", `launch=FORK&asset=${FORK}&ecx=0.0001&min_tokens=0.044`, 1_700_000_000), -32602, /expired/],
+        ["another network's link", () => market(), buy().replace("ecashbeta", "ecash"), -32602, /network ecash/],
+        ["an action the wallet doesn't build", () => market(), link("route", `pools=${FORK_POOL}`), 4200, /doesn't do Flush's "route"/],
+        ["a node that can't quote", () => { market(); config.flushRpcStatus = { getswapquote: 503 }; }, buy(), -32001, /Busy/],
+      ];
+      for (const [what, setUp, uri, code, message] of cases) {
+        setUp();
+        const { sends, prompts } = sendsWith();
+        const before = stub.broadcasts().length;
+        // -32001 is the Provider's code for a server's failure: here, the error it comes from.
+        const matches = (e) => (code === -32001 ? e instanceof wallet.SidechainServerError : e.code === code) && message.test(e.message);
+        await assert.rejects(sends.trade(99, uri, { origin: DEX }), matches, what);
+        assert.equal(stub.broadcasts().length, before, what);
+        // The link's checks run before the window opens; the floor's, in the module, before it shows anything.
+        assert.equal(prompts.length, 0, what);
+      }
+    });
+  });
 });
+

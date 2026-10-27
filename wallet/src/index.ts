@@ -48,7 +48,12 @@ export {
   type OutputToken,
   type OutputTokens,
   type TokenKind,
+  type BuiltTrade,
+  type ClearTrade,
   type ClearView,
+  type FlushAction,
+  type TradeOrder,
+  type TradeSide,
   type DangerousMode,
   type Decoded,
   type Destination,
@@ -113,6 +118,7 @@ export {
   type SlotReport,
 } from "./pull-path";
 export { createSends, HOLD_BLOCKS, sendRequester, type HeldSpend, type HeldStore, type RefusedSend, type SendDeps, type Sends } from "./send";
+export { LINK_NETWORKS, linkDigest, type UsedLinks } from "./flush-links";
 export { CACHE_PREFIX, cacheKey, type SessionCache } from "./cache";
 export { esploraClient, feeRate, type EsploraClient, type EsploraTx, type EsploraTxStatus, type EsploraUtxo } from "./esplora";
 export { findTreasury, TreasuryError, type Treasury } from "./treasury";

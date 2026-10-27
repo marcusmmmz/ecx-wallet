@@ -1,5 +1,6 @@
 import { ErrorCode, ProviderRpcError } from "./errors";
-import type { SlotAddress } from "./accounts";
+import { servedNetwork, type SlotAddress } from "./accounts";
+import { LINK_NETWORKS } from "./flush-links";
 import type { AssetSuggestion, StoredAsset } from "./assets";
 import { covers, GRANTABLE_METHODS, scopeOf, widen, type GrantableMethod, type GrantScope, type GrantStore, type Scope } from "./grants";
 import { parseSigningRequest } from "./signing-request";
@@ -66,6 +67,8 @@ export interface ProviderDeps extends SigningDeps {
   askToTurnOn(prompt: TurnOnPrompt): Promise<boolean>;
   /** The wallet's Send, asked for by `from` (only called for a supported Slot). */
   send(slot: number, order: TransferOrder, from: { origin: string }): Promise<SendResult>;
+  /** The chain's action `action` (on Flush, a `flush:` link), built by the wallet, asked for by `from` (docs/adr/0016). */
+  sendAction(slot: number, action: string, from: { origin: string }): Promise<SendResult>;
   /** What `origin` suggests naming an asset on `slot`, checked before the user is asked; throws to refuse it (docs/adr/0010). */
   assetSuggestion(slot: number, origin: string, suggestion: AssetSuggestion): Promise<Omit<AssetPrompt, "origin" | "balance">>;
   /** The wallet's balance of `asset` on `slot`. Never asks to unlock: `{ locked: true }` while locked. */
@@ -187,6 +190,60 @@ export function createProviderHandler(deps: ProviderDeps) {
     return result.txid === undefined ? {} : { txid: result.txid };
   }
 
+  /**
+   * A chain's action, built by the wallet (docs/adr/0016): on Flush, the trade a `flush:` link asks
+   * for. Under `sendTransfer`'s Grant: both have the wallet build and send a transaction the user
+   * approves Clear. Works while locked, as `sendTransfer` does.
+   */
+  async function sendAction(origin: string, params: unknown): Promise<{ txid?: string }> {
+    const slot = parseSlot("sendAction", params);
+    await authorize(origin, "sendTransfer", slot);
+    const { action } = params as { action?: unknown };
+    if (typeof action !== "string") throw new ProviderRpcError(ErrorCode.InvalidParams, "sendAction needs `action`: the chain's action, as text (on Flush, a flush: link).");
+    await turnOn(origin, [slot]);
+    const result = await deps.sendAction(slot, action, { origin });
+    if (!result.accepted) throw new SidechainServerError(result.server, `The Sidechain Server at ${result.server} didn't accept the transaction.`);
+    return result.txid === undefined ? {} : { txid: result.txid };
+  }
+
+  /** The supported Slot whose module trades from `flush:` links, and the network its links name. */
+  async function flushChain(): Promise<{ slot: number; network: string }> {
+    for (const slot of supportedSlots) {
+      const module = await deps.chainModule(slot);
+      if (!module?.declare().capabilities.includes("trades")) continue;
+      const { entry, chain } = servedNetwork(module);
+      const key = Object.entries(entry.networks).find(([, n]) => n.chain === chain)?.[0];
+      const network = key === undefined ? undefined : LINK_NETWORKS[key];
+      if (network !== undefined) return { slot, network };
+    }
+    throw new ProviderRpcError(ErrorCode.UnsupportedMethod, "This wallet has no Flush chain on this network.");
+  }
+
+  /**
+   * `window.flush` (docs/adr/0016), as flush.markets calls it. `flush_requestAddress` is its first
+   * call, with no connect before it: without a Grant it asks for one (addresses and Sends on Flush),
+   * then answers the given-out address. `flush_submit` is `sendAction`. A rejection reads "User
+   * rejected.", which the site takes quietly.
+   */
+  async function flush(origin: string, method: "flush_requestAddress" | "flush_submit", params: unknown): Promise<unknown> {
+    const { slot, network } = await flushChain();
+    try {
+      if (method === "flush_submit") {
+        const { uri } = (params ?? {}) as { uri?: unknown };
+        return await sendAction(origin, { slot, action: uri });
+      }
+      const scope: Scope = { slots: [slot], methods: ["getAddresses", "sendTransfer"] };
+      if (!covers(await grants.get(origin), scope)) await connect(origin, scope);
+      await unlocked(origin, slot);
+      await turnOn(origin, [slot]);
+      const [given] = await receiveAddresses(slot);
+      return { network, address: given.address };
+    } catch (error) {
+      if (error instanceof ProviderRpcError && error.code === ErrorCode.UserRejected) throw new ProviderRpcError(ErrorCode.UserRejected, "User rejected.");
+      throw error;
+    }
+  }
+
   /** Origins with an asset suggestion waiting for the user: one window at a time each. */
   const suggesting = new Set<string>();
 
@@ -253,6 +310,8 @@ export function createProviderHandler(deps: ProviderDeps) {
       await grants.remove(origin);
       return null;
     }
+    if (method === "sendAction") return sendAction(origin, params);
+    if (method === "flush_requestAddress" || method === "flush_submit") return flush(origin, method, params);
     if (isGrantable(method)) return granted(origin, method, params);
     throw new ProviderRpcError(ErrorCode.UnsupportedMethod, `Unsupported method: ${String(method)}`);
   };

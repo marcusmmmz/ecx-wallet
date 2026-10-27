@@ -60,7 +60,10 @@ const PAGE = 25;
  * `/flush/rpc/getasset?args=["0x<id>"]` answers `config.flushAssets[id]` (getasset's JSON), else 404
  * `{ error: "Not found" }`; `/flush/market/addresses/{address}/holdings` answers
  * `{ items: config.holdings[address] ?? [], address }`; `POST /txs/test` answers each transaction
- * `allowed`, or refused with `config.rejectReason` as its `reject-reason`.
+ * `allowed`, or refused with `config.rejectReason` as its `reject-reason`. Any other
+ * `/flush/rpc/{method}` answers `config.flushRpc[method]` (a function of the args, or JSON as is;
+ * `undefined` from the function: 404), else 404; `config.flushRpcStatus[method]` answers that HTTP
+ * status with `{ error }` instead, as the explorer does when the node can't answer (501, 503).
  */
 export function createEsploraStub(config) {
   /** Every request, in order: its path, or `POST <path>`. */
@@ -183,6 +186,20 @@ export function createEsploraStub(config) {
       }
       const record = typeof id === "string" && id.startsWith("0x") ? config.flushAssets?.[id.slice(2)] : undefined;
       return record ? [200, record] : [404, { error: "Not found" }];
+    }
+    const rpc = config.flush ? /^\/flush\/rpc\/([a-z]+)$/.exec(pathname) : null;
+    if (rpc && rpc[1] !== "getasset") {
+      const status = config.flushRpcStatus?.[rpc[1]];
+      if (status !== undefined) return [status, { error: status === 503 ? "Busy" : "Not implemented" }];
+      let args;
+      try {
+        args = JSON.parse(query.get("args") ?? "[]");
+      } catch {
+        return [400, { error: "Invalid arguments" }];
+      }
+      const answer = config.flushRpc?.[rpc[1]];
+      const value = typeof answer === "function" ? answer(args) : answer;
+      return value === undefined ? [404, { error: "Not found" }] : [200, value];
     }
     const holdings = config.flush ? /^\/flush\/market\/addresses\/([^/]+)\/holdings$/.exec(pathname) : null;
     if (holdings) {

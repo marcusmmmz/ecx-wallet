@@ -16,8 +16,11 @@ import {
   ChainModuleRefusal,
   NATIVE_COIN,
   type AssetAmount,
+  type BuiltTrade,
   type BuiltTransfer,
   type ChainEntry,
+  type ClearView,
+  type FlushAction,
   type ModuleTransferOrder,
   type NetworkEntry,
   type OutputTokens,
@@ -32,6 +35,7 @@ import { checkedOrder, isTransferAskedFor, WATCHED_CHANGE_ADDRESSES, WATCHED_REC
 import { rejected, type ApprovalContext, type SignPrompt, type SigningApproval } from "./signing";
 import { speaksEsplora } from "./server-api";
 import { SidechainServerError, type TransferOrder } from "./sidechain-server";
+import { linkDigest, type UsedLinks } from "./flush-links";
 
 /** Blocks past its broadcast after which a Send the server doesn't know releases its coins. */
 export const HOLD_BLOCKS = 6;
@@ -63,6 +67,8 @@ export interface SendDeps extends Keys, ChainModules {
   openSigningApproval(context: ApprovalContext): SigningApproval;
   isUnlocked(): Promise<boolean>;
   held: HeldStore;
+  /** Links whose trade went out this session (docs/adr/0016). */
+  usedLinks: UsedLinks;
   /** Where the Slot's last Send refused after approval is kept for the session. */
   cache?: SessionCache;
   /** Milliseconds since the epoch. */
@@ -297,8 +303,136 @@ export function createSends(deps: SendDeps) {
     }
   }
 
-  /** Each Slot's last Send, which the next one waits for. */
+  /** The link's trade, as the module reads it: a link it doesn't build is unsupported (4200), a bad one invalid. */
+  function parsedAction(target: KeyedChain<Starter>, link: string): FlushAction {
+    try {
+      return target.module.parseAction(link, Math.floor(deps.now() / 1000));
+    } catch (error) {
+      if (error instanceof ChainModuleRefusal && error.code === "unsupportedAction") throw new ProviderRpcError(ErrorCode.UnsupportedMethod, error.message);
+      if (error instanceof ChainModuleRefusal) throw refusal(error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * What the module needs besides the coins, from the explorer: the pool (`getpool`), the node's
+   * quote for it (`getswapquote`), each token's registration, and the least ECX the node pays out.
+   * The module checks what it can; the rest can make a trade fail, never pay less than its floor.
+   */
+  async function tradeFacts(server: EsploraClient, action: FlushAction) {
+    const [assetIn, amount, assetOut] =
+      action.verb === "swap" ? [action.from, action.amount, action.to] : action.verb === "buy" ? ["ECX", action.ecx, `0x${action.asset}`] : [`0x${action.asset}`, action.tokens, "ECX"];
+    const quoted = (await server.flushRpc("getswapquote", [assetIn, amount, assetOut])) as { pools?: { pool?: unknown; curve?: unknown; amount_out?: unknown }[] } | undefined;
+    const pools = Array.isArray(quoted?.pools) ? quoted.pools : [];
+    // A swap names its pool; a buy or a sale trades on the launch's curve.
+    const entry = pools.find((p) => (action.verb === "swap" ? p.pool === action.pool : p.curve === "launch"));
+    if (typeof entry?.pool !== "string" || typeof entry.amount_out !== "number") {
+      throw refusal("The pool doesn't quote this trade now: ask the site for a fresh link.");
+    }
+    const pool = (await server.flushRpc("getpool", [entry.pool])) as { asset_a_id?: unknown; asset_b_id?: unknown } | undefined;
+    if (typeof pool?.asset_a_id !== "string" || typeof pool.asset_b_id !== "string") throw refusal(`The explorer doesn't describe pool ${entry.pool}.`);
+    const tokens = [pool.asset_a_id, pool.asset_b_id].filter((id) => !/^0+$/.test(id));
+    const registrations = await Promise.all(
+      tokens.map(async (id) => {
+        const registration = await server.assetRegistration(id);
+        if (registration === undefined) throw refusal(`The explorer doesn't know asset ${id}'s registration.`);
+        return server.txHex(registration.txid);
+      }),
+    );
+    const info = (await server.flushRpc("getbitassetsinfo")) as { min_chn_payout?: unknown } | undefined;
+    if (typeof info?.min_chn_payout !== "number") throw new SidechainServerError(server.url, `The Sidechain Server at ${server.url} sent a malformed getbitassetsinfo answer.`);
+    return { pool, registrations, quote: entry.amount_out, minPayout: info.min_chn_payout };
+  }
+
+  /** The built trade's Clear View is exactly the trade checked, every output back to the wallet: else a wallet bug. */
+  function isTradeBuilt(view: ClearView, built: BuiltTrade["trade"]): boolean {
+    const t = view.trade;
+    return (
+      t !== undefined &&
+      t.pool === built.pool &&
+      t.assetIn === built.assetIn.id &&
+      t.amountIn === built.amountIn &&
+      t.assetOut === built.assetOut.id &&
+      t.minOut === built.minOut &&
+      t.warnings.length === 0 &&
+      (t.payout === null || (t.payout.kind === "address" && t.payout.yours)) &&
+      view.outputs.every((o) => o.destination.kind === "address" && o.destination.yours)
+    );
+  }
+
+  /** One trade an app's link asks for (`sendAction`, docs/adr/0016), once the Slot's previous Send is done. */
+  async function tradeNow(slot: number, link: string, from: { origin: string }): Promise<SendResult> {
+    const target = await routing.slot(slot);
+    const server = esplora(target);
+    if (server === undefined || !target.module.declare().capabilities.includes("trades")) {
+      throw new ProviderRpcError(ErrorCode.UnsupportedMethod, `This wallet can't trade on ${target.entry.name}.`);
+    }
+    const action = parsedAction(target, link);
+    const digest = await linkDigest(link);
+    if (await deps.usedLinks.has(digest)) throw refusal("This link has already run: ask the site for a fresh one.");
+    await server.checkChain();
+    const facts = await tradeFacts(server, action);
+
+    const approval = deps.openSigningApproval({ origin: from.origin, chain: target.chain });
+    let built: BuiltTrade;
+    let tipHeight: number;
+    let finalized: { tx: string; txid: string };
+    try {
+      if (!(await deps.isUnlocked()) && !(await approval.unlock())) throw rejected();
+      const key = await target.key();
+      const [{ coins, account }, estimates, tip] = await Promise.all([
+        spendableCoins(slot, target, server, key),
+        server.feeEstimates().catch(() => undefined),
+        server.tipHeight(),
+      ]);
+      tipHeight = tip;
+      const order = {
+        link,
+        now: Math.floor(deps.now() / 1000),
+        ...facts,
+        coins: await wholeTxCoins(server, coins),
+        feeRate: feeRate(estimates),
+        changeIndex: await changeIndex(server, account.change),
+      };
+      built = await refusing(async () => target.module.buildTrade(order, key));
+      const offered = new Set(coins.map((c) => `${c.txid}:${c.vout}`));
+      if (!built.spent.every((s) => offered.has(`${s.txid}:${s.vout}`))) {
+        throw new SidechainServerError(server.url, `The Sidechain Server at ${server.url} sent a transaction that isn't one it listed. Nothing was sent.`);
+      }
+      await refusing(async () => target.module.check(built.pset));
+      const decoded = await refusing(async () => target.module.decode(built.pset, key, { pool: facts.pool }));
+      if (decoded.kind !== "clear") throw new Error(`The wallet can't fully explain the trade it built: ${decoded.reason}`);
+      if (!isTradeBuilt(decoded.view, built.trade)) throw new Error("The built trade isn't the one asked for.");
+      const prompt: SignPrompt = { origin: from.origin, chain: target.chain, requestId: `trade-${slot}`, decoded, trade: built.trade };
+      if (!(await approval.confirm(prompt))) throw rejected();
+      const signed = await refusing(async () => target.module.sign(built.pset, key));
+      finalized = await refusing(async () => target.module.finalize(signed));
+    } finally {
+      approval.close();
+    }
+
+    let txid: string;
+    try {
+      txid = await server.broadcast(finalized.tx, built.burn);
+    } catch (error) {
+      if (!(error instanceof SidechainServerError)) throw error;
+      throw new SidechainServerError(error.server, `${error.message} Nothing was sent.`);
+    }
+    await deps.held.put({ slot, txid: finalized.txid, spent: built.spent, tipHeight });
+    await deps.usedLinks.add(digest);
+    if (txid !== finalized.txid) throw new SidechainServerError(server.url, `${server.url} reported txid ${txid} for transaction ${finalized.txid}.`);
+    return { server: server.url, accepted: true, txid };
+  }
+
+  /** Each Slot's last Send or trade, which the next one waits for. */
   const queues = new Map<number, Promise<unknown>>();
+
+  /** Runs `run` once the Slot's previous Send or trade is done. */
+  function queued<T>(slot: number, run: () => Promise<T>): Promise<T> {
+    const result = (queues.get(slot) ?? Promise.resolve()).then(run, run);
+    queues.set(slot, result.catch(() => {}));
+    return result;
+  }
 
   return {
     /** Per asset, what a Send on the Slot can spend now: over Esplora confirmed plus trusted, less held; else the reported balance. */
@@ -321,10 +455,16 @@ export function createSends(deps: SendDeps) {
      * Slot at a time, so two never pick the same coins.
      */
     send(slot: number, order: TransferOrder, from?: { origin: string }, host?: string): Promise<SendResult> {
-      const run = () => sendNow(slot, order, from, host);
-      const result = (queues.get(slot) ?? Promise.resolve()).then(run, run);
-      queues.set(slot, result.catch(() => {}));
-      return result;
+      return queued(slot, () => sendNow(slot, order, from, host));
+    },
+
+    /**
+     * Trades as `link` (a `flush:` link) asks, for the app `from` (`sendAction`): checked, built from
+     * the account's coins, approved Clear, broadcast with its marker's ECX allowed, its coins held and
+     * the link kept as run. Throws on refusal or rejection. In the Slot's queue with its Sends.
+     */
+    trade(slot: number, link: string, from: { origin: string }): Promise<SendResult> {
+      return queued(slot, () => tradeNow(slot, link, from));
     },
 
     /** The Slot's last Send refused after approval this session, if not closed since. */

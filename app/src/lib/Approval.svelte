@@ -72,6 +72,9 @@
   }
 
   /** The assets the request's chain names, and the main chain's coin (Deposits and Withdrawal payouts). */
+  /** A trade's title, by its link's verb (docs/adr/0016). */
+  const TRADE_TITLES = { swap: "Swap", buy: "Buy", sell: "Sell" } as const;
+
   const assets = $derived(chains.find((c) => prompt && "chain" in prompt && c.chain === prompt.chain)?.assets ?? []);
   const coinAssets = $derived(chains.find((c) => c.id === "l1")?.assets ?? []);
   /**
@@ -298,7 +301,7 @@
 {:else if prompt.kind === "sign" && prompt.decoded.kind === "clear"}
   {@const view = prompt.decoded.view}
   {@const labels = prompt.hints?.outputLabels ?? {}}
-  {@const dangerous = view.dangerousModes.length > 0}
+  {@const dangerous = view.dangerousModes.length > 0 || (view.trade?.warnings.length ?? 0) > 0}
   {@const issuances = view.inputs.flatMap((i) => (i.issuance ? [i.issuance] : []))}
   {@const contractAssets = issuances.flatMap((i) =>
     i.contract ? [{ id: i.asset.asset, ticker: i.contract.ticker, name: i.contract.name, decimals: i.contract.precision }] : [],
@@ -320,6 +323,43 @@
       <span class="badge ok"><Icon name="check" size={14} /> Clear View: decoded by this wallet</span>
     </div>
     {@render requester(prompt.origin, prompt.chain)}
+
+    {#if view.trade}
+      {@const t = view.trade}
+      {@const checked = prompt.kind === "sign" ? prompt.trade : undefined}
+      {@const result = view.outputs.find((o) => o.index === t.result)}
+      {@const side = (asset: string, amount: string, known?: { ticker: string; decimals: number }) =>
+        known ? formatAllDecimals(amount, known.decimals, known.ticker) : amountText(amount, asset, shownAssets)}
+      <section class="card stack" data-trade>
+        <h2>{checked ? TRADE_TITLES[checked.verb] : "Trade"} on Flush</h2>
+        {#if t.warnings.length > 0}
+          <ul class="danger-box stack" role="alert">
+            {#each t.warnings as warning, i (i)}<li data-trade-warning>{warning}</li>{/each}
+          </ul>
+        {/if}
+        <div data-trade-pay>
+          Pay <strong>{side(t.assetIn, t.amountIn, checked?.assetIn)}</strong><AssetBadge entry={assets.find((n) => n.id === t.assetIn)} size={14} />
+        </div>
+        <div data-trade-receive>
+          Receive at least <strong>{side(t.assetOut, t.minOut, checked?.assetOut)}</strong><AssetBadge entry={assets.find((n) => n.id === t.assetOut)} size={14} />
+        </div>
+        {#if checked}
+          <div class="muted small" data-trade-quote>The pool gives {side(t.assetOut, checked.quote, checked.assetOut)} now, by the node's own quote.</div>
+        {/if}
+        {#if result?.destination.kind === "address"}
+          <div class="small">
+            To <code data-trade-to>{result.destination.address}</code>
+            {#if result.destination.yours}<span class="badge ok" data-yours><Icon name="check" size={14} /> Yours</span>{:else}<span class="badge bad" data-not-yours>Not yours</span>{/if}
+          </div>
+        {/if}
+        {#if checked}
+          <div class="small" data-trade-expires>Expires {new Date(checked.expires * 1000).toLocaleString()}</div>
+        {/if}
+        <p class="muted small">
+          It clears at the end of its block, with every other order of the block. If the pool gives less than the floor then, what goes in comes back.
+        </p>
+      </section>
+    {/if}
 
     {#each issuances as issuance (issuance.asset.asset)}
       <section class="card stack" data-issuance>
@@ -371,7 +411,7 @@
               {:else}
                 {@const entry = assets.find((n) => n.id === output.asset)}
                 {@const named = entry !== undefined}
-                <span class="amount">{amountText(output.amount, output.asset, shownAssets)}<AssetBadge {entry} size={14} /></span>
+                <span class="amount">{#if output.atLeast}<span data-at-least>at least </span>{/if}{amountText(output.amount, output.asset, shownAssets)}<AssetBadge {entry} size={14} /></span>
                 {#if assetSource(entry)}
                   <span class="muted small" data-asset-source>{assetSource(entry)} <code title={output.asset}>{shortAsset(output.asset)}</code></span>
                 {:else if !named}

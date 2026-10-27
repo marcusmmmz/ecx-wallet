@@ -81,3 +81,16 @@ function announce() {
 
 window.addEventListener(REQUEST_PROVIDER_EVENT, announce);
 announce();
+
+// `window.flush` (docs/adr/0016): how flush.markets finds a wallet. Its two methods go through the
+// same relay, so the background decides everything. A page that already has one (another wallet's)
+// keeps it.
+const FLUSH_METHODS: readonly unknown[] = ["flush_requestAddress", "flush_submit"];
+if (!("flush" in window)) {
+  const flush = Object.freeze({
+    isFlush: true,
+    request: ({ method, params }: RequestArguments): Promise<unknown> =>
+      FLUSH_METHODS.includes(method) ? provider.request({ method, params }) : Promise.reject(new ProviderRpcError(4200, `Unsupported method: ${String(method)}`)),
+  });
+  Object.defineProperty(window, "flush", { value: flush, configurable: true, enumerable: false, writable: false });
+}
