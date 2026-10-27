@@ -486,4 +486,14 @@ describe("Flush", () => {
       config.refuseBroadcast = config.rejectReason = undefined;
     }
   });
+
+  test("a broadcast allows a burn only when asked, in ECX", async () => {
+    const client = wallet.esploraClient(wallet.esploraConfig(module().chainEntry(), module().chainEntry().networks.betanet), (...args) => fetch(...args));
+    const before = stub.burnAllowances().length;
+    await client.broadcast(paying("ca", [[RECEIVE_0.scriptPubkey, 1_000]]));
+    // A DEX marker locking 10,000 sat: the node is told that much, and no more.
+    await client.broadcast(paying("cb", [[RECEIVE_0.scriptPubkey, 1_000]]), "10000");
+    await client.broadcast(paying("cc", [[RECEIVE_0.scriptPubkey, 1_000]]), "2100000000000000");
+    assert.deepEqual(stub.burnAllowances().slice(before), [null, "0.0001", "21000000"]);
+  });
 });

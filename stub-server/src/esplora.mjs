@@ -67,6 +67,8 @@ export function createEsploraStub(config) {
   const requests = [];
   /** Every transaction broadcast, hex. */
   const broadcasts = [];
+  /** Each broadcast's `maxburnamount` (ECX), or null without one, in order. */
+  const burnAllowances = [];
 
   const status = ({ confirmed = true, blockHeight = 1, blockHash = "00".repeat(32), blockTime = 1792000000 }) =>
     confirmed ? { confirmed, block_height: blockHeight, block_hash: blockHash, block_time: blockTime } : { confirmed };
@@ -131,6 +133,7 @@ export function createEsploraStub(config) {
         return [400, `sendrawtransaction RPC error: {"code":-22,"message":"TX decode failed: ${error.message}"}`];
       }
       broadcasts.push(body.trim());
+      burnAllowances.push(query.get("maxburnamount"));
       if (config.elements) (config.txStatuses ??= {})[tx.txid] = { confirmed: false };
       else (config.txs ??= []).push({ hex: body.trim(), confirmed: false });
       // `config.broadcastTxid` answers another txid than the one broadcast, as a lying server would.
@@ -288,5 +291,7 @@ export function createEsploraStub(config) {
     requests: () => [...requests],
     /** Every transaction broadcast, hex. */
     broadcasts: () => [...broadcasts],
+    /** Each broadcast's `maxburnamount` (ECX), or null without one, in order. */
+    burnAllowances: () => [...burnAllowances],
   };
 }

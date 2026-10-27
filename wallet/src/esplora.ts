@@ -140,6 +140,14 @@ type Held = AssetAmount & { confirmed: boolean; preconfirmed: boolean };
 
 const HEX = /^[0-9a-f]*$/;
 const HASH = /^[0-9a-f]{64}$/;
+
+/** Base units of ECX (a decimal integer) in ECX, exactly: "10000" is "0.0001". */
+function ecxOf(units: string): string {
+  if (!/^[0-9]+$/.test(units)) throw new Error(`Not an amount: ${units}`);
+  const padded = units.padStart(9, "0");
+  const fraction = padded.slice(-8).replace(/0+$/, "");
+  return padded.slice(0, -8).replace(/^0+(?=\d)/, "") + (fraction ? `.${fraction}` : "");
+}
 const isCount = (n: unknown): n is number => Number.isSafeInteger(n) && (n as number) >= 0;
 
 export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, finality = false }: EsploraServerConfig, fetchFn: Fetch) {
@@ -518,9 +526,13 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
      * Broadcasts a raw transaction (hex); returns the txid the server reports. Flush's explorer
      * refuses with the node's code alone (`{"code":-26}`): the reason is then asked of its
      * `POST /txs/test` (the node's `testmempoolaccept`), and left out if that doesn't answer it.
+     * `maxBurn` (base units of ECX) is what the node may let the transaction lock in `OP_RETURN`
+     * outputs, as a Flush DEX marker does (`?maxburnamount=`, in ECX; docs/adr/0016). Without it the
+     * node allows none.
      */
-    async broadcast(tx: string): Promise<string> {
-      const answer = await response("/tx", { method: "POST", body: tx, headers: { "Content-Type": "text/plain" } });
+    async broadcast(tx: string, maxBurn?: string): Promise<string> {
+      const path = maxBurn === undefined ? "/tx" : `/tx?maxburnamount=${ecxOf(maxBurn)}`;
+      const answer = await response(path, { method: "POST", body: tx, headers: { "Content-Type": "text/plain" } });
       if (!answer.ok) {
         const error = refused(answer);
         if (!/RPC error: \{"code":-?[0-9]+\}$/.test(error.message)) throw error;
