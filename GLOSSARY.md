@@ -122,6 +122,10 @@ _Avoid_: Wallet API, bridge, connector
 A user's stored approval letting one Sidechain App, identified by its web origin, request certain methods on certain Slots.
 _Avoid_: Permission, connection, session
 
+**Action**:
+A Sidechain App's request that the Wallet Base build and send a transaction doing something its chain defines, such as a swap on Flush (a `flush:` URI), rather than paying a list of outputs (docs/adr/0016).
+_Avoid_: Intent, flush link, order (a Flush order is one kind of Action)
+
 ### Signing
 
 **Signing Request**:
@@ -145,6 +149,10 @@ _Avoid_: Signer module, plugin, adapter
 **Clear View**:
 The structured, chain-neutral account of a Signing Request that a Decoder produces and the Wallet Base renders for Clear Signing.
 _Avoid_: Preview, summary, decoded transaction
+
+**Floor**:
+The least an Action may return, which the Wallet Base checks against its own quote before showing it.
+_Avoid_: Minimum out, slippage limit
 
 **Evidence**:
 Data a Signing Request carries, keyed by kind, that its Chain Module checks against the payload before the Clear View shows anything from it, refusing the request if it doesn't check out (e.g. an asset's contract, against the hash its issuance commits to). Unlike hints, it can change the outcome.
