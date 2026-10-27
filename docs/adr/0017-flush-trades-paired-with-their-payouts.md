@@ -24,13 +24,13 @@ So the wallet reads a trade's outcome from the market index and pairs its ECX wi
 - **Two rows, the payout relabelled and linked to its trade:** rejected (Q1). A queued payout can land in another day's section, away from its trade.
 - **Guessing the fill from coinbases alone** (the earliest output to `chn_to` of at least `min_out`): rejected. Every other payout to that address (liquidity, positions, orders, Deposits) could pass for it, and it can't show what a buy received.
 - **The explorer's decoded `operation`** (`/flush/tx/:txid`) for the order: rejected. It is the server's word for what the transaction itself proves (ADR 0013).
-- **`gettxout`'s `token` for a result:** not reachable. The explorer's `/flush/rpc` refuses `gettxout`. An outcome by txid, misses included, is to be asked of the Flush dev; with it, the paging and the miss rule go.
+- **`gettxout`'s `token` for a result:** not reachable. The explorer's `/flush/rpc` refuses `gettxout`. The Flush dev is adding `trades/{txid}` in 8.2.0 (said 2026-10-27): its route, each hop's pool, kind and amounts in and out, and the ECX given back when a launch-curve buy reaches the curve's end. With it, the paging goes, and a launch buy's ECX back can be paired. Whether it reports misses wasn't said; until it does, the miss rule stays.
 
 ## Consequences
 
 - A filled buy's tokens, a missed sale's returned tokens and a queued payout's amount are the market index's word. Only a coinbase paying exactly the expected amount backs a fill with the chain.
 - If the index reports an amount no coinbase pays, the payout stays queued, and the coinbase stays its own "Received" entry. Pairing never relaxes the exact amount.
-- A launch buy's ECX change paid back through a coinbase isn't paired: the index doesn't report it, so it stays a "Received" entry (not verified on live data).
+- A launch buy's ECX change paid back through a coinbase isn't paired: the index doesn't report it yet (`trades/{txid}` will, from 8.2.0), so it stays a "Received" entry.
 - Trades through more than one pool, and other operations that pay ECX by coinbase (liquidity, positions, orders, Collect), aren't paired: they show as their own transactions.
 - A trade costs one `getpool` and the pages of its pool's trades back to its block (100 a page, at most 10) until its block is final, then nothing.
 - Every Activity row now carries its asset marks and shows what left the wallet in red.
