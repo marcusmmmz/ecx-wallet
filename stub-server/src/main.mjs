@@ -1,6 +1,6 @@
 // Runs stubs on the e2e build's Sidechain Server URLs (e2e/scripts/build.mjs), answering for the
 // "abandon … about" test wallet from the e2e fixtures: eCash's Esplora stub, one for Slot 24, and
-// one for Slot 46 in Flush mode (its chain is right, but it holds no coins: Flush's addresses come
+// one for Flush (Slot 99) in Flush mode (its chain is right, but it holds no coins: Flush's addresses come
 // from the Starter, which only the wallet derives).
 //
 //   pnpm --filter @ecx/stub-server start             Slot 24's Esplora stub, which the e2e build speaks to

@@ -1,6 +1,6 @@
 //! `flush.wasm`: the Flush Chain Module behind the shared C ABI (see `ecx-wasm-abi`).
 //! Thin by design: every function only decodes its inputs, calls `ecx_flush` and returns JSON.
-//! It holds nothing between calls; Slot 46's Starter arrives per call and is the only secret it sees.
+//! It holds nothing between calls; Flush's Starter arrives per call and is the only secret it sees.
 #![allow(clippy::missing_safety_doc)]
 
 use ecx_wasm_abi::{ret_text, text};
@@ -19,7 +19,7 @@ pub extern "C" fn declare() -> i32 {
     ret_text(json(&ecx_flush::declare()))
 }
 
-/// Slot 46's Chain Entry, as JSON.
+/// Flush's Chain Entry, as JSON.
 #[no_mangle]
 pub extern "C" fn chain_entry() -> i32 {
     ret_text(json(ecx_flush::chain_entry()))

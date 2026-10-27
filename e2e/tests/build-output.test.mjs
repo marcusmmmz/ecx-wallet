@@ -63,7 +63,7 @@ function splitManifest(manifest) {
 }
 
 for (const target of Object.keys(DIST)) {
-  test(`${target}: the shipped build reaches eCash's, Slot 24's and Slot 46's betanet servers, and nothing else`, async () => {
+  test(`${target}: the shipped build reaches eCash's, Slot 24's and Flush's betanet servers, and nothing else`, async () => {
     const { hostPermissions, connectSrc } = splitManifest(JSON.parse(await readFile(path.join(DIST[target], "manifest.json"), "utf8")));
     const servers = ["https://esplora.beta.ecash.ninja", "https://explorer.bitnames.info", "https://explorer.blockfab.org"];
     assert.deepEqual(hostPermissions, servers.map((s) => `${s}/*`));

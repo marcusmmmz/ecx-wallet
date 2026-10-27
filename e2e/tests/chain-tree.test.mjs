@@ -60,10 +60,10 @@ describe("the bundled Chain Entries", () => {
     });
   });
 
-  test("Flush is Slot 46, identified by its own genesis, and its ECX is its native coin", () => {
+  test("Flush on betanet is Slot 99, identified by its own genesis, and its ECX is its native coin", () => {
     const entry = flush.chainEntry();
-    assert.equal(entry.slot, 46);
-    assert.deepEqual(entry.networks.betanet.identityBlock, { height: 0, hash: "7d66b10e351e5ad86c562ba761b5476f75c6f1b9f13aa7cf469df3a8d5701b75" });
+    assert.equal(entry.slot, 99);
+    assert.deepEqual(entry.networks.betanet.identityBlock, { height: 0, hash: "04dfb01bef61e44d679132f9e830719c64241f7052880418a350ff6d3c90b561" });
     assert.equal(entry.networks.betanet.sidechainServer.api, "flush");
     assert.deepEqual(entry.networks.betanet.assets.find((a) => a.ecx)?.id, "", "the empty id, as eCash's (docs/adr/0005)");
   });

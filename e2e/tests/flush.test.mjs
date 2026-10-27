@@ -1,4 +1,4 @@
-// Flush (Slot 46) over its explorer, in node: the wallet's own TypeScript and the shipped flush.wasm
+// Flush (Slot 99 on betanet, docs/adr/0014) over its explorer, in node: the wallet's own TypeScript and the shipped flush.wasm
 // against the Esplora stub in Flush mode (mempool.space's electrs fork plus `/flush/blocks`), with a
 // scripted approval window instead of a browser. Balance, history, Send, finality and the stall
 // (#56, docs/adr/0012); token balances, names from their registration (#58) and token Sends (#59,
@@ -18,10 +18,10 @@ const l1 = await wallet.loadL1Module(await readFile(path.join(DIST.chromium, "l1
 
 const STARTER = "buyer citizen congress doll secret merry denial law live wait pass drive";
 const FOREIGN = "blush cream bullet drive index disease noble east target dice put rate";
-const CHAIN = "ecash:betanet-s46";
+const CHAIN = "ecash:betanet-s99";
 const { identityBlock } = flush.chainEntry().networks.betanet;
-/** The temporary Slot 99 chain the live explorer serves: same HRP, another genesis. */
-const SLOT_99_GENESIS = "04dfb01bef61e44d679132f9e830719c64241f7052880418a350ff6d3c90b561";
+/** The betanet genesis Backbone derives for Slot 46, mainnet's Flush: same HRP, another chain. */
+const SLOT_46_GENESIS = "7d66b10e351e5ad86c562ba761b5476f75c6f1b9f13aa7cf469df3a8d5701b75";
 
 const account = flush.deriveAccount(STARTER, { receive: wallet.WATCHED_RECEIVE_ADDRESSES, change: wallet.WATCHED_CHANGE_ADDRESSES });
 const [RECEIVE_0, RECEIVE_1] = account.receive;
@@ -104,8 +104,8 @@ describe("Flush", () => {
   function pullPathWith({ lock = lockState(), prompts = [], tokens } = {}) {
     const flushModule = module();
     const deps = {
-      supportedSlots: [46],
-      chainModule: (slot) => (slot === 46 ? Promise.resolve(flushModule) : undefined),
+      supportedSlots: [99],
+      chainModule: (slot) => (slot === 99 ? Promise.resolve(flushModule) : undefined),
       openSigningApproval: (context) => ({
         unlock: async () => true,
         confirm: async (prompt) => {
@@ -140,10 +140,10 @@ describe("Flush", () => {
     return { sends, prompts, held };
   }
 
-  test("a server on the temporary Slot 99 chain fails the identity check", async () => {
-    config.identityBlock = { height: 0, hash: SLOT_99_GENESIS };
+  test("a server on another Flush chain fails the identity check", async () => {
+    config.identityBlock = { height: 0, hash: SLOT_46_GENESIS };
     try {
-      await assert.rejects(pullPathWith().pullPath.reportedState(46), /is on another chain: its genesis block is 04dfb01b/);
+      await assert.rejects(pullPathWith().pullPath.reportedState(99), /is on another chain: its genesis block is 7d66b10e/);
     } finally {
       config.identityBlock = identityBlock;
     }
@@ -158,18 +158,18 @@ describe("Flush", () => {
       { hex: paying("e2", [[RECEIVE_1.scriptPubkey, 0]]), blockHeight: 300, blockHash: FINAL },
     ]);
     config.finality = { [SOFT]: "soft", [ANCHORED]: "anchored" };
-    const report = await pullPathWith().pullPath.reportedState(46);
+    const report = await pullPathWith().pullPath.reportedState(99);
     assert.deepEqual(report.balances, [{ asset: "", amount: "100002000" }]);
     assert.deepEqual(report.unconfirmed, [{ asset: "", amount: "5000" }], "a soft block isn't confirmed yet");
     assert.equal(report.stalledSince, undefined);
 
     config.finality = {};
-    assert.deepEqual((await pullPathWith().pullPath.reportedState(46)).balances, [{ asset: "", amount: "100007000" }]);
+    assert.deepEqual((await pullPathWith().pullPath.reportedState(99)).balances, [{ asset: "", amount: "100007000" }]);
   });
 
   test("the history lists coinbase receipts and pages with after_txid past the first 25", async () => {
     fund(Array.from({ length: 40 }, (_, i) => ({ hex: coinbase(1000 + i, [[RECEIVE_0.scriptPubkey, 1_000 + i]]), blockHeight: 1000 + i, blockHash: FINAL })));
-    const history = await pullPathWith().pullPath.history(46);
+    const history = await pullPathWith().pullPath.history(99);
     assert.equal(history.entries.length, 40);
     assert.equal(history.partial, false);
     assert.deepEqual(history.entries[0].amounts, [{ asset: "", amount: "1039" }], "newest first");
@@ -185,7 +185,7 @@ describe("Flush", () => {
     ]);
     const { sends, prompts, held } = sendsWith();
     const before = stub.broadcasts().length;
-    const result = await sends.send(46, { outputs: [{ asset: "", amount: "40000", to: { address: PAY_TO } }] });
+    const result = await sends.send(99, { outputs: [{ asset: "", amount: "40000", to: { address: PAY_TO } }] });
 
     assert.equal(prompts.length, 1);
     assert.deepEqual(prompts[0].context, { origin: "This wallet (Send on Flush)", chain: CHAIN });
@@ -202,16 +202,16 @@ describe("Flush", () => {
     assert.equal(tx.locktime, 0, "no replay marker on Flush (docs/adr/0011)");
     assert.deepEqual(tx.inputs.map((i) => i.txid), [parseTx(coin).txid], "the value-0 output is never spent");
     assert.equal(tx.inputs[0].witness.length, 2, "signed by flush.wasm");
-    assert.deepEqual(held, [{ slot: 46, txid: tx.txid, spent: [{ txid: parseTx(coin).txid, vout: 0 }], tipHeight: 500 }]);
+    assert.deepEqual(held, [{ slot: 99, txid: tx.txid, spent: [{ txid: parseTx(coin).txid, vout: 0 }], tipHeight: 500 }]);
   });
 
   test("a coin someone else paid in a soft block isn't spent until its block is anchored", async () => {
     fund([{ hex: paying("d1", [[RECEIVE_0.scriptPubkey, 70_000]]), blockHeight: 499, blockHash: SOFT }]);
     config.finality = { [SOFT]: "soft" };
     try {
-      assert.deepEqual(await sendsWith().sends.spendable(46), []);
+      assert.deepEqual(await sendsWith().sends.spendable(99), []);
       config.finality = { [SOFT]: "anchored" };
-      assert.deepEqual(await sendsWith().sends.spendable(46), [{ asset: "", amount: "70000" }]);
+      assert.deepEqual(await sendsWith().sends.spendable(99), [{ asset: "", amount: "70000" }]);
     } finally {
       config.finality = {};
     }
@@ -224,7 +224,7 @@ describe("Flush", () => {
     config.txHexOverrides = { [parseTx(coin).txid]: paying("c4", [[RECEIVE_0.scriptPubkey, 100_000]]) };
     const before = stub.broadcasts().length;
     try {
-      await assert.rejects(sendsWith().sends.send(46, { outputs: [{ asset: "", amount: "1000", to: { address: PAY_TO } }] }), /isn't one it listed/);
+      await assert.rejects(sendsWith().sends.send(99, { outputs: [{ asset: "", amount: "1000", to: { address: PAY_TO } }] }), /isn't one it listed/);
       assert.equal(stub.broadcasts().length, before);
     } finally {
       config.txHexOverrides = undefined;
@@ -236,7 +236,7 @@ describe("Flush", () => {
     const tipTime = Math.floor(Date.now() / 1000) - wallet.FLUSH_STALL_SECONDS - 60;
     config.tipTime = tipTime;
     try {
-      assert.equal((await pullPathWith().pullPath.reportedState(46)).stalledSince, tipTime);
+      assert.equal((await pullPathWith().pullPath.reportedState(99)).stalledSince, tipTime);
     } finally {
       config.tipTime = undefined;
     }
@@ -257,7 +257,7 @@ describe("Flush", () => {
     ]);
     config.holdings = { [RECEIVE_1.address]: [{ ticker: "BROSEVELT", kind: "asset", asset_id: BROSEVELT, amount_units: "400" }] };
     try {
-      const report = await pullPathWith({ tokens }).pullPath.reportedState(46);
+      const report = await pullPathWith({ tokens }).pullPath.reportedState(99);
       assert.deepEqual(report.balances, [
         { asset: BROSEVELT, amount: "1500" },
         { asset: "", amount: "9000" },
@@ -266,7 +266,7 @@ describe("Flush", () => {
       assert.ok(!stub.requests().some((p) => p.includes(RECEIVE_0.address) && p.endsWith("/holdings")), "an address with no result isn't asked");
 
       // Without the module's reading, a token output adds nothing, as before.
-      const plain = await pullPathWith().pullPath.reportedState(46);
+      const plain = await pullPathWith().pullPath.reportedState(99);
       assert.deepEqual(plain.balances, [{ asset: "", amount: "9000" }]);
       assert.equal(plain.unverified, undefined);
     } finally {
@@ -279,7 +279,7 @@ describe("Flush", () => {
     fund([{ hex: transfer, blockHeight: 300, blockHash: FINAL }]);
     config.txHexOverrides = { [parseTx(transfer).txid]: paying("f4", [[RECEIVE_0.scriptPubkey, 0], [marker(0, [], [{ n: 0, asset: BROSEVELT, amount: 10 ** 12 }]), 0]]) };
     try {
-      await assert.rejects(pullPathWith({ tokens: async (tx) => flush.outputTokens(tx) }).pullPath.reportedState(46), /sent another transaction for/);
+      await assert.rejects(pullPathWith({ tokens: async (tx) => flush.outputTokens(tx) }).pullPath.reportedState(99), /sent another transaction for/);
     } finally {
       config.txHexOverrides = undefined;
     }
@@ -329,7 +329,7 @@ describe("Flush", () => {
     ]);
     const { sends, prompts } = sendsWith();
     assert.deepEqual(
-      (await sends.spendable(46)).sort((a, b) => a.asset.localeCompare(b.asset)),
+      (await sends.spendable(99)).sort((a, b) => a.asset.localeCompare(b.asset)),
       [
         { asset: "", amount: "100000" },
         { asset: BROSEVELT, amount: "5000" },
@@ -338,7 +338,7 @@ describe("Flush", () => {
     );
 
     const before = stub.broadcasts().length;
-    await sends.send(46, { outputs: [{ asset: BROSEVELT, amount: "1200", to: { address: PAY_TO } }] });
+    await sends.send(99, { outputs: [{ asset: BROSEVELT, amount: "1200", to: { address: PAY_TO } }] });
     const { decoded } = prompts.at(-1).prompt;
     assert.equal(decoded.kind, "clear");
     assert.deepEqual(
@@ -377,7 +377,7 @@ describe("Flush", () => {
         now: () => Date.now(),
       });
       const deposit = (n, value) => ({
-        slot: 46,
+        slot: 99,
         chainName: "Flush",
         txid: n.repeat(32),
         vout: 0,
@@ -401,7 +401,7 @@ describe("Flush", () => {
         { hex: old, blockHeight: 90, blockHash: FINAL },
         { hex: first, blockHeight: 105, blockHash: FINAL },
       ]);
-      let list = await deposits.list(46);
+      let list = await deposits.list(99);
       const state = (d) => list.find((s) => s.txid === d.txid);
       assert.equal(state(d1).state, "credited", "the oldest Deposit takes the first payout");
       assert.deepEqual([state(d2).state, state(d2).paidBy, state(d2).claim], ["awaitingCredit", "chain", undefined]);
@@ -415,7 +415,7 @@ describe("Flush", () => {
         { hex: first, blockHeight: 105, blockHash: FINAL },
         { hex: second, blockHeight: 110, blockHash: FINAL },
       ]);
-      list = await deposits.list(46);
+      list = await deposits.list(99);
       assert.deepEqual([state(d1).state, state(d2).state, state(d3).state], ["credited", "credited", "awaitingCredit"]);
       assert.deepEqual([...memory.keys()], [d3.txid]);
     } finally {

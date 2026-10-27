@@ -47,23 +47,24 @@ fn refuses_anything_but_a_starter() {
 }
 
 #[test]
-fn declare_reports_slot_46s_betanet_binding_and_buildtransfer() {
+fn declare_reports_slot_99s_betanet_binding_and_capabilities() {
     let d = declare();
-    assert_eq!(d.binding.chain, "ecash:betanet-s46");
+    assert_eq!(d.binding.chain, "ecash:betanet-s99");
     assert_eq!(d.binding.format, "psbt");
     assert_eq!(d.binding.payload_versions, ["0"]);
-    assert_eq!(d.capabilities, ["buildTransfer", "tokens"]);
+    assert_eq!(d.capabilities, ["buildTransfer", "tokens", "depositDestination"]);
 }
 
 #[test]
-fn flush_is_slot_46_identified_by_its_own_genesis() {
-    assert_eq!(chain_entry().slot, Some(46));
+fn flush_on_betanet_is_slot_99_identified_by_its_own_genesis() {
+    assert_eq!(chain_entry().slot, Some(99));
     assert_eq!(chain_entry().name, "Flush");
     let betanet = network();
     assert_eq!(betanet.parent.as_deref(), Some("ecash:betanet"));
     assert_eq!(betanet.identity_block.height, 0);
-    assert_eq!(betanet.identity_block.hash, "7d66b10e351e5ad86c562ba761b5476f75c6f1b9f13aa7cf469df3a8d5701b75");
-    assert_eq!(betanet.activation, None, "Slot 46 isn't active on betanet yet");
+    assert_eq!(betanet.identity_block.hash, "04dfb01bef61e44d679132f9e830719c64241f7052880418a350ff6d3c90b561");
+    let activation = betanet.activation.as_ref().expect("Slot 99 is active on betanet");
+    assert_eq!((activation.height, activation.hash.as_str()), (968_998, "00000000000000012009a14359125c30ad531aa58fdcc76eee7d14c522acd5ae"));
     assert_eq!(betanet.deposit_confirmations, Some(2));
     assert_eq!(betanet.sidechain_server.api, ServerApi::Flush);
     let p = &betanet.params.address_params;

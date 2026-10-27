@@ -1,8 +1,8 @@
-// Seam 1, Flush (Slot 46, #56): the e2e build's wallet reads Flush from the Esplora stub in Flush
+// Seam 1, Flush (Slot 99 on betanet, #56): the e2e build's wallet reads Flush from the Esplora stub in Flush
 // mode, listening where that build's Chain Entry names betanet's server, and sends ECX on it. The
 // logic's edge cases are in node, in flush.test; this is what the user sees.
 //
-// The wallet imports "abandon … about"; its Slot 46 Starter and addresses are derived here by the
+// The wallet imports "abandon … about"; its Slot 99 Starter and addresses are derived here by the
 // shipped vault.wasm and flush.wasm. No plain ECX transfer exists on the live chain, so every
 // fixture is made here: a Deposit's payout in a coinbase, someone's payment, a token's output.
 import assert from "node:assert/strict";
@@ -17,7 +17,7 @@ const [vault, flush] = await Promise.all([
   readFile(path.join(DIST.chromium, "vault.wasm")).then(wallet.loadVaultModule),
   readFile(path.join(DIST.chromium, "flush.wasm")).then(wallet.loadChainModule),
 ]);
-const account = flush.deriveAccount(vault.starter(ABANDON, "", 46), { receive: 1 });
+const account = flush.deriveAccount(vault.starter(ABANDON, "", 99), { receive: 1 });
 const RECEIVE_0 = account.receive[0];
 const PAY_TO = flush.deriveAccount("blush cream bullet drive index disease noble east target dice put rate", { receive: 1 }).receive[0].address;
 
@@ -66,7 +66,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
   let l1Stub;
   before(async () => {
     [session, stub, l1Stub] = await Promise.all([launchWallet(browserName), serveFlushEsplora(FLUSH), serveL1Esplora(L1_ESPLORA)]);
-    await setUpWallet(session, { on: [46] });
+    await setUpWallet(session, { on: [99] });
   });
   after(async () => {
     await session?.close();
@@ -78,7 +78,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
     const page = await openHome(session);
     const shown = await page.evaluate(() => {
       const text = (e) => e?.textContent.replace(/\s+/g, " ").trim();
-      const card = document.querySelector('[data-account="46"]');
+      const card = document.querySelector('[data-account="99"]');
       return {
         name: text(card.querySelector("[data-chain-link] strong")),
         balance: text(card.querySelector('[data-balance][data-asset=""]')),
@@ -91,14 +91,14 @@ for (const browserName of BROWSERS) describe(browserName, () => {
   });
 
   test("Flush's Activity lists the Deposit's payout", async () => {
-    const page = await openWalletPage(session, "#/chain/46/activity");
+    const page = await openWalletPage(session, "#/chain/99/activity");
     await page.waitForSelector(`[data-history-entry="${parseTx(PAYOUT).txid}"]`, { timeout: 20_000 });
     await activitySettled(page);
     await page.close();
   });
 
   test("Send on Flush: built from the wallet's ECX, reviewed in the approval window, broadcast, and shown with its txid", async () => {
-    const page = await openWalletPage(session, "#/send/46");
+    const page = await openWalletPage(session, "#/send/99");
     await page.waitForSelector('[data-send-asset] option[value=""]', { timeout: 20_000 });
     const option = await page.$eval('[data-send-row="0"] [data-send-asset] option[value=""]', (e) => e.textContent.trim());
     assert.equal(option, "ECX (0.001 ECX spendable)", "anchored only: someone's payment in a soft block isn't spendable yet");
@@ -138,10 +138,10 @@ for (const browserName of BROWSERS) describe(browserName, () => {
     FLUSH.tipTime = Math.floor(Date.now() / 1000) - 3600;
     try {
       const home = await openHome(session);
-      assert.notEqual(await home.$('[data-account="46"] [data-stalled]'), null);
+      assert.notEqual(await home.$('[data-account="99"] [data-stalled]'), null);
       await home.close();
 
-      const page = await openWalletPage(session, "#/chain/46");
+      const page = await openWalletPage(session, "#/chain/99");
       await page.waitForSelector("[data-settled]", { timeout: 20_000 });
       const notice = await page.$eval("[data-stalled]", (e) => e.textContent.trim());
       assert.match(notice, /^Flush has made no block since .+\. Nothing sent on it confirms until it moves again\.$/);

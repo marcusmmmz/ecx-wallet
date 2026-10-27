@@ -1,6 +1,6 @@
 # Flush spends carry no replay marker
 
-`flush.wasm` (Slot 46, #56) is a copy of `l1.wasm`'s PSBT rules: every input carries its whole previous transaction, which must hash to the txid it names, and `sign` signs only P2WPKH inputs that re-derive. It leaves out one rule. L1 refuses a spend whose `nLockTime` isn't `replayLockTime` or that has a final `nSequence` (ADR 0004); Flush has no such check, and its Send uses `nLockTime` 0.
+`flush.wasm` (Flush, #56) is a copy of `l1.wasm`'s PSBT rules: every input carries its whole previous transaction, which must hash to the txid it names, and `sign` signs only P2WPKH inputs that re-derive. It leaves out one rule. L1 refuses a spend whose `nLockTime` isn't `replayLockTime` or that has a final `nSequence` (ADR 0004); Flush has no such check, and its Send uses `nLockTime` 0.
 
 ADR 0004's reason is that eCash shares Bitcoin's keys, addresses and pre-fork coins, so an unmarked eCash spend is also valid on Bitcoin. Flush shares no coins with any chain. Its genesis is its own (`7d66b10e…` on betanet), it creates no coins of its own, and every coin it has comes from a Deposit paid out in one of its own blocks. A Flush transaction spends outputs that exist only on Flush, so no other chain can accept it. The keys are shared, since the Starter's `m/84'/1'/0'` keys also serve Slot 24, but a signature commits to the outputs it spends, not only to the key.
 

@@ -30,7 +30,7 @@ The shipped build reads public explorers, which tests can't control. So `e2e/scr
 |---|---|---|
 | eCash | `http://127.0.0.1:24000` | `E2E_L1_SERVER` |
 | Slot 24 | `http://127.0.0.1:24024` | `E2E_SIDECHAIN_SERVER` |
-| Slot 46 (Flush) | `http://127.0.0.1:24046` (Server API `flush`) | `E2E_FLUSH_SERVER` |
+| Slot 99 (Flush) | `http://127.0.0.1:24046` (Server API `flush`) | `E2E_FLUSH_SERVER` |
 
 - Chain Entries are compiled into their modules (`core/<module>/build.rs` reads `$ECX_L1_CHAIN_ENTRY` / `$ECX_ELEMENTS_CHAIN_ENTRY` / `$ECX_FLUSH_CHAIN_ENTRY`), so `l1.wasm`, `elements.wasm` and `flush.wasm` are rebuilt, in their own cargo target dir (`core/target/e2e`). The output is in `e2e/dist/extension/{chromium,firefox}`.
 - `build-output.test` checks that the two builds differ only there: every other file is byte-identical, the manifest differs only in the servers' origins, and each module's `declare()` and `chainEntry()` differ only in betanet's server.
@@ -40,7 +40,7 @@ The shipped build reads public explorers, which tests can't control. So `e2e/scr
 
 1. `pnpm build && pnpm build:e2e`
 2. Load `e2e/dist/extension/chromium` as an unpacked extension.
-3. `pnpm --filter @ecx/stub-server start`: the eCash and Slot 24 Esplora stubs, answering for the wallet "abandon … about", and an empty Flush stub (Slot 46) so turning Flush on reads a chain. Import that mnemonic.
+3. `pnpm --filter @ecx/stub-server start`: the eCash and Slot 24 Esplora stubs, answering for the wallet "abandon … about", and an empty Flush stub (Slot 99) so turning Flush on reads a chain. Import that mnemonic.
 
 ## Writing e2e tests
 
@@ -64,7 +64,7 @@ The shipped build reads public explorers, which tests can't control. So `e2e/scr
 **Stub servers:**
 
 - `serveEsplora(config)`: the Esplora stub where the e2e build's Chain Entry names Slot 24's server (`:24024`). Its config is read on every request, so a test can change it.
-- `serveFlushEsplora(config)`: the same for Slot 46's (`:24046`), in Flush mode: it answers as Flush's explorer does (`/flush/blocks` finality from `config.finality`, `?after_txid=` paging, JSON errors; see `stub-server/src/esplora.mjs`).
+- `serveFlushEsplora(config)`: the same for Flush's (`:24046`), in Flush mode: it answers as Flush's explorer does (`/flush/blocks` finality from `config.finality`, `?after_txid=` paging, JSON errors; see `stub-server/src/esplora.mjs`).
 - `serveL1Esplora(config)`: the same for eCash's (`:24000`). It indexes the raw transactions in `config.txs` as Esplora would and accepts broadcasts. `@ecx/stub-server/bitcoin-tx` makes and parses them.
 - `serveSidechainServer(config)`: the Standard Sidechain API stub, on a free port.
 

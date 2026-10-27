@@ -1,12 +1,13 @@
 {
-  "slot": 46,
+  "slot": 99,
   "name": "Flush",
   "description": "Tokens, trading and staking",
   "networks": {
     "betanet": {
-      "chain": "ecash:betanet-s46",
+      "chain": "ecash:betanet-s99",
       "parent": "ecash:betanet",
-      "identityBlock": { "height": 0, "hash": "7d66b10e351e5ad86c562ba761b5476f75c6f1b9f13aa7cf469df3a8d5701b75" },
+      "identityBlock": { "height": 0, "hash": "04dfb01bef61e44d679132f9e830719c64241f7052880418a350ff6d3c90b561" },
+      "activation": { "height": 968998, "hash": "00000000000000012009a14359125c30ad531aa58fdcc76eee7d14c522acd5ae" },
       "depositConfirmations": 2,
       "sidechainServer": { "api": "flush", "url": "https://explorer.blockfab.org/betanet/flush/api" },
       "officialApps": [],

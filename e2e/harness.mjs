@@ -374,7 +374,7 @@ export async function serveEsplora(config, server = E2E_SIDECHAIN_SERVER) {
 /** `serveEsplora` where the e2e build's eCash Chain Entry names betanet's server (`E2E_L1_SERVER`). */
 export const serveL1Esplora = (config) => serveEsplora(config, E2E_L1_SERVER);
 
-/** `serveEsplora` in Flush mode where the e2e build's Slot 46 Chain Entry names betanet's server (`E2E_FLUSH_SERVER`). */
+/** `serveEsplora` in Flush mode where the e2e build's Flush Chain Entry names betanet's server (`E2E_FLUSH_SERVER`). */
 export const serveFlushEsplora = (config) => serveEsplora(Object.assign(config, { flush: true }), E2E_FLUSH_SERVER);
 
 /** The wallet's TypeScript (`wallet/`), bundled for node the way esbuild bundles it for the background. */

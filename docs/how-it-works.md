@@ -59,7 +59,7 @@ Each chain is read from the Sidechain Server its Chain Entry names for the modul
 |---|---|---|
 | eCash | `https://esplora.beta.ecash.ninja` | `core/l1/chain-entry.json` |
 | Slot 24 | `https://explorer.bitnames.info/api` | `core/elements/chain-entry.json` |
-| Slot 46 (Flush, provisional) | `https://explorer.blockfab.org/betanet/flush/api` (serves the temporary Slot 99 chain for now, so its identity check fails) | `core/flush/chain-entry.json` |
+| Slot 99 (Flush on betanet, ADR 0014) | `https://explorer.blockfab.org/betanet/flush/api` | `core/flush/chain-entry.json` |
 
 The extension build turns those URLs into `host_permissions` and the CSP's `connect-src`. `wallet/src/server-api.ts` picks the client for the Server API.
 
@@ -153,7 +153,7 @@ A ticker of the Chain Entry's, in any case, is refused, with the reason shown. A
 
 **How** (`wallet/src/deposit.ts`, #31, ADR 0004):
 
-1. The Slot's Chain Module says what the Deposit credits (`depositDestination`). For Elements, that's its first receive address as UTF-8, with a minimum of 3,000 sats, credited exactly the value. For Flush, it's `s46_<address>_<checksum>` (the checksum is the first 6 hex digits of the SHA-256 of `s46_<address>_`), with a minimum of 294 sats; `flush.wasm` declares it only once Slot 46's Chain Entry pins its activation (ADR 0004).
+1. The Slot's Chain Module says what the Deposit credits (`depositDestination`). For Elements, that's its first receive address as UTF-8, with a minimum of 3,000 sats, credited exactly the value. For Flush, it's `s99_<address>_<checksum>` on betanet (the checksum is the first 6 hex digits of the SHA-256 of `s99_<address>_`), with a minimum of 294 sats; `flush.wasm` declares it only while its Chain Entry pins its Slot's activation (ADR 0004).
 2. `treasury.ts` finds the Slot's Treasury on eCash's Esplora by #15's strict exactly-one rule (`/scripthash/:h/utxo`, following pending M5s). With none, only a pinned `activation` in the Slot's Chain Entry allows a first Deposit.
 3. `l1.wasm`'s `build_deposit` builds the M5 from the account's confirmed coins: largest first, the fee at the 6-block estimate, change to the first unused change address. Every input carries its previous transaction, so the module checks every value itself. It refuses an M5 eCash won't relay: over 10,000 vB, or over 1,000 vB when the Treasury it spends is a pending M5's, and a destination over 100 bytes (Backbone's limits, #57).
 4. The L1 Decoder's Clear View goes to the approval window. After approval: `sign`, `finalize`, `POST /tx`.

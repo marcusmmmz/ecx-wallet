@@ -1,4 +1,4 @@
-//! `deposit_destination(starter)`: what a Deposit to Slot 46 is credited to, in the bytes an M5's
+//! `deposit_destination(starter)`: what a Deposit to Flush's Slot is credited to, in the bytes an M5's
 //! `OP_RETURN` carries, and the chain's rules for it (#57).
 //!
 //! Flush reads the destination as `s<slot>_<address>_<checksum>`, the checksum the first 6 hex
@@ -27,7 +27,7 @@ const MINIMUM_DEPOSIT: u64 = 294;
 pub struct DepositDestination {
     /// The Starter's first receive address, which the Deposit is credited to.
     pub address: String,
-    /// The bytes the M5's `OP_RETURN` pushes, hex: `s46_<address>_<checksum>` in ASCII.
+    /// The bytes the M5's `OP_RETURN` pushes, hex: `s<slot>_<address>_<checksum>` in ASCII.
     pub destination: String,
     /// The asset the credit arrives in: "", Flush's ECX.
     pub asset: String,
@@ -46,9 +46,9 @@ pub fn long_form(slot: u32, address: &str) -> String {
 
 pub fn deposit_destination(starter: &str) -> Result<DepositDestination, String> {
     if network().activation.is_none() {
-        return Err("Slot 46's Chain Entry pins no activation block: this wallet makes no Deposit to it (docs/adr/0004).".into());
+        return Err("Flush's Chain Entry pins no activation block: this wallet makes no Deposit to it (docs/adr/0004).".into());
     }
-    let slot = chain_entry().slot.ok_or("Slot 46's Chain Entry names no slot")?;
+    let slot = chain_entry().slot.ok_or("Flush's Chain Entry names no slot")?;
     let entry = derive_account(starter, 1, 0)?.receive.remove(0);
     let destination = long_form(slot, &entry.address);
     if destination.len() > MAX_DESTINATION_BYTES {

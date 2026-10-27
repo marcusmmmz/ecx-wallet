@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 export const E2E_SIDECHAIN_SERVER = { api: "esplora", url: "http://127.0.0.1:24024" };
 /** eCash betanet's server in the e2e build: another Esplora stub, on its own port. */
 export const E2E_L1_SERVER = { api: "esplora", url: "http://127.0.0.1:24000" };
-/** Slot 46's (Flush) betanet server in the e2e build: the Esplora stub in Flush mode, on its own port. */
+/** Flush's (Slot 99) betanet server in the e2e build: the Esplora stub in Flush mode, on its own port. */
 export const E2E_FLUSH_SERVER = { api: "flush", url: "http://127.0.0.1:24046" };
 
 /** Per module: its Chain Entry's env var for `core/<module>/build.rs`, its .wasm and its e2e server. */

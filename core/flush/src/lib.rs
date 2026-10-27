@@ -1,10 +1,10 @@
-//! The Flush Chain Module (Slot 46). Flush is a Bitcoin Core fork with its own genesis, so this is
+//! The Flush Chain Module (Slot 99 on betanet, docs/adr/0014). Flush is a Bitcoin Core fork with its own genesis, so this is
 //! L1's module (`core/l1`) keyed by a Starter instead of the L1 Account Key, and without the
 //! replay marker (docs/adr/0011).
 //!
 //! - [`declare`] reports the binding the module serves;
-//! - [`derive_account`] turns the Slot 46 Starter into BIP84 (P2WPKH) addresses and watch data;
-//! - [`deposit_destination`] says what a Deposit from eCash is credited to, once Slot 46's
+//! - [`derive_account`] turns Flush's Starter into BIP84 (P2WPKH) addresses and watch data;
+//! - [`deposit_destination`] says what a Deposit from eCash is credited to, once its Slot's
 //!   activation is pinned;
 //! - [`build_transfer`] builds the wallet's own Send of ECX from the account's coins;
 //! - [`check`] refuses, without the Starter, what the wallet must never sign;
@@ -16,7 +16,7 @@
 //!   transactions that made them (the `tokens` capability, docs/adr/0013).
 //!
 //! The module holds nothing between calls and receives only its own Slot's Starter. Every
-//! per-network value comes from Slot 46's Chain Entry (`chain-entry.json`), never from constants.
+//! per-network value comes from Flush's Chain Entry (`chain-entry.json`), never from constants.
 use std::str::FromStr;
 
 use bitcoin::bech32::{self, Hrp};
@@ -74,7 +74,7 @@ pub struct Declaration {
     pub capabilities: Vec<String>,
 }
 
-/// `depositDestination` only once the Chain Entry pins Slot 46's activation (docs/adr/0004): a
+/// `depositDestination` only once the Chain Entry pins its Slot's activation (docs/adr/0004): a
 /// Deposit to an inactive Slot is accepted on eCash and its funds are anyone's (#57).
 pub fn declare() -> Declaration {
     let mut capabilities = vec!["buildTransfer".to_string(), "tokens".into()];
@@ -84,7 +84,7 @@ pub fn declare() -> Declaration {
     Declaration { binding: Binding { chain: network().chain.clone(), format: "psbt".into(), payload_versions: vec!["0".into()] }, capabilities }
 }
 
-/// This build's network in Slot 46's Chain Entry.
+/// This build's network in Flush's Chain Entry.
 pub fn network() -> &'static NetworkEntry {
     &chain_entry().networks[NETWORK]
 }

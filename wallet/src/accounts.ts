@@ -16,7 +16,7 @@ import type { NamedAsset } from "./assets";
 import { speaksEsplora } from "./server-api";
 
 /** Slots with a bundled Chain Module, and the .wasm each ships as. */
-export const CHAIN_MODULE_FILES: Readonly<Record<number, string>> = { 24: "elements.wasm", 46: "flush.wasm" };
+export const CHAIN_MODULE_FILES: Readonly<Record<number, string>> = { 24: "elements.wasm", 99: "flush.wasm" };
 
 export const SUPPORTED_SLOTS: readonly number[] = Object.keys(CHAIN_MODULE_FILES).map(Number);
 

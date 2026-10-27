@@ -93,7 +93,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
 
   test("the Chains screen lists every chain this release supports; turning one on shows it on home", async () => {
     const page = await openWalletPage(session, "#/chains");
-    assert.deepEqual(await readChains(page), [["l1", "always"], ["24", "false"], ["46", "false"]], "Flush starts off too");
+    assert.deepEqual(await readChains(page), [["l1", "always"], ["24", "false"], ["99", "false"]], "Flush starts off too");
     await page.click('[data-chain-switch="24"]');
     await page.waitForSelector('[data-chain-switch="24"][aria-checked="true"]', { timeout: 10_000 });
     await page.close();

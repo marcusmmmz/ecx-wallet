@@ -8,7 +8,7 @@ Servers report balances by asset id only, and the home page needs more: a name a
 ]
 ```
 
-`id` is the lowercase hex servers report. An empty id is the chain's native coin, the one its server reports without an asset id: eCash's only coin, and Flush's ECX (Slot 46), which the mempool.space-style explorer lists with no `asset` field. A network names each asset at most once and marks at most one as `ecx`. A Chain Module may add its own rule: Elements' ECX must be its `policyAsset`, the asset a Deposit is credited in. Any asset the entry doesn't name shows as "Unknown asset" with its shortened id. The same entry gives the chain's display `name` ("Main chain", "Elements+") and a one-line `description`. The network label shown to users ("Betanet") is the network's key, not a new field.
+`id` is the lowercase hex servers report. An empty id is the chain's native coin, the one its server reports without an asset id: eCash's only coin, and Flush's ECX, which the mempool.space-style explorer lists with no `asset` field. A network names each asset at most once and marks at most one as `ecx`. A Chain Module may add its own rule: Elements' ECX must be its `policyAsset`, the asset a Deposit is credited in. Any asset the entry doesn't name shows as "Unknown asset" with its shortened id. The same entry gives the chain's display `name` ("Main chain", "Elements+") and a one-line `description`. The network label shown to users ("Betanet") is the network's key, not a new field.
 
 ## Considered Options
 

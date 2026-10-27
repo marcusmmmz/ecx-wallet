@@ -1,14 +1,17 @@
-//! Slot 46's Chain Entry: the one place Flush's per-network values live. It ships with the module
+//! Flush's Chain Entry: the one place its per-network values live. It ships with the module
 //! (embedded from `chain-entry.json`) and the wallet reads it through `chain_entry()`. The envelope
 //! is `ecx-chain-entry`'s; `params` are this module's own.
 //!
-//! Provisional (#56): Slot 46 isn't active on betanet yet, and the explorer that serves Flush today
-//! runs a temporary Slot 99 chain (genesis `04dfb01b…`), which this entry's identity check refuses.
-//! Sources are github.com/block-fabric/backbone-flush at commit `48e822b`, read 2026-10-25:
+//! On betanet Flush is Slot 99, the temporary chain its node calls "Photon"; Slot 46 is
+//! mainnet's (docs/adr/0014). Sources are github.com/block-fabric/backbone-flush at commit
+//! `48e822b`, read 2026-10-25, and the live chains, read 2026-10-27:
 //!
-//! - **Identity:** height 0, `7d66b10e…`, the betanet genesis of `MakeSidechain` for
-//!   `ChainType::ECASH_BETANET` (`src/kernel/chainparams.cpp`), which the node's own tests check
-//!   as `getblockhash 0` (`src/test/layers_tests.cpp:170-188`); recomputed from its parameters.
+//! - **Identity:** height 0, `04dfb01b…`, the genesis Flush's explorer serves. (`7d66b10e…`, the
+//!   betanet genesis `MakeSidechain` derives for Slot 46, is that chain's if it ever runs there.)
+//! - **`activation`:** eCash block 968,998 (`00000000000000012009a1…acd5ae`), the last of 1,009
+//!   consecutive M2 ACKs (`d6e1c5df 63 4ec9a1a1…d3d6ced6`, from 967,990) for the "Photon" M1 in
+//!   block 967,989, read from esplora.beta. No M2 for Slot 99 follows it, and the first M5 to Slot
+//!   99 is in block 973,928.
 //! - **`depositConfirmations`: 2.** A Deposit in eCash block N is paid by the first Flush block
 //!   whose acknowledgement covers N (`ack.mainheight − 1 ≥ N`), in practice after N+1; all seven
 //!   Deposits seen on the Slot 99 chain fit (research on #55).
@@ -17,8 +20,7 @@
 //!   asset id, so the entry names it with the empty id (docs/adr/0005).
 //! - **Address params:** `CEcashSidechainParams` copies `CMainParams` (P2PKH 0, P2SH 5) and sets
 //!   only the HRP, `bflx` on betanet.
-//! - **Server:** Flush's explorer, `explorer.blockfab.org/betanet/flush/api`. On 2026-10-25 it served
-//!   the temporary Slot 99 chain, so the identity check fails there until it serves Slot 46.
+//! - **Server:** Flush's explorer, `explorer.blockfab.org/betanet/flush/api`.
 //!
 //! `build.rs` picks the file: `chain-entry.json`, or `$ECX_FLUSH_CHAIN_ENTRY` for the e2e build,
 //! whose Chain Entry differs only in its Sidechain Servers.

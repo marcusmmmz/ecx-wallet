@@ -1,6 +1,6 @@
 # Flush's explorer is its own Server API, and a Flush block is confirmed once anchored
 
-Flush (Slot 46, #56) is read from its explorer, `explorer.blockfab.org/betanet/flush/api`, which serves the temporary Slot 99 chain today: until it serves Slot 46, the identity check refuses it. That explorer is mempool.space's backend, whose electrs fork serves most of what ADR 0002's `"esplora"` covers, plus routes of its own under `/flush/`. Two things about Flush don't fit `"esplora"`:
+Flush (Slot 99 on betanet, ADR 0014; #56) is read from its explorer, `explorer.blockfab.org/betanet/flush/api`. That explorer is mempool.space's backend, whose electrs fork serves most of what ADR 0002's `"esplora"` covers, plus routes of its own under `/flush/`. Two things about Flush don't fit `"esplora"`:
 
 - **Depth means little.** Flush makes a block of stake every 15 seconds, and such a block stays `soft` until an eCash block anchors it. One anchor can replace any number of soft blocks: block 8,462 was 502 deep and still soft. `/flush/blocks?hashes=a,b,…` (up to 30, comma-separated) says how final each block is: `soft`, `anchored` (one anchor), or `final` (three, about 30 minutes).
 - **It can stall without saying so.** Flush halted from 2026-10-24 ~19:00 UTC to the next day, and `getposinfo.stalled` stayed `false` throughout. Only the tip's age showed it.
@@ -36,4 +36,4 @@ Flush's module builds from whole transactions (its format is `psbt`, as L1's Dep
 - Flush's explorer had no unconfirmed incoming outputs on `/address/*` (recorded 2026-10-25). A payment to the wallet showed only once it was in a block, and a Send's change only then too. Its `58882ec` merges the mempool into `/address/*` and adds Blockstream's `/txs/chain/:txid`, so the client's `?after_txid=` fallback stops being needed. Neither was observable live: the mempool was empty, and `/address/:a/txs*` returned 502 from 2026-10-25 20:16 UTC (#55). Fixed by 2026-10-27, with `POST /tx` now reaching the node.
 - A refused broadcast carries the node's code alone (`sendrawtransaction RPC error: {"code":-26}`). The wallet then asks the explorer's `POST /txs/test` (the node's `testmempoolaccept`) for the reason, and shows the code alone if that doesn't answer.
 - A Send's held coins are released once its block is anchored, or once the server has forgotten it for 6 blocks (`HOLD_BLOCKS`), which on Flush is 90 seconds.
-- `"flush"` is provisional with the rest of Slot 46's Chain Entry. If Slot 46's explorer differs from today's Slot 99 one, this ADR changes with it.
+- If mainnet's Flush (Slot 46) is served by a different explorer, this ADR changes with it.

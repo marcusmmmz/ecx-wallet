@@ -22,7 +22,7 @@ So a Slot's Chain Entry may pin `activation: { height, hash }` per network: the 
 - **No Treasury, with a pin:** the wallet checks the L1 server has the activation block at its height (`/block-height/H`), then builds an M5 that spends no Treasury. The Decoder flags it (`firstDeposit`), and the approval window warns: the wallet can't confirm the Slot is active and still empty, the funds can be lost if either is wrong, and a racing first Deposit is refused or dropped, its coins coming back. (This said "can leave coins stuck in mempools" until #57's research: Backbone checks an M5 against the Treasury as its mempool leaves it, refuses a second first Deposit with `bad-dc-escrow-unspent`, and drops the losing one once a block confirms the other.)
 - **No Treasury without a pin, or several Treasuries:** a refusal, with no approval window.
 
-A pin is the only guard against an inactive Slot: Backbone relays and mines an M5 to one, whose Treasury-shaped output is anyone's (#57). Flush's module declares `depositDestination` only once its Chain Entry pins an activation, so not even a Treasury someone else made at an inactive Slot 46 draws a Deposit.
+A pin is the only guard against an inactive Slot: Backbone relays and mines an M5 to one, whose Treasury-shaped output is anyone's (#57). Flush's module declares `depositDestination` only once its Chain Entry pins an activation, so not even a Treasury someone else made at an inactive Slot draws a Deposit. Betanet's Flush, Slot 99, is pinned at block 968,998 (ADR 0014).
 
 A pin is a checked fact, added once someone has verified it. Slot 24's was read from esplora.beta on 2026-10-20; the enforcer may count the Slot as active from the next block (970,716), to confirm with the Elements developer before release.
 
