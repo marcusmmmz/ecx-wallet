@@ -52,7 +52,7 @@ fn declare_reports_slot_99s_betanet_binding_and_capabilities() {
     assert_eq!(d.binding.chain, "ecash:betanet-s99");
     assert_eq!(d.binding.format, "psbt");
     assert_eq!(d.binding.payload_versions, ["0"]);
-    assert_eq!(d.capabilities, ["buildTransfer", "tokens", "depositDestination"]);
+    assert_eq!(d.capabilities, ["buildTransfer", "tokens", "trades", "depositDestination"]);
 }
 
 #[test]

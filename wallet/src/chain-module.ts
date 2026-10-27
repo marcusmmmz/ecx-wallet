@@ -22,7 +22,10 @@ export interface Binding {
 
 export interface Declaration {
   binding: Binding;
-  /** Optional capabilities: `depositDestination`, `buildTransfer` and `assetContract` (a Slot's), `buildDeposit` (L1's). */
+  /**
+   * Optional capabilities: `depositDestination`, `buildTransfer` and `assetContract` (a Slot's), `buildDeposit` (L1's),
+   * `tokens` and `trades` (Flush's).
+   */
   capabilities: string[];
 }
 
@@ -226,9 +229,28 @@ export interface ClearView {
   dangerousModes: DangerousMode[];
   /** `treasury`: the Slot whose Treasury the input spends (L1 only). `issuance`: Elements only. */
   inputs: (AssetAmount & { index: number; yours: boolean; treasury?: number; issuance?: ClearIssuance })[];
-  /** Every output except the fee. */
-  outputs: (AssetAmount & { index: number; destination: Destination })[];
+  /** Every output except the fee. `atLeast`: a trade's result, at least `amount` as the node clears it. */
+  outputs: (AssetAmount & { index: number; destination: Destination; atLeast?: true })[];
   fee: AssetAmount;
+  /** A trade's terms (Flush, docs/adr/0016). */
+  trade?: ClearTrade;
+}
+
+/** A trade through one pool, as its marker and the pool's description say. Base units; "" is the native coin. */
+export interface ClearTrade {
+  pool: string;
+  assetIn: string;
+  amountIn: string;
+  /** The pool's other asset. */
+  assetOut: string;
+  /** The floor the node enforces. */
+  minOut: string;
+  /** The output that takes what comes out. */
+  result: number;
+  /** Where the native coin paid out, or back if it doesn't fill, goes; null if it is on neither side. */
+  payout: Destination | null;
+  /** What isn't the wallet's own, shown above everything else. */
+  warnings: string[];
 }
 
 /** `decode`'s answer for a request it doesn't refuse: a Clear View only if fully understood. */
@@ -255,7 +277,11 @@ export type RefusalCode =
   /** `buildDeposit`, `buildTransfer`: the coins don't cover the amounts and the fee. */
   | "insufficientFunds"
   /** `buildTransfer`: an amount, or change that can't go to the fee, is below what the chain relays. */
-  | "dust";
+  | "dust"
+  /** `parseAction`, `buildTrade`: a link its chain's own app would refuse, or a trade the wallet won't build (docs/adr/0016). */
+  | "invalidAction"
+  /** `parseAction`: an action of the chain the wallet doesn't build yet. */
+  | "unsupportedAction";
 
 /** A module refused to decode or sign a request. */
 export class ChainModuleRefusal extends Error {
@@ -337,6 +363,64 @@ export interface ChainModule<K extends ChainKey = Starter> {
    * a PNG, JPEG, GIF or WebP image. Throws ChainModuleRefusal (`invalidContract`, `malformed`).
    */
   assetLogo(asset: string, tx: string): CheckedLogo;
+  /**
+   * Only if `declare()` lists `trades` (Flush, docs/adr/0016): the trade a `flush:` link asks for, at
+   * the Unix time `now`. Throws ChainModuleRefusal (`invalidAction`, `unsupportedAction`).
+   */
+  parseAction(link: string, now: number): FlushAction;
+  /**
+   * Only if `declare()` lists `trades`: the trade, built from the account's coins, with the checks of
+   * ADR 0016. Throws ChainModuleRefusal (`invalidAction`, `insufficientFunds`, …).
+   */
+  buildTrade(order: TradeOrder, key: K): BuiltTrade;
+}
+
+/** A trade a `flush:` link asks for. Amounts are the link's decimals; `expires` a Unix time. */
+export type FlushAction = { expires: number; slippageBps: number | null } & (
+  | { verb: "swap"; pool: string; from: string; to: string; amount: string; minOut: string }
+  | { verb: "buy"; launch: string; asset: string; ecx: string; minTokens: string }
+  | { verb: "sell"; launch: string; asset: string; tokens: string; minEcx: string }
+);
+
+/** What to trade, and what to build it from (the Flush module's `TradeOrder`). */
+export interface TradeOrder {
+  link: string;
+  now: number;
+  /** The explorer's `getpool` answer, as is. */
+  pool: unknown;
+  /** The current registration (hex) of each token the trade involves. */
+  registrations: string[];
+  /** The node's quote for this pool, in whole units of what comes out. */
+  quote: number;
+  /** `getbitassetsinfo`'s `min_chn_payout`, in ECX. */
+  minPayout: number;
+  coins: { tx: string; vout: number; chain: 0 | 1; index: number }[];
+  /** Sats per 1000 vbytes. */
+  feeRate: number;
+  changeIndex: number;
+}
+
+/** A trade `buildTrade` built: the transfer, the sats its marker locks, and its checked terms. */
+export interface BuiltTrade extends BuiltTransfer {
+  /** Sats: what broadcasting must allow as a burn (`maxburnamount`). */
+  burn: string;
+  trade: {
+    verb: "swap" | "buy" | "sell";
+    pool: string;
+    assetIn: TradeSide;
+    assetOut: TradeSide;
+    amountIn: string;
+    minOut: string;
+    quote: string;
+    expires: number;
+  };
+}
+
+/** An asset of a trade: its id ("" for ECX), checked ticker and decimals. */
+export interface TradeSide {
+  id: string;
+  ticker: string;
+  decimals: number;
 }
 
 /** A token a Flush output carries (docs/adr/0013). */
@@ -494,6 +578,8 @@ function chainModuleOf<K extends ChainKey>(m: CoreModule): ChainModule<K> {
     outputTokens: (tx) => refusals(() => json<OutputTokens>("output_tokens", tx)),
     assetRegistration: (asset, tx) => refusals(() => json<CheckedRegistration>("asset_registration", asset, tx)),
     assetLogo: (asset, tx) => refusals(() => json<CheckedLogo>("asset_logo", asset, tx)),
+    parseAction: (link, now) => refusals(() => json<FlushAction>("parse_action", link, String(now))),
+    buildTrade: (order, key) => refusals(() => json<BuiltTrade>("build_trade", JSON.stringify(order), key)),
   };
 }
 

@@ -39,7 +39,7 @@ mod transfer;
 
 pub use chain_entry::{chain_entry, ChainEntry, NetworkEntry, ServerApi, SidechainServerEntry};
 pub use deposit::{deposit_destination, long_form, DepositDestination, MAX_DESTINATION_BYTES};
-pub use decode::{decode, ClearInput, ClearOutput, ClearView, DangerousMode, Decoded, Destination, VerifiableFacts};
+pub use decode::{decode, decode_with_evidence, ClearInput, ClearOutput, ClearTrade, ClearView, DangerousMode, Decoded, Destination, VerifiableFacts};
 pub use link::{parse_action, Action, CLOCK_SKEW, MAX_LIFETIME, MAX_LINK_BYTES, MAX_SLIPPAGE_BPS};
 pub use psbt::{check, AssetAmount, OwnedInput, Refusal, RefusalCode};
 pub use sign::{finalize, sign, Finalized};
@@ -81,7 +81,7 @@ pub struct Declaration {
 /// `depositDestination` only once the Chain Entry pins its Slot's activation (docs/adr/0004): a
 /// Deposit to an inactive Slot is accepted on eCash and its funds are anyone's (#57).
 pub fn declare() -> Declaration {
-    let mut capabilities = vec!["buildTransfer".to_string(), "tokens".into()];
+    let mut capabilities = vec!["buildTransfer".to_string(), "tokens".into(), "trades".into()];
     if network().activation.is_some() {
         capabilities.push("depositDestination".into());
     }

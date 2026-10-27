@@ -46,13 +46,32 @@ pub unsafe extern "C" fn build_transfer(order: *const u8, order_len: usize, star
     }))
 }
 
+/// A `flush:` link + the Unix time (decimal text) → the trade it asks for (`{ verb, expires, … }`) as
+/// JSON, or a refusal (`invalidAction`, `unsupportedAction`; docs/adr/0016).
+#[no_mangle]
+pub unsafe extern "C" fn parse_action(link: *const u8, link_len: usize, now: *const u8, now_len: usize) -> i32 {
+    ret_text(text(link, link_len).and_then(|l| {
+        let now: i64 = text(now, now_len)?.parse().map_err(|_| refusal(ecx_flush::Refusal { code: ecx_flush::RefusalCode::Malformed, message: "now isn't a Unix time".into() }))?;
+        ecx_flush::parse_action(l, now).map_err(refusal).and_then(|a| json(&a))
+    }))
+}
+
+/// Trade order (JSON) + Starter → `{ pset, spent, burn, trade }` as JSON, or a refusal.
+#[no_mangle]
+pub unsafe extern "C" fn build_trade(order: *const u8, order_len: usize, starter: *const u8, starter_len: usize) -> i32 {
+    ret_text(text(order, order_len).and_then(|o| {
+        let s = text(starter, starter_len)?;
+        ecx_flush::build_trade(o, s).map_err(refusal).and_then(|b| json(&b))
+    }))
+}
+
 /// Base64 PSBT → `null` if it passes the refusals that need no key, or a refusal.
 #[no_mangle]
 pub unsafe extern "C" fn check(payload: *const u8, payload_len: usize) -> i32 {
     ret_text(text(payload, payload_len).and_then(|p| ecx_flush::check(p).map_err(refusal).map(|()| "null".into())))
 }
 
-/// Base64 PSBT + Starter (+ the request's evidence, which no Flush kind uses yet: ignored) →
+/// Base64 PSBT + Starter + the request's evidence (JSON; `pool` for a trade) →
 /// `{ kind: "clear", view }` or `{ kind: "blind", reason, verifiableFacts }` as JSON, or a refusal.
 #[no_mangle]
 pub unsafe extern "C" fn decode(
@@ -60,12 +79,13 @@ pub unsafe extern "C" fn decode(
     payload_len: usize,
     starter: *const u8,
     starter_len: usize,
-    _evidence: *const u8,
-    _evidence_len: usize,
+    evidence: *const u8,
+    evidence_len: usize,
 ) -> i32 {
     ret_text(text(payload, payload_len).and_then(|p| {
         let s = text(starter, starter_len)?;
-        ecx_flush::decode(p, s).map_err(refusal).and_then(|d| json(&d))
+        let e = text(evidence, evidence_len)?;
+        ecx_flush::decode_with_evidence(p, s, e).map_err(refusal).and_then(|d| json(&d))
     }))
 }
 

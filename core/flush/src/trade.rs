@@ -237,7 +237,7 @@ impl Side {
 }
 
 /// The pool's kind, from `getpool`'s words for it.
-fn pool_kind(pool: &PoolReport) -> Result<PoolKind, Refusal> {
+pub(crate) fn pool_kind(pool: &PoolReport) -> Result<PoolKind, Refusal> {
     let curve = match pool.curve.as_str() {
         "constant_product" => 0,
         "stable" => 1,

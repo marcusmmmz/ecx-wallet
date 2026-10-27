@@ -37,6 +37,8 @@ pub enum RefusalCode {
     Dust,
     /// `asset_registration`: the transaction isn't the asset's registration, or names it no ticker.
     InvalidContract,
+    /// `decode_with_evidence`: the request's evidence doesn't check out against the payload (docs/adr/0009).
+    InvalidEvidence,
     /// `parse_action`: a `flush:` link Flush's own app would refuse (its version, network, expiry
     /// or parameters).
     InvalidAction,
