@@ -1,17 +1,20 @@
 //! Tokens and asset names read from whole transactions (`output_tokens`, `asset_registration`).
 //!
-//! `token-txs.json`: three live Slot 99 transactions, fetched 2026-10-25 from the explorer's
-//! `/tx/:txid/hex`: BROSEVELT's registration (kind 35), a SwapPools (kind 21, one result output) and
-//! an AddLiquidity (kind 7: BROSEVELT change listed at output 0, then two results).
+//! `token-txs.json`: live Slot 99 transactions from the explorer's `/tx/:txid/hex`: BROSEVELT's
+//! registration (kind 35), a SwapPools (kind 21, one result output) and an AddLiquidity (kind 7:
+//! BROSEVELT change listed at output 0, then two results), fetched 2026-10-25; BROSEVELT's SetLogo
+//! (kind 32, a 15,798-byte JPEG), fetched 2026-10-27.
 mod common;
 
-use ecx_flush::{asset_registration, output_tokens, RefusalCode, TokenAmount};
+use bitcoin::hashes::{sha256, Hash};
+use ecx_flush::{asset_logo, asset_registration, output_tokens, RefusalCode, TokenAmount};
 use serde_json::Value;
 
 const BROSEVELT: &str = "7351ccd9fd2f091cce3f9d8e3cd0b95f278885f4610620784b8c64be8b0237c1";
 const REGISTRATION: &str = "24fc101fccc71bc60845e190c2ad1e07b332fe7a6de99af37acdaaefdd9db891";
 const SWAP: &str = "0944a2452c9b07b99cc6a54dd662cb752738abdb051ec41069638097e9770e9b";
 const ADD_LIQUIDITY: &str = "681f2d2c4331fa285b30a59663ae7ed22a548a0f00db16cff72abebafca0ec12";
+const SET_LOGO: &str = "7958bc9b161e2bacc98e66bd7c6a01457809817a4c0cfcecc749504ad38e8d44";
 
 fn tx(txid: &str) -> String {
     let txs: Value = serde_json::from_str(include_str!("token-txs.json")).unwrap();
@@ -73,4 +76,23 @@ fn token_amounts_are_decimal_strings() {
     let add = output_tokens(&tx(ADD_LIQUIDITY)).unwrap();
     let TokenAmount { amount, .. } = add.outputs[0].token.clone().unwrap();
     assert!(amount.parse::<u64>().is_ok(), "{amount}");
+}
+
+#[test]
+fn a_logo_is_the_image_its_set_logo_carries() {
+    let logo = asset_logo(BROSEVELT, &tx(SET_LOGO)).unwrap();
+    assert_eq!((logo.asset.as_str(), logo.txid.as_str(), logo.mime.as_str()), (BROSEVELT, SET_LOGO, "image/jpeg"));
+    let bytes: Vec<u8> = (0..logo.bytes.len()).step_by(2).map(|i| u8::from_str_radix(&logo.bytes[i..i + 2], 16).unwrap()).collect();
+    assert_eq!(bytes.len(), 15_798);
+    // The hash Flush's node reports for it (`getasset`'s `logo.hash`).
+    assert_eq!(sha256::Hash::hash(&bytes).to_string(), "68472f4e69ed0aa96feac3e61f5a35bc119d34d33bce57af4a9d641a4ee730ed");
+}
+
+#[test]
+fn a_logo_is_refused_from_a_transaction_that_sets_none_or_sets_another_assets() {
+    let refused = |asset: &str, txid: &str| asset_logo(asset, &tx(txid)).unwrap_err();
+    // The registration carries no logo; the swap is no logo operation.
+    assert_eq!(refused(BROSEVELT, REGISTRATION).code, RefusalCode::InvalidContract);
+    assert!(refused(BROSEVELT, SWAP).message.contains("sets no logo"));
+    assert!(refused(&"ab".repeat(32), SET_LOGO).message.contains("not abab"));
 }

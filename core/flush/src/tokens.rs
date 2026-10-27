@@ -9,6 +9,7 @@
 //!   node's state knows (swaps, pool withdrawals, …).
 //! - [`asset_registration`]: an asset's name and decimals from the transaction that registered it,
 //!   only if it registers that very id and the ticker hashes to it (`HashName`).
+//! - [`asset_logo`]: an asset's logo, from the transaction that set it, which carries the image.
 use bitcoin::consensus::encode::deserialize_hex;
 use bitcoin::Transaction;
 use serde::Serialize;
@@ -199,4 +200,57 @@ pub(crate) fn token_flow(psbt: &bitcoin::psbt::Psbt) -> Result<TokenFlow, Refusa
         return Err(malformed("The transfer doesn't carry on exactly the tokens its inputs spend: Flush would refuse it."));
     }
     Ok(flow)
+}
+
+/// The most bytes a logo the wallet shows may have. Flush's own cap is the marker's size.
+pub const MAX_LOGO_BYTES: usize = 100_000;
+
+/// An asset's logo, as the transaction that set it carries it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckedLogo {
+    /// Display order.
+    pub asset: String,
+    /// The transaction that set it, display order.
+    pub txid: String,
+    /// `image/png`, `image/jpeg`, `image/gif` or `image/webp`, from the bytes themselves.
+    pub mime: String,
+    /// The image, hex.
+    pub bytes: String,
+}
+
+/// The image type `bytes` start with, if the wallet shows it: raster formats only, never SVG.
+fn image_type(bytes: &[u8]) -> Option<&'static str> {
+    match bytes {
+        [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, ..] => Some("image/png"),
+        [0xFF, 0xD8, 0xFF, ..] => Some("image/jpeg"),
+        [b'G', b'I', b'F', b'8', b'7' | b'9', b'a', ..] => Some("image/gif"),
+        [b'R', b'I', b'F', b'F', _, _, _, _, b'W', b'E', b'B', b'P', ..] => Some("image/webp"),
+        _ => None,
+    }
+}
+
+/// `asset`'s logo, only if `tx` sets one for that very id: a SetLogo (kind 32) for it, or its
+/// registration with a logo. Consensus lets only the asset's control coin set it.
+pub fn asset_logo(asset: &str, tx_hex: &str) -> Result<CheckedLogo, Refusal> {
+    let invalid = |message: String| refuse(RefusalCode::InvalidContract, message);
+    let tx = transaction(tx_hex)?;
+    let txid = tx.compute_txid().to_string();
+    let (_, marker) = marker(&tx)?.ok_or_else(|| invalid(format!("Transaction {txid} sets no logo: it has no BAST marker.")))?;
+    let set_for = match marker.kind {
+        32 => marker.fields.get("asset").and_then(|a| a.as_str()).map(str::to_owned),
+        _ => marker.registration().map(|r| r.asset),
+    };
+    let asset = asset.to_ascii_lowercase();
+    let (Some(for_asset), Some(bytes)) = (set_for, marker.logo) else {
+        return Err(invalid(format!("Transaction {txid} sets no logo: it is a {}.", marker.name)));
+    };
+    if for_asset != asset {
+        return Err(invalid(format!("Transaction {txid} sets asset {for_asset}'s logo, not {asset}'s.")));
+    }
+    if bytes.len() > MAX_LOGO_BYTES {
+        return Err(invalid(format!("Asset {asset}'s logo is {} bytes; the wallet shows at most {MAX_LOGO_BYTES}.", bytes.len())));
+    }
+    let mime = image_type(&bytes).ok_or_else(|| invalid(format!("Asset {asset}'s logo isn't a PNG, JPEG, GIF or WebP image.")))?;
+    Ok(CheckedLogo { asset, txid, mime: mime.into(), bytes: crate::hex(&bytes) })
 }

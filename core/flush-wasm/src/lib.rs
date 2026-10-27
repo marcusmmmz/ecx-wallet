@@ -101,6 +101,16 @@ pub unsafe extern "C" fn asset_registration(asset: *const u8, asset_len: usize, 
     }))
 }
 
+/// Asset id (display hex) + raw transaction (hex) → `{ asset, txid, mime, bytes }` if the
+/// transaction sets that asset's logo to an image the wallet shows, as JSON, or a refusal.
+#[no_mangle]
+pub unsafe extern "C" fn asset_logo(asset: *const u8, asset_len: usize, tx: *const u8, tx_len: usize) -> i32 {
+    ret_text(text(asset, asset_len).and_then(|a| {
+        let t = text(tx, tx_len)?;
+        ecx_flush::asset_logo(a, t).map_err(refusal).and_then(|l| json(&l))
+    }))
+}
+
 /// Starter → `{ address, destination, asset, minimum, scriptPubkey }` as JSON: what a Deposit is
 /// credited to. Fails while the Chain Entry pins no activation (`declare` lists it only then).
 #[no_mangle]

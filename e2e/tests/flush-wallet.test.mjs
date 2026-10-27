@@ -10,7 +10,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { encodeTx, parseTx } from "@ecx/stub-server/bitcoin-tx";
-import { ABANDON, activitySettled, BROWSERS, DIST, homeSettled, importWallet, launchWallet, openWalletPage, serveFlushEsplora, serveL1Esplora, setUpWallet } from "../harness.mjs";
+import { ABANDON, activitySettled, BROWSERS, DIST, homeSettled, importWallet, launchWallet, openWalletPage, ROOT, serveFlushEsplora, serveL1Esplora, setUpWallet } from "../harness.mjs";
 
 const wallet = await importWallet();
 const [vault, flush] = await Promise.all([
@@ -33,6 +33,21 @@ const PAYOUT = encodeTx({
 const PAYMENT = encodeTx({ inputs: [{ txid: "e1".repeat(32), vout: 0 }], outputs: [{ value: 5_000, script: RECEIVE_0.scriptPubkey }] });
 /** A token's output at the wallet's address: value 0. */
 const TOKEN = encodeTx({ inputs: [{ txid: "e2".repeat(32), vout: 0 }], outputs: [{ value: 0, script: RECEIVE_0.scriptPubkey }] });
+
+/** BROSEVELT, a live Slot 99 asset: its registration and SetLogo (core/flush/tests/token-txs.json). */
+const BROSEVELT = "7351ccd9fd2f091cce3f9d8e3cd0b95f278885f4610620784b8c64be8b0237c1";
+const LIVE_TXS = JSON.parse(await readFile(path.join(ROOT, "core/flush/tests/token-txs.json"), "utf8"));
+const REGISTRATION = "24fc101fccc71bc60845e190c2ad1e07b332fe7a6de99af37acdaaefdd9db891";
+const LOGO = "7958bc9b161e2bacc98e66bd7c6a01457809817a4c0cfcecc749504ad38e8d44";
+/** 10 BROSEVELT (1,000 units at 2 decimals) to the wallet: a transfer whose marker lists output 0. */
+const BROSEVELT_IN = encodeTx({
+  inputs: [{ txid: "e3".repeat(32), vout: 0 }],
+  outputs: [
+    { value: 0, script: RECEIVE_0.scriptPubkey },
+    // OP_RETURN "BAST" v0 transfer, one listed output: n 0, an asset token, its id (internal order), VARINT 1000.
+    { value: 0, script: `6a2b${Buffer.from("BAST").toString("hex")}00000100${"00"}${Buffer.from(BROSEVELT, "hex").reverse().toString("hex")}8668` },
+  ],
+});
 
 const utxo = (hex, value, blockHash) => ({ txid: parseTx(hex).txid, vout: hex === PAYOUT ? 1 : 0, value, confirmed: true, blockHash });
 
@@ -148,6 +163,36 @@ for (const browserName of BROWSERS) describe(browserName, () => {
       await page.close();
     } finally {
       FLUSH.tipTime = undefined;
+    }
+  });
+
+  test("home names a token from its registration by itself, with the logo its SetLogo carries", async () => {
+    const txs = FLUSH.txs;
+    const utxos = FLUSH.utxos[RECEIVE_0.address];
+    FLUSH.txs = [
+      ...txs,
+      { hex: BROSEVELT_IN, blockHeight: 3260, blockHash: FINAL },
+      { hex: LIVE_TXS[REGISTRATION], blockHeight: 604, blockHash: FINAL },
+      { hex: LIVE_TXS[LOGO], blockHeight: 8462, blockHash: FINAL },
+    ];
+    FLUSH.utxos[RECEIVE_0.address] = [...utxos, utxo(BROSEVELT_IN, 0, FINAL)];
+    FLUSH.flushAssets = { [BROSEVELT]: { asset: BROSEVELT, registered: 604, registration: REGISTRATION, logo: { height: 8462, txid: LOGO } } };
+    try {
+      const page = await openHome(session);
+      const row = `[data-account="99"] li[data-asset="${BROSEVELT}"]`;
+      await page.waitForSelector(`${row} img`, { timeout: 20_000 });
+      const shown = await page.$eval(row, (e) => ({
+        ticker: e.querySelector(".name strong").textContent.trim(),
+        balance: e.querySelector("[data-balance]").textContent.replace(/\s+/g, " ").trim(),
+        logo: e.querySelector("img").getAttribute("src").slice(0, 27),
+        loaded: e.querySelector("img").naturalWidth > 0,
+      }));
+      assert.deepEqual(shown, { ticker: "BROSEVELT", balance: "10 BROSEVELT", logo: "data:image/jpeg;base64,/9j/", loaded: true });
+      await page.close();
+    } finally {
+      FLUSH.txs = txs;
+      FLUSH.utxos[RECEIVE_0.address] = utxos;
+      FLUSH.flushAssets = undefined;
     }
   });
 

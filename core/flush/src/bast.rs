@@ -80,6 +80,8 @@ pub struct Marker {
     /// The operation's fields, as a JSON object.
     pub fields: Map<String, Value>,
     pub outputs: Vec<Listed>,
+    /// The logo's bytes, for a marker that sets one (kinds 32, 33, 35, and a launch's registration).
+    pub logo: Option<Vec<u8>>,
 }
 
 impl Marker {
@@ -153,7 +155,8 @@ pub fn parse(script: &[u8]) -> Result<Marker, String> {
         return Err("version is not 0".into());
     }
     let kind = r.u8()?;
-    let (name, fields) = operation(&mut r, kind)?;
+    let mut logo = None;
+    let (name, fields) = operation(&mut r, kind, &mut logo)?;
     canonical(kind, &fields)?;
     let count = r.compact()?;
     if count > MAX_LISTED as u64 {
@@ -175,7 +178,7 @@ pub fn parse(script: &[u8]) -> Result<Marker, String> {
     if r.i != r.b.len() {
         return Err("trailing bytes".into());
     }
-    Ok(Marker { kind, name, fields, outputs })
+    Ok(Marker { kind, name, fields, outputs, logo: logo.filter(|l: &Vec<u8>| !l.is_empty()) })
 }
 
 /// The bytes of `OP_RETURN <one push>`, refusing a push that isn't minimal or isn't all of `script`.
@@ -233,8 +236,14 @@ fn canonical(kind: u8, fields: &Map<String, Value>) -> Result<(), String> {
 }
 
 /// The operation `kind` names and its fields.
-fn operation(r: &mut Reader, kind: u8) -> Result<(&'static str, Map<String, Value>), String> {
+/// `logo` gets the logo's bytes, for a kind that carries one.
+fn operation(r: &mut Reader, kind: u8, logo: &mut Option<Vec<u8>>) -> Result<(&'static str, Map<String, Value>), String> {
     let mut f = Fields::default();
+    let mut blob = |r: &mut Reader| -> Result<usize, String> {
+        let bytes = r.blob()?;
+        *logo = Some(bytes.to_vec());
+        Ok(bytes.len())
+    };
     let name = match kind {
         0 => "transfer",
         1 => {
@@ -330,7 +339,7 @@ fn operation(r: &mut Reader, kind: u8) -> Result<(&'static str, Map<String, Valu
             "swap_pools"
         }
         22 => {
-            launch(r, &mut f)?;
+            launch(r, &mut f, &mut blob)?;
             "launch_token"
         }
         23 => {
@@ -361,12 +370,12 @@ fn operation(r: &mut Reader, kind: u8) -> Result<(&'static str, Map<String, Valu
             "curve_asset"
         }
         32 => {
-            f.put("asset", r.u256()?).put("logo_bytes", r.blob()?.len());
+            f.put("asset", r.u256()?).put("logo_bytes", blob(r)?);
             "set_logo"
         }
         33 => {
             register(r, &mut f)?;
-            f.put("logo_bytes", r.blob()?.len());
+            f.put("logo_bytes", blob(r)?);
             "register_with_logo"
         }
         34 => {
@@ -375,16 +384,16 @@ fn operation(r: &mut Reader, kind: u8) -> Result<(&'static str, Map<String, Valu
         }
         35 => {
             register(r, &mut f)?;
-            f.put("logo_bytes", r.blob()?.len()).put("display_name", r.string()?);
+            f.put("logo_bytes", blob(r)?).put("display_name", r.string()?);
             "register_with_display_name"
         }
         36 => {
-            launch(r, &mut f)?;
+            launch(r, &mut f, &mut blob)?;
             f.put("fee", r.v()?);
             "launch_with_params"
         }
         37 => {
-            launch(r, &mut f)?;
+            launch(r, &mut f, &mut blob)?;
             f.put("fee", r.v()?);
             let destination = r.u8()?;
             if destination > 2 {
@@ -406,10 +415,10 @@ fn register(r: &mut Reader, f: &mut Fields) -> Result<(), String> {
 }
 
 /// A LaunchToken's fields (kinds 22, 36, 37): its registration under `reg`, then the launch's own.
-fn launch(r: &mut Reader, f: &mut Fields) -> Result<(), String> {
+fn launch(r: &mut Reader, f: &mut Fields, logo: &mut impl FnMut(&mut Reader) -> Result<usize, String>) -> Result<(), String> {
     let mut reg = Fields::default();
     register(r, &mut reg)?;
-    reg.put("logo_bytes", r.blob()?.len()).put("display_name", r.string()?);
+    reg.put("logo_bytes", logo(r)?).put("display_name", r.string()?);
     f.put("reg", Value::Object(reg.0)).put("creator", r.blob_hex()?).put("allocation", r.u16()?);
     f.put("min_buy", r.v()?).put("max_buy", r.v()?).put("first_buy", r.v()?).put("first_min_out", r.v()?).put("chn_to", r.blob_hex()?);
     Ok(())

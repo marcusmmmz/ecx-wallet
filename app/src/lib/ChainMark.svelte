@@ -3,13 +3,16 @@
 
   /**
    * A chain's or an asset's mark: eCash's own on a near-black disc for the main chain and every
-   * ECX; Elements+'s initials on its purple; anything else its first letter, or "?" when unnamed.
+   * ECX; Elements+'s initials on its purple; an asset's checked logo (`image`, a `data:` URL) if it
+   * has one; anything else its first letter, or "?" when unnamed.
    */
-  let { kind, label = "", size = 32 }: { kind: "ecash" | "chain" | "asset" | "unknown"; label?: string; size?: number } = $props();
+  let { kind, label = "", image, size = 32 }: { kind: "ecash" | "chain" | "asset" | "unknown"; label?: string; image?: string; size?: number } = $props();
 </script>
 
 <span class="mark {kind}" style:width="{size}px" style:height="{size}px" style:font-size="{Math.round(size * 0.36)}px">
-  {#if kind === "ecash"}
+  {#if image !== undefined && image.startsWith("data:image/")}
+    <img src={image} alt="" width={size} height={size} />
+  {:else if kind === "ecash"}
     <EcashLogo size={Math.round(size * 0.6)} />
   {:else if kind === "unknown"}
     ?
@@ -19,6 +22,12 @@
 </span>
 
 <style>
+  img {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    object-fit: cover;
+  }
   .mark {
     display: inline-flex;
     align-items: center;

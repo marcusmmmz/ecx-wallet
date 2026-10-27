@@ -46,6 +46,8 @@ const lockState = () => ({ unlocked: true, steps: [] });
 /** BROSEVELT, a live Slot 99 asset, and the transaction that registered it (core/flush/tests). */
 const BROSEVELT = "7351ccd9fd2f091cce3f9d8e3cd0b95f278885f4610620784b8c64be8b0237c1";
 const BROSEVELT_REGISTRATION = "24fc101fccc71bc60845e190c2ad1e07b332fe7a6de99af37acdaaefdd9db891";
+/** BROSEVELT's SetLogo: the whole JPEG in its marker. */
+const BROSEVELT_LOGO = "7958bc9b161e2bacc98e66bd7c6a01457809817a4c0cfcecc749504ad38e8d44";
 const LIVE_TXS = JSON.parse(await readFile(path.join(ROOT, "core/flush/tests/token-txs.json"), "utf8"));
 
 /** Core's VARINT (serialize.h): base 128, most significant group first, one less per continuation byte. */
@@ -312,6 +314,40 @@ describe("Flush", () => {
       config.flushAssets[BROSEVELT].registered = 605;
       await assert.rejects(assets.addByRegistration(module(), client, BROSEVELT), /isn't confirmed at block 605/);
       await assert.rejects(assets.addByRegistration(module(), client, "ab".repeat(32)), /doesn't know asset/);
+    } finally {
+      config.flushAssets = undefined;
+    }
+  });
+
+  test("unnamed assets are named from their registrations, with the logo their SetLogo carries", async () => {
+    const memory = new Map();
+    const store = { get: async (k) => memory.get(k), set: async (k, v) => void memory.set(k, v) };
+    const assets = wallet.createAssets({ store, entryAssets: async () => module().chainEntry().networks.betanet.assets });
+    const client = wallet.esploraClient(wallet.esploraConfig(module().chainEntry(), module().chainEntry().networks.betanet), (...args) => fetch(...args));
+    fund([
+      { hex: LIVE_TXS[BROSEVELT_REGISTRATION], blockHeight: 604, blockHash: FINAL },
+      { hex: LIVE_TXS[BROSEVELT_LOGO], blockHeight: 8462, blockHash: FINAL },
+    ]);
+    const logo = { hash: "68472f4e69ed0aa96feac3e61f5a35bc119d34d33bce57af4a9d641a4ee730ed", mime: "image/jpeg", size: 15798, height: 8462, txid: BROSEVELT_LOGO };
+    config.flushAssets = { [BROSEVELT]: { asset: BROSEVELT, registered: 604, registration: BROSEVELT_REGISTRATION, logo } };
+    const unknown = "ab".repeat(32);
+    try {
+      const named = await assets.nameFromRegistrations(module(), client, [BROSEVELT, unknown]);
+      const brosevelt = named.find((a) => a.id === BROSEVELT);
+      assert.equal(brosevelt?.ticker, "BROSEVELT");
+      assert.ok(brosevelt.logo.startsWith("data:image/jpeg;base64,/9j/"), "the JPEG its SetLogo carries");
+      assert.equal(Buffer.from(brosevelt.logo.split(",")[1], "base64").length, 15_798);
+      assert.equal(named.some((a) => a.id === unknown), false, "an asset the server doesn't know stays unknown");
+
+      // A logo transaction not confirmed where the server says: the name stands, without a logo.
+      await assets.remove(CHAIN, BROSEVELT);
+      config.flushAssets[BROSEVELT].logo = { ...logo, height: 8463 };
+      const again = (await assets.nameFromRegistrations(module(), client, [BROSEVELT])).find((a) => a.id === BROSEVELT);
+      assert.deepEqual([again?.ticker, again?.logo], ["BROSEVELT", undefined]);
+      // Or one that sets no logo (the registration itself).
+      await assets.remove(CHAIN, BROSEVELT);
+      config.flushAssets[BROSEVELT].logo = { ...logo, height: 604, txid: BROSEVELT_REGISTRATION };
+      assert.equal((await assets.nameFromRegistrations(module(), client, [BROSEVELT])).find((a) => a.id === BROSEVELT)?.logo, undefined);
     } finally {
       config.flushAssets = undefined;
     }

@@ -126,7 +126,7 @@ The API this project defines, for a sidechain with no indexer. Its protocol draf
 
 A ticker of the Chain Entry's, in any case, is refused, with the reason shown. An "Unknown asset" on Home's rows or in an Activity transaction's details has "Name it", which opens `#/assets/<slot>/<asset>` with the form ready for that asset. The approval window has no such link, since leaving it would abandon the request.
 
-**How:** `assets.list`, `assets.label` and `assets.remove` take a Slot and work on its network's store (`wallet/src/assets.ts`). Only `assets.addByContract` and `assets.addByRegistration` read the chain, so they need the chain on and an Esplora server (Flush's explorer, for a registration).
+**How:** `assets.list`, `assets.label` and `assets.remove` take a Slot and work on its network's store (`wallet/src/assets.ts`). On Flush, the app names each unnamed asset a report shows by itself (`assets.nameFromRegistrations`, once per asset per session in the background), with its logo if `getasset` names a SetLogo that checks out (ADR 0013); home shows the logo in place of the ticker's first letter. Only `assets.addByContract`, `assets.addByRegistration` and `assets.nameFromRegistrations` read the chain, so they need the chain on and an Esplora server (Flush's explorer, for a registration).
 
 ## Send
 

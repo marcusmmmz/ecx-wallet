@@ -332,6 +332,11 @@ export interface ChainModule<K extends ChainKey = Starter> {
    * asset under a ticker that hashes to it. Throws ChainModuleRefusal (`invalidContract`, `malformed`).
    */
   assetRegistration(asset: string, tx: string): CheckedRegistration;
+  /**
+   * Only if `declare()` lists `tokens`: `asset`'s logo, if `tx` (hex) sets it for that asset, as
+   * a PNG, JPEG, GIF or WebP image. Throws ChainModuleRefusal (`invalidContract`, `malformed`).
+   */
+  assetLogo(asset: string, tx: string): CheckedLogo;
 }
 
 /** A token a Flush output carries (docs/adr/0013). */
@@ -361,6 +366,17 @@ export interface CheckedRegistration {
   /** Its display name, or else the ticker. */
   name: string;
   decimals: number;
+}
+
+/** An asset's logo, as the transaction that set it carries it. */
+export interface CheckedLogo {
+  asset: string;
+  /** The transaction that set it. */
+  txid: string;
+  /** `image/png`, `image/jpeg`, `image/gif` or `image/webp`, read from the image itself. */
+  mime: string;
+  /** The image, hex. */
+  bytes: string;
 }
 
 /** One of the account's coins as its server reports it: what a PSET module (Elements) builds from. */
@@ -477,6 +493,7 @@ function chainModuleOf<K extends ChainKey>(m: CoreModule): ChainModule<K> {
     assetContract: (asset, { txid, vout }, contract) => refusals(() => json<CheckedContract>("asset_contract", asset, txid, vout, contract)),
     outputTokens: (tx) => refusals(() => json<OutputTokens>("output_tokens", tx)),
     assetRegistration: (asset, tx) => refusals(() => json<CheckedRegistration>("asset_registration", asset, tx)),
+    assetLogo: (asset, tx) => refusals(() => json<CheckedLogo>("asset_logo", asset, tx)),
   };
 }
 

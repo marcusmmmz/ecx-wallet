@@ -12,6 +12,7 @@ import type {
   DangerousMode,
   DepositStatus,
   Grant,
+  NamedAsset,
   HistoryEntry,
   RefusedDeposit,
   RefusedSend,
@@ -237,6 +238,9 @@ export const addAssetByContract = (slot: number, asset: string, contract: string
 
 /** Names a Flush asset from the transaction that registered it, once checked; throws, saying why, if it can't be. */
 export const addAssetByRegistration = (slot: number, asset: string) => send<StoredAsset>({ kind: "assets.addByRegistration", slot, asset });
+
+/** Names the Flush assets a report showed unnamed, from their registrations and logos; answers the chain's names. */
+export const nameFromRegistrations = (slot: number, assets: string[]) => send<NamedAsset[]>({ kind: "assets.nameFromRegistrations", slot, assets });
 
 /** The user's own name for an asset with no contract, or a new one for an earlier label. */
 export const labelAsset = (slot: number, asset: string, label: { name: string; ticker: string; precision: number }) =>

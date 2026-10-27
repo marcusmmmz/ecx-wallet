@@ -17,9 +17,13 @@ Over the `flush` Server API (ADR 0012), the Esplora client reads every value-0 c
 
 ## Names (asset store source `registration`)
 
-A token whose id neither the Chain Entry nor the asset store names shows as "Unknown asset", as on Elements. Its "Name it" form on Flush offers **its registration** in place of a contract. `getasset` (`/flush/rpc/getasset`) says which transaction registered the asset and at what height. The wallet checks that the transaction is confirmed, and the module checks it is that asset's registration. The asset store keeps the result with `source: "registration"`, marked "from its registration" (ADR 0010's rules apply: no colliding tickers, the Chain Entry wins).
+A token whose id neither the Chain Entry nor the asset store names is **named automatically** from its registration: when a report shows one, the app asks the background to name it (`assets.nameFromRegistrations`), once per asset per session. Until then, or if the check fails, it shows as "Unknown asset", whose "Name it" form on Flush offers its registration in place of a contract. `getasset` (`/flush/rpc/getasset`) says which transaction registered the asset and at what height. The wallet checks that the transaction is confirmed, and the module checks it is that asset's registration. The asset store keeps the result with `source: "registration"`, marked "from its registration" (ADR 0010's rules apply: no colliding tickers, the Chain Entry wins).
 
 What this proves: the ticker and the decimals are the asset's own, since consensus binds an id to its ticker's hash. The display name is the one the registration set. The asset's controller can change it later (`SetDisplayName`), and the wallet doesn't follow that.
+
+**Logos** are on chain too: a SetLogo (kind 32), or a registration with a logo, carries the whole image in its marker. `getasset` names the transaction that set the asset's logo (`logo.txid`, `logo.height`). The wallet checks that transaction is confirmed at that height, and the module's `assetLogo(asset, tx)` checks it sets this asset's logo and that the bytes are a PNG, JPEG, GIF or WebP image of at most 100 kB (never SVG). The store keeps it as a `data:` URL with the name. A logo that fails a check is left out; the name stands. Consensus lets only the asset's control coin set a logo, so the image is the controller's choice, as the display name is. A later SetLogo isn't followed, as with the display name. `/flush/logo/:asset` serves the same bytes, but only the server says they are the asset's, so the wallet doesn't use it.
+
+The explorer's assets page (`/flush/assets`) lists the node's `listassets`, the same records as `getasset`, so it names nothing the registration doesn't.
 
 ## Sending tokens (#59)
 
@@ -31,7 +35,7 @@ The Decoder shows a transfer as a Clear View: each input and output in ECX or in
 
 - **Use `holdings` for every token balance:** rejected. It is the server's word on every amount; reading markers makes most of them the chain's.
 - **Ask the server per outpoint:** no such route exists (asked of Flush's developer on 2026-10-25).
-- **Name tokens automatically, without the user asking:** not for now. On Elements, naming takes the user's action (ADR 0010), and the screens already lead to "Name it". It would also need the Home list to learn new names mid-session.
+- **Name tokens only when the user asks ("Name it"):** the first choice, replaced on 2026-10-27. Unlike an Elements contract, which anyone can write for any asset and which the user must pick, a Flush registration is the one the chain binds to the id, so the user's action added nothing but a step.
 - **Trust `getasset`'s ticker and decimals:** rejected. The server could name any asset anything; the registration transaction can't be forged into another asset's.
 - **Prove the registration is current:** not possible from a light client. A released ticker can be registered again under the same id, and only node state shows the release. Consensus refuses a release while any output carries the asset, so while the wallet holds the asset, a registration older than the coin can only have been replaced by one between them. The store keeps the registration's txid, so a later check can tell if `getasset` names another.
 

@@ -67,6 +67,8 @@ export type BackgroundMessage =
   | { kind: "assets.addByContract"; slot: number; asset: string; contract: string }
   // Names a Flush asset from its registration, checked against the Slot's chain: wallet pages only.
   | { kind: "assets.addByRegistration"; slot: number; asset: string }
+  // Names the Flush assets a report showed unnamed, each from its registration and logo: wallet pages only.
+  | { kind: "assets.nameFromRegistrations"; slot: number; assets: string[] }
   // Turns a sidechain on or off (the main chain is always on): wallet pages only.
   | { kind: "chains.setOn"; slot: number; on: boolean }
   // Display settings: wallet pages only.

@@ -40,7 +40,7 @@ pub use deposit::{deposit_destination, long_form, DepositDestination, MAX_DESTIN
 pub use decode::{decode, ClearInput, ClearOutput, ClearView, DangerousMode, Decoded, Destination, VerifiableFacts};
 pub use psbt::{check, AssetAmount, OwnedInput, Refusal, RefusalCode};
 pub use sign::{finalize, sign, Finalized};
-pub use tokens::{asset_registration, output_tokens, CheckedRegistration, OutputToken, OutputTokens, TokenAmount, MAX_DECIMALS};
+pub use tokens::{asset_logo, asset_registration, output_tokens, CheckedLogo, CheckedRegistration, OutputToken, OutputTokens, TokenAmount, MAX_DECIMALS, MAX_LOGO_BYTES};
 pub use transfer::{build_transfer, Built, Coin, Payment, PaymentTo, Spent, TransferOrder};
 
 /// The network this build serves (betanet only, until mainnet: #32).

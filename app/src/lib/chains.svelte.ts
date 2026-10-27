@@ -10,6 +10,7 @@ import {
   listAccounts,
   listChains,
   listDeposits,
+  nameFromRegistrations,
   refusedDeposit,
   refusedSend,
   reportedHistory,
@@ -19,11 +20,13 @@ import {
   type AssetEntry,
   type ChainId,
   type ChainInfo,
+  type ChainReport,
   type DepositStatus,
   type RefusedDeposit,
   type RefusedSend,
   type ShownReport,
 } from "$lib/background";
+import { assetsOf } from "$lib/unit.svelte";
 
 export interface ChainView {
   info: ChainInfo;
@@ -114,9 +117,24 @@ export class Chains {
   }
 
   private readReport(id: ChainId) {
-    const show = (shown: ShownReport) => this.update(id, { shown });
+    const show = (shown: ShownReport) => {
+      this.update(id, { shown });
+      if (id !== "l1" && shown.report !== undefined && !shown.refreshing) this.nameUnknown(id, shown.report);
+    };
     if (id === "l1") showReport(l1Cached, l1Reported, show);
     else showReport(() => cachedState(id), () => reportedState(id), show);
+  }
+
+  /** On a chain whose assets are named from their registrations (Flush), names those the report shows unnamed. */
+  private nameUnknown(slot: number, report: ChainReport) {
+    const info = this.get(slot)?.info;
+    if (info?.checksNames !== "registration") return;
+    const unknown = assetsOf(report).map((a) => a.asset).filter((asset) => !info.assets.some((a) => a.id === asset));
+    if (unknown.length === 0) return;
+    nameFromRegistrations(slot, unknown).then(
+      (assets) => this.update(slot, { info: { ...info, assets } }),
+      () => {},
+    );
   }
 
   private readAddresses(only?: ChainId) {
@@ -161,8 +179,8 @@ export function chainMark(info: ChainInfo): { kind: "ecash" | "chain"; label?: s
   return { kind: "chain", label: words.map((w) => w[0].toUpperCase()).slice(0, 2).join("") + (info.name.endsWith("+") ? "+" : "") };
 }
 
-/** An asset's mark: eCash's for every ECX, a named asset's first letter, or unknown. */
-export function assetMark(entry: AssetEntry | undefined): { kind: "ecash" | "asset" | "unknown"; label?: string } {
+/** An asset's mark: eCash's for every ECX, a named asset's checked logo or else its first letter, or unknown. */
+export function assetMark(entry: (AssetEntry & { logo?: string }) | undefined): { kind: "ecash" | "asset" | "unknown"; label?: string; image?: string } {
   if (entry === undefined) return { kind: "unknown" };
-  return entry.ecx ? { kind: "ecash" } : { kind: "asset", label: entry.ticker[0] };
+  return entry.ecx ? { kind: "ecash" } : { kind: "asset", label: entry.ticker[0], ...(entry.logo === undefined ? {} : { image: entry.logo }) };
 }

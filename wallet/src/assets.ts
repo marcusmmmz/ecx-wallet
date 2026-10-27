@@ -5,6 +5,7 @@
 import { ErrorCode, ProviderRpcError } from "./errors";
 import { ChainModuleRefusal, type AssetEntry, type ChainModule, type ClearView } from "./chain-module";
 import type { EsploraClient } from "./esplora";
+import { SidechainServerError } from "./sidechain-server";
 import type { KeyValueStore } from "./vault";
 
 /**
@@ -32,6 +33,8 @@ export interface StoredAsset {
   origin?: string;
   /** `registration`: the transaction that registered it, display hex. */
   registration?: string;
+  /** `registration`: its logo as a `data:` URL, from the transaction that set it, once checked. */
+  logo?: string;
 }
 
 /** An asset as screens name it: its Chain Entry's word on it, or (with `source`) the store's. */
@@ -39,6 +42,7 @@ export interface NamedAsset extends AssetEntry {
   source?: AssetSource;
   domain?: string;
   origin?: string;
+  logo?: string;
 }
 
 /** A name an app suggests for an asset (`suggestAsset`): by its contract, or as a plain name. */
@@ -75,6 +79,25 @@ function checkLabel({ name, ticker, precision }: Pick<StoredAsset, "name" | "tic
   if (typeof name !== "string" || !/^[\x20-\x7e]{1,255}$/.test(name)) throw refused("A label's name is 1 to 255 printable ASCII characters.");
   if (typeof ticker !== "string" || !/^[A-Za-z0-9.-]{3,24}$/.test(ticker)) throw refused("A label's ticker is 3 to 24 letters, digits, dots or hyphens.");
   if (!Number.isInteger(precision) || precision < 0 || precision > 8) throw refused("A label's precision is 0 to 8 decimal places.");
+}
+
+/**
+ * `asset`'s logo as a `data:` URL, if the transaction the server names set it and is confirmed at
+ * the height it says; else undefined: a logo the wallet can't check isn't shown, and the name stands.
+ */
+async function checkedLogo(module: ChainModule, client: EsploraClient, asset: string, { txid, height }: { txid: string; height: number }): Promise<string | undefined> {
+  try {
+    const status = await client.txStatus(txid);
+    if (!status?.confirmed || status.blockHeight !== height) return undefined;
+    const logo = module.assetLogo(asset, await client.txHex(txid));
+    if (logo.txid !== txid) return undefined;
+    let binary = "";
+    for (let i = 0; i < logo.bytes.length; i += 2) binary += String.fromCharCode(Number.parseInt(logo.bytes.slice(i, i + 2), 16));
+    return `data:${logo.mime};base64,${btoa(binary)}`;
+  } catch (error) {
+    if (error instanceof ChainModuleRefusal || error instanceof SidechainServerError) return undefined;
+    throw error;
+  }
 }
 
 export function createAssets({ store, entryAssets }: AssetsDeps) {
@@ -123,14 +146,14 @@ export function createAssets({ store, entryAssets }: AssetsDeps) {
     }
   }
 
-  return {
+  const assets = {
     /** The assets screens name on `chain`: the Chain Entry's, then the store's for any other asset. */
     async named(chain: string): Promise<NamedAsset[]> {
       const entry = await entryAssets(chain);
       const extra = Object.values(await stored(chain)).filter((a) => !entry.some((e) => e.id === a.id));
       return [
         ...entry,
-        ...extra.map(({ id, name, ticker, precision, domain, source, origin }) => ({
+        ...extra.map(({ id, name, ticker, precision, domain, source, origin, logo }) => ({
           id,
           name,
           ticker,
@@ -138,6 +161,7 @@ export function createAssets({ store, entryAssets }: AssetsDeps) {
           source,
           ...(domain === undefined ? {} : { domain }),
           ...(origin === undefined ? {} : { origin }),
+          ...(logo === undefined ? {} : { logo }),
         })),
       ];
     },
@@ -192,7 +216,26 @@ export function createAssets({ store, entryAssets }: AssetsDeps) {
       }
       if (checked.txid !== registered.txid) throw refused(`The Sidechain Server at ${client.url} sent another transaction for ${registered.txid}.`);
       const { ticker, name, decimals } = checked;
-      return put(binding.chain, { id, name, ticker, precision: decimals, source: "registration", registration: checked.txid });
+      const logo = registered.logo && (await checkedLogo(module, client, id, registered.logo));
+      return put(binding.chain, { id, name, ticker, precision: decimals, source: "registration", registration: checked.txid, ...(logo ? { logo } : {}) });
+    },
+
+    /**
+     * Names each of `ids` that nothing names on the module's chain yet from its registration, as
+     * `addByRegistration` does; one that can't be named stays unknown. Answers the chain's names.
+     */
+    async nameFromRegistrations(module: ChainModule, client: EsploraClient, ids: string[]): Promise<NamedAsset[]> {
+      const chain = module.declare().binding.chain;
+      const named = new Set((await assets.named(chain)).map((a) => a.id));
+      for (const asset of new Set(ids.map((a) => String(a).toLowerCase()))) {
+        if (named.has(asset) || !ID.test(asset)) continue;
+        try {
+          await assets.addByRegistration(module, client, asset);
+        } catch (error) {
+          if (!(error instanceof ProviderRpcError || error instanceof SidechainServerError)) throw error;
+        }
+      }
+      return assets.named(chain);
     },
 
     /**
@@ -248,6 +291,7 @@ export function createAssets({ store, entryAssets }: AssetsDeps) {
       await store.set(storeKey(chain), rest);
     },
   };
+  return assets;
 }
 
 export type Assets = ReturnType<typeof createAssets>;

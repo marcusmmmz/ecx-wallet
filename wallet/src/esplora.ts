@@ -453,11 +453,11 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
     },
 
     /**
-     * Which transaction registered a Flush asset, as the node's `getasset` says (`/flush/rpc`);
-     * undefined if the node doesn't know the asset. Whoever uses it checks that transaction is the
-     * registration: the server isn't trusted for that (docs/adr/0013).
+     * Which transaction registered a Flush asset, and which set its logo if it has one, as the
+     * node's `getasset` says (`/flush/rpc`); undefined if the node doesn't know the asset. Whoever
+     * uses it checks those transactions: the server isn't trusted for that (docs/adr/0013).
      */
-    async assetRegistration(asset: string): Promise<{ txid: string; height: number } | undefined> {
+    async assetRegistration(asset: string): Promise<{ txid: string; height: number; logo?: { txid: string; height: number } } | undefined> {
       const answer = await response(`/flush/rpc/getasset?args=${encodeURIComponent(JSON.stringify([`0x${asset}`]))}`);
       if (answer.status === 404) return undefined;
       if (!answer.ok) throw refused(answer);
@@ -467,9 +467,12 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
       } catch {
         throw malformed("asset");
       }
-      const { registration, registered } = record;
+      const { registration, registered, logo } = record;
       if (typeof registration !== "string" || !HASH.test(registration) || !isCount(registered)) throw malformed("asset");
-      return { txid: registration, height: registered };
+      if (logo == null) return { txid: registration, height: registered };
+      const { txid, height } = logo as Record<string, unknown>;
+      if (typeof txid !== "string" || !HASH.test(txid) || !isCount(height)) throw malformed("asset");
+      return { txid: registration, height: registered, logo: { txid, height } };
     },
 
     /**

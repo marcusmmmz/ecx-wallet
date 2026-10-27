@@ -412,6 +412,9 @@ const handleProviderRequest = createProviderHandler({
   },
 });
 
+/** The assets `assets.nameFromRegistrations` already tried this session, per chain (CAIP-2). */
+const triedRegistrations = new Map<string, Set<string>>();
+
 /** What a transaction's outputs carry, by its Slot's module, if that declares `tokens` (Flush, docs/adr/0013). */
 const tokensOn = (entry: ChainEntry) => async (tx: string) => {
   const module = entry.slot === undefined ? undefined : await chainModule(entry.slot);
@@ -542,6 +545,19 @@ async function route(message: BackgroundMessage, sender: chrome.runtime.MessageS
         throw new ProviderRpcError(ErrorCode.InvalidParams, `${entry.name}'s server doesn't say which transaction registered an asset.`);
       }
       return assets.addByRegistration(module, esplora(entry, network), String(message.asset ?? ""));
+    }
+    case "assets.nameFromRegistrations": {
+      // Each asset is tried once a session: one that can't be named isn't asked about on every refresh.
+      if (!fromWalletPage(sender)) throw new ProviderRpcError(ErrorCode.Unauthorized, "Unknown requester.");
+      const module = await chainModule(await onSlot(message.slot))!;
+      const { entry, network } = servedNetwork(module);
+      const chain = module.declare().binding.chain;
+      if (network.sidechainServer.api !== "flush") return assets.named(chain);
+      const tried = triedRegistrations.get(chain) ?? new Set<string>();
+      triedRegistrations.set(chain, tried);
+      const ids = (Array.isArray(message.assets) ? message.assets : []).map((a) => String(a).toLowerCase()).filter((a) => !tried.has(a));
+      ids.forEach((a) => tried.add(a));
+      return assets.nameFromRegistrations(module, esplora(entry, network), ids);
     }
     case "chains.setOn": {
       // Turning a sidechain on or off; the main chain is always on.
