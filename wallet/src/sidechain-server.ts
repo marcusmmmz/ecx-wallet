@@ -60,12 +60,48 @@ export interface HistoryEntry {
    * in the node's state, not the transaction, so it isn't in `amounts`.
    */
   results?: true;
+  /** A Flush trade through one pool the wallet made, with its outcome (docs/adr/0017). */
+  trade?: TradeEntry;
   /** The wallet's M5 to this Slot's Treasury (eCash only). */
   depositTo?: number;
   /** A Deposit's credit on a Slot (an input claims the Deposit): the Deposit's parent-chain txid. */
   depositFrom?: string;
   /** An input of the wallet's issues an asset (Elements): a new one, or more of one it has the token for. */
   issuance?: Issuance;
+}
+
+/**
+ * A Flush trade (kind 21, one pool) the wallet funded, paying ECX to one of its addresses. Its entry
+ * is the trade's, with its coinbase payout or refund folded in: `amounts` nets both, and the payout's
+ * own entry is left out (docs/adr/0017).
+ */
+export interface TradeEntry {
+  pool: string;
+  /** What it paid in: its order's asset and amount. */
+  given: AssetAmount;
+  /** The ECX fee, base units. */
+  fee: string;
+  outcome: TradeOutcome;
+}
+
+/**
+ * - `settling`: not in a block yet, or the market index hasn't reached its block.
+ * - `unknown`: the market index couldn't be read (`error`).
+ * - `filled`: what came out (`back`), as the market index reports it.
+ * - `missed`: no fill listed: what it paid in comes back (`back`), on its result or, for ECX, by coinbase.
+ *
+ * `payout`, when ECX comes back: the coinbase that paid it, or `queued` while none has.
+ */
+export type TradeOutcome =
+  | { state: "settling" }
+  | { state: "unknown"; error: string }
+  | { state: "filled" | "missed"; back: AssetAmount; payout?: TradePayout | "queued" };
+
+/** The coinbase output that paid a trade's ECX. */
+export interface TradePayout {
+  txid: string;
+  /** Its block's time, in seconds since the epoch. */
+  time?: number;
 }
 
 /** What an Elements input issues: a new asset, or more of one through its reissuance token. */

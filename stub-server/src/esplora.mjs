@@ -20,7 +20,8 @@ import { parseElementsTx } from "./elements-tx.mjs";
  *   txStatuses?: Record<string, { confirmed: boolean, blockHeight?: number, blockHash?: string }>,
  *   broadcastTxid?: string, assets?: Record<string, object>, flush?: boolean,
  *   finality?: Record<string, "soft" | "anchored" | "final">, tipTime?: number,
- *   flushAssets?: Record<string, object>, holdings?: Record<string, object[]>, rejectReason?: string }} EsploraStubConfig
+ *   flushAssets?: Record<string, object>, holdings?: Record<string, object[]>, rejectReason?: string,
+ *   marketHeight?: number, poolTrades?: Record<string, object[]> }} EsploraStubConfig
  */
 
 /** How many confirmed transactions an address's list holds per page, as both electrs forks list them. */
@@ -59,7 +60,10 @@ const PAGE = 25;
  * height past the tip is HTTP 500; errors are JSON `{ error }`, and unknown routes an HTML 404.
  * `/flush/rpc/getasset?args=["0x<id>"]` answers `config.flushAssets[id]` (getasset's JSON), else 404
  * `{ error: "Not found" }`; `/flush/market/addresses/{address}/holdings` answers
- * `{ items: config.holdings[address] ?? [], address }`; `POST /txs/test` answers each transaction
+ * `{ items: config.holdings[address] ?? [], address }`; `/flush/market/status` answers the height its
+ * index reached (`config.marketHeight`, else the tip); `/flush/market/pools/{id}/trades?limit=&cursor=`
+ * pages `config.poolTrades[id]` (the API's items, newest first; `next_cursor` an offset, null at the
+ * end); `POST /txs/test` answers each transaction
  * `allowed`, or refused with `config.rejectReason` as its `reject-reason`. Any other
  * `/flush/rpc/{method}` answers `config.flushRpc[method]` (a function of the args, or JSON as is;
  * `undefined` from the function: 404), else 404; `config.flushRpcStatus[method]` answers that HTTP
@@ -205,6 +209,17 @@ export function createEsploraStub(config) {
     if (holdings) {
       const address = decodeURIComponent(holdings[1]);
       return [200, { items: config.holdings?.[address] ?? [], address }];
+    }
+    if (config.flush && pathname === "/flush/market/status") {
+      return [200, { flush: { height: config.marketHeight ?? config.tipHeight ?? 0 }, market_index: true }];
+    }
+    const poolTrades = config.flush ? /^\/flush\/market\/pools\/([0-9a-f]{64})\/trades$/.exec(pathname) : null;
+    if (poolTrades) {
+      const all = config.poolTrades?.[poolTrades[1]] ?? [];
+      const from = Number(query.get("cursor") ?? 0);
+      const limit = Number(query.get("limit") ?? 50);
+      const items = all.slice(from, from + limit);
+      return [200, { items, next_cursor: from + limit < all.length ? String(from + limit) : null, total: all.length }];
     }
     const asset = /^\/asset\/([0-9a-f]{64})$/.exec(pathname);
     if (asset) return config.assets?.[asset[1]] ? [200, config.assets[asset[1]]] : [404, "Asset id not found"];

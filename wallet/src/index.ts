@@ -97,6 +97,9 @@ export {
 export {
   SidechainServerError,
   type HistoryEntry,
+  type TradeEntry,
+  type TradeOutcome,
+  type TradePayout,
   type Issuance,
   type ReportedHistory,
   type ReportedState,
@@ -120,6 +123,7 @@ export {
 } from "./pull-path";
 export { createSends, HOLD_BLOCKS, sendRequester, type HeldSpend, type HeldStore, type RefusedSend, type SendDeps, type Sends } from "./send";
 export { LINK_NETWORKS, linkDigest, type UsedLinks } from "./flush-links";
+export type { TradeStore } from "./flush-trades";
 export { CACHE_PREFIX, cacheKey, type SessionCache } from "./cache";
 export { esploraClient, feeRate, type EsploraClient, type EsploraTx, type EsploraTxStatus, type EsploraUtxo } from "./esplora";
 export { findTreasury, TreasuryError, type Treasury } from "./treasury";

@@ -44,6 +44,7 @@ import {
   type KeyValueStore,
   type PendingDeposit,
   type SessionCache,
+  type TradeStore,
   type ApprovalContext,
   type SigningApproval,
   type VaultModule,
@@ -447,12 +448,18 @@ const tokensOn = (entry: ChainEntry) => async (tx: string) => {
   return module?.declare().capabilities.includes("tokens") ? module.outputTokens(tx) : undefined;
 };
 
+/**
+ * What Flush's market index said of the wallet's trades in final blocks (docs/adr/0017): it can't
+ * change, so it's kept for good, in plain `storage.local` like pending Deposits.
+ */
+const tradeStore: TradeStore = keyValueStore(chrome.storage.local);
+
 // The pull path: each Slot's Sidechain Server, in the Server API its Chain Entry names.
 const pullPath = createPullPath({
   ...signing,
   ...keys,
   l1Module,
-  sidechainServer: (entry, network) => sidechainServer(entry, network, undefined, sessionCache, tokensOn(entry)),
+  sidechainServer: (entry, network) => sidechainServer(entry, network, undefined, sessionCache, tokensOn(entry), tradeStore),
   cache: sessionCache,
 });
 

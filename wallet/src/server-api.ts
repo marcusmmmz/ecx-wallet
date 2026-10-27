@@ -2,6 +2,7 @@
 import type { SessionCache } from "./cache";
 import type { ChainEntry, NetworkEntry, OutputTokens, ServerApi } from "./chain-module";
 import { esploraServer, FLUSH_STALL_SECONDS, type EsploraServerConfig } from "./esplora";
+import type { TradeStore } from "./flush-trades";
 import { SidechainServerError, type Fetch, type SidechainServer } from "./sidechain-server";
 import { standardSidechainServer } from "./standard-sidechain-api";
 
@@ -11,16 +12,18 @@ export const speaksEsplora = (api: ServerApi): boolean => api === "esplora" || a
 /**
  * How to reach `network`'s default server over Esplora: Flush's (`flush`) also reports finality
  * and can stall (docs/adr/0012). `tokens` reads what a transaction's outputs carry, where the
- * chain's module declares it (docs/adr/0013).
+ * chain's module declares it (docs/adr/0013); `tradeStore` keeps what Flush's market index said of
+ * a trade once final (docs/adr/0017).
  */
 export function esploraConfig(
   entry: ChainEntry,
   network: NetworkEntry,
   cache?: SessionCache,
   tokens?: (tx: string) => Promise<OutputTokens | undefined>,
+  tradeStore?: TradeStore,
 ): EsploraServerConfig {
   const { api, url } = network.sidechainServer;
-  const flush = api === "flush" ? { finality: true, stallAfter: FLUSH_STALL_SECONDS } : {};
+  const flush = api === "flush" ? { finality: true, stallAfter: FLUSH_STALL_SECONDS, ...(tradeStore === undefined ? {} : { tradeStore }) } : {};
   return { url, identityBlock: network.identityBlock, chainName: entry.name, cache, ...flush, ...(tokens === undefined ? {} : { tokens }) };
 }
 
@@ -31,6 +34,7 @@ export function sidechainServer(
   fetchFn: Fetch = (...args) => fetch(...args),
   cache?: SessionCache,
   tokens?: (tx: string) => Promise<OutputTokens | undefined>,
+  tradeStore?: TradeStore,
 ): SidechainServer {
   const { api, url } = network.sidechainServer;
   switch (api) {
@@ -38,7 +42,7 @@ export function sidechainServer(
       return standardSidechainServer(url, fetchFn);
     case "esplora":
     case "flush":
-      return esploraServer(esploraConfig(entry, network, cache, tokens), fetchFn);
+      return esploraServer(esploraConfig(entry, network, cache, tokens, tradeStore), fetchFn);
     default:
       throw new SidechainServerError(url, `${entry.name}'s Chain Entry names a Server API this wallet doesn't speak: ${String(api)}.`);
   }

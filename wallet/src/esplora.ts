@@ -9,6 +9,7 @@
 // uses it directly on eCash's server); `esploraServer` is the pull path's view of it.
 import { cacheKey, type SessionCache } from "./cache";
 import { NATIVE_COIN, type AssetAmount, type IdentityBlock, type OutputToken, type OutputTokens } from "./chain-module";
+import { withTrades, type TradeStore } from "./flush-trades";
 import { serverFetch, SidechainServerError, type Fetch, type HistoryEntry, type Issuance, type SidechainServer, type TreasuryScript, type WatchData } from "./sidechain-server";
 import { isM5 } from "./treasury";
 
@@ -82,8 +83,18 @@ export interface EsploraServerConfig {
    * (the module doesn't read tokens), such a coin adds nothing.
    */
   tokens?: (tx: string) => Promise<OutputTokens | undefined>;
+  /** Flush, with `tokens`: where what the market index said of a trade in a final block is kept for good (docs/adr/0017). */
+  tradeStore?: TradeStore;
   /** Milliseconds since the epoch. */
   now?: () => number;
+}
+
+/** A fill the node's DEX API lists through a pool (`amountIn`, `amountOut`: base units, decimal). */
+export interface PoolTrade {
+  txid: string;
+  height: number;
+  amountIn: string;
+  amountOut: string;
 }
 
 /** An unspent output, as Esplora lists it for an address or a script. */
@@ -108,6 +119,8 @@ export interface EsploraTxStatus {
   blockTime?: number;
   /** Flush: its block is `soft`, not yet anchored (`CONFIRMED_AT`). */
   preconfirmed?: true;
+  /** Flush: its block is `final` (3 eCash anchors): no reorg can undo it. */
+  final?: true;
 }
 
 /**
@@ -323,7 +336,8 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
     return statuses.map((s) => {
       if (!s.confirmed) return s;
       if (!enough(s.blockHash!)) return { confirmed: false };
-      return known.get(s.blockHash!) === "soft" ? { ...s, preconfirmed: true as const } : s;
+      const block = known.get(s.blockHash!);
+      return block === "soft" ? { ...s, preconfirmed: true as const } : block === "final" ? { ...s, final: true as const } : s;
     });
   }
 
@@ -528,6 +542,31 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
         }
         return [{ asset: asset_id, amount: amount_units }];
       });
+    },
+
+    /** The Flush height the node's DEX API has indexed (`/flush/market/status`): its trades up to it are listed. */
+    async marketHeight(): Promise<number> {
+      const answer = (await getJson("/flush/market/status", "market status")) as Record<string, unknown> | null;
+      const height = (answer?.flush as Record<string, unknown> | undefined)?.height;
+      if (!isCount(height) || answer?.market_index !== true) throw malformed("market status");
+      return height;
+    },
+
+    /**
+     * A page of the trades the node's DEX API lists through `pool` (`/flush/market/pools/:id/trades`),
+     * newest first: fills only, the server's word (docs/adr/0017). `cursor` is the last page's `next`.
+     */
+    async poolTrades(pool: string, cursor?: string): Promise<{ trades: PoolTrade[]; next?: string }> {
+      const query = cursor === undefined ? "?limit=100" : `?limit=100&cursor=${encodeURIComponent(cursor)}`;
+      const answer = (await getJson(`/flush/market/pools/${pool}/trades${query}`, "list of trades")) as Record<string, unknown>;
+      if (!Array.isArray(answer?.items) || (answer.next_cursor != null && typeof answer.next_cursor !== "string")) throw malformed("list of trades");
+      const trades = answer.items.map((item: Record<string, unknown>) => {
+        const { txid, height, amount_in_units, amount_out_units } = item ?? {};
+        const units = (n: unknown) => typeof n === "string" && /^[0-9]+$/.test(n);
+        if (typeof txid !== "string" || !HASH.test(txid) || !isCount(height) || !units(amount_in_units) || !units(amount_out_units)) throw malformed("list of trades");
+        return { txid, height, amountIn: amount_in_units as string, amountOut: amount_out_units as string };
+      });
+      return { trades, ...(typeof answer.next_cursor === "string" && answer.next_cursor !== "" ? { next: answer.next_cursor } : {}) };
     },
 
     /** Fee rates (sat/vB) by confirmation target in blocks. */
@@ -785,7 +824,9 @@ export function esploraServer(config: EsploraServerConfig, fetchFn: Fetch): Side
           (await Promise.all(batch.map((txid) => outputTokens(txid, read)))).forEach((t, j) => markers.set(batch[j], t));
         }
       }
-      return { entries: newestFirst.map((tx) => entry(tx, ours, treasuries, trusted, markers)), partial };
+      const entries = newestFirst.map((tx) => entry(tx, ours, treasuries, trusted, markers));
+      if (config.tokens === undefined) return { entries, partial };
+      return { entries: await withTrades(entries, txs, markers, ours, client, { session: config.cache, store: config.tradeStore }), partial };
     },
     buildTransfer: async () => {
       throw notHere();

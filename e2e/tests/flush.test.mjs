@@ -108,7 +108,7 @@ describe("Flush", () => {
     }
   }
 
-  function pullPathWith({ lock = lockState(), prompts = [], tokens } = {}) {
+  function pullPathWith({ lock = lockState(), prompts = [], tokens, tradeStore } = {}) {
     const flushModule = module();
     const deps = {
       supportedSlots: [99],
@@ -126,7 +126,7 @@ describe("Flush", () => {
       l1Module: async () => l1,
       l1AccountKey: async () => assert.fail("Flush asked for the L1 Account Key"),
       now: () => Date.now(),
-      sidechainServer: (entry, network) => wallet.sidechainServer(entry, network, undefined, undefined, tokens),
+      sidechainServer: (entry, network) => wallet.sidechainServer(entry, network, undefined, undefined, tokens, tradeStore),
     };
     return { pullPath: wallet.createPullPath(deps), deps, prompts };
   }
@@ -349,6 +349,129 @@ describe("Flush", () => {
     const plain = byTxid(await pullPathWith().pullPath.history(99));
     assert.deepEqual(plain.get(parseTx(sale).txid).amounts, [{ asset: "", amount: "-393" }]);
     assert.equal(plain.get(parseTx(sale).txid).results, undefined);
+  });
+
+  describe("a trade's outcome and payout (docs/adr/0017)", () => {
+    const POOL = "77".repeat(32);
+    const BROKEN_POOL = "78".repeat(32);
+    const ECX_ID = "00".repeat(32);
+    const internal = (id) => [...Buffer.from(id, "hex").reverse()];
+    /** A kind-21 marker as the module writes it (core/flush/src/bast.rs `swap_pools_marker`). */
+    const swapMarker = ({ assetIn, pool = POOL, amountIn, minOut, chnTo = RECEIVE_1.scriptPubkey }, listed) => {
+      const to = [...Buffer.from(chnTo, "hex")];
+      return marker(21, [...internal(assetIn), 1, ...internal(pool), ...varint(amountIn), ...varint(minOut), to.length, ...to], listed);
+    };
+    /** A transaction spending `inputs` (each `[hex, vout]`) and paying `outputs` (`[script, value]`). */
+    const spending = (inputs, outputs) =>
+      encodeTx({ inputs: inputs.map(([hex, vout]) => ({ txid: parseTx(hex).txid, vout })), outputs: outputs.map(([script, value]) => ({ script, value })) });
+    const tokenCoin = (seed, units) => paying(seed, [[RECEIVE_0.scriptPubkey, 0], [marker(0, [], [{ n: 0, asset: BROSEVELT, amount: units }]), 0]]);
+    /** A sale of `amountIn` BROSEVELT units from `coin` (5,000 units), its fee 400 sat from `ecx` (10,000 sat). */
+    const sale = (coin, ecx, amountIn, pool = POOL) =>
+      spending(
+        [[coin, 0], [ecx, 0]],
+        [
+          [RECEIVE_0.scriptPubkey, 0],
+          [RECEIVE_0.scriptPubkey, 0],
+          [swapMarker({ assetIn: BROSEVELT, pool, amountIn, minOut: 1_000 }, [{ n: 0, asset: BROSEVELT, amount: 5_000 - amountIn }, { n: 1 }]), 0],
+          [RECEIVE_1.scriptPubkey, 9_600],
+        ],
+      );
+    const fill = (tx, height, amountIn, amountOut) => ({ txid: parseTx(tx).txid, height, amount_in_units: String(amountIn), amount_out_units: String(amountOut) });
+    const ecxCoin = (seed, sat) => paying(seed, [[RECEIVE_1.scriptPubkey, sat]]);
+
+    const [coin1, ecx1, coin2, ecx2, coin3, ecx3, coin4, ecx4] = [tokenCoin("d1", 5_000), ecxCoin("d2", 10_000), tokenCoin("d3", 5_000), ecxCoin("d4", 10_000), tokenCoin("d5", 5_000), ecxCoin("d6", 10_000), tokenCoin("d7", 5_000), ecxCoin("d8", 10_000)];
+    // Paid: 1,234 units for 12,100 sat, by the next block's coinbase.
+    const paid = sale(coin1, ecx1, 1_234);
+    const payout = coinbase(451, [["", 0], [RECEIVE_1.scriptPubkey, 12_100]]);
+    // Queued: filled for 5,000 sat, which no coinbase has paid yet.
+    const queued = sale(coin2, ecx2, 500);
+    // Missed: a buy of 100,000 sat (held by its marker) that no fill lists, refunded exactly.
+    const buyCoin = ecxCoin("d9", 200_000);
+    const missedBuy = spending(
+      [[buyCoin, 0]],
+      [
+        [RECEIVE_0.scriptPubkey, 0],
+        [swapMarker({ assetIn: ECX_ID, amountIn: 100_000, minOut: 50 }, [{ n: 0 }]), 100_000],
+        [RECEIVE_1.scriptPubkey, 99_600],
+      ],
+    );
+    const refund = coinbase(471, [["", 0], [RECEIVE_1.scriptPubkey, 100_000]]);
+    // Past the market index's height (475), and not in a block at all.
+    const tooNew = sale(coin3, ecx3, 100);
+    const pending = sale(coin4, ecx4, 200);
+    // A malformed answer from the index for its pool; and a coinbase payment no trade explains.
+    const broken = sale(tokenCoin("da", 5_000), ecxCoin("db", 10_000), 300, BROKEN_POOL);
+    const unrelated = coinbase(490, [["", 0], [RECEIVE_0.scriptPubkey, 777]]);
+
+    before(() => {
+      const coins = [coin1, ecx1, coin2, ecx2, coin3, ecx3, coin4, ecx4, buyCoin].map((hex, i) => ({ hex, blockHeight: 400 + i, blockHash: FINAL }));
+      fund([
+        ...coins,
+        { hex: tokenCoin("da", 5_000), blockHeight: 420, blockHash: FINAL },
+        { hex: ecxCoin("db", 10_000), blockHeight: 421, blockHash: FINAL },
+        { hex: paid, blockHeight: 450, blockHash: FINAL },
+        { hex: payout, blockHeight: 451, blockHash: FINAL },
+        { hex: queued, blockHeight: 460, blockHash: FINAL },
+        { hex: missedBuy, blockHeight: 470, blockHash: FINAL },
+        { hex: refund, blockHeight: 471, blockHash: FINAL },
+        { hex: broken, blockHeight: 472, blockHash: FINAL },
+        { hex: tooNew, blockHeight: 480, blockHash: FINAL },
+        { hex: pending, confirmed: false },
+        { hex: unrelated, blockHeight: 490, blockHash: FINAL },
+      ]);
+      // 150 newer fills come first, so the two sales are found on the index's second page.
+      const newer = Array.from({ length: 150 }, (_, i) => ({ txid: (i + 1).toString(16).padStart(64, "e"), height: 499, amount_in_units: "1", amount_out_units: "1" }));
+      config.poolTrades = { [POOL]: [...newer, fill(queued, 460, 500, 5_000), fill(paid, 450, 1_234, 12_100)], [BROKEN_POOL]: [{ txid: "not a txid" }] };
+      config.marketHeight = 475;
+      config.flushRpc = { getpool: ([pool]) => (pool === POOL ? { asset_a_id: BROSEVELT, asset_b_id: ECX_ID } : undefined) };
+    });
+    after(() => {
+      config.poolTrades = config.marketHeight = config.flushRpc = undefined;
+    });
+
+    test("a fill is paired with the coinbase that paid it, a miss with its refund; the rest wait or say why", async () => {
+      const store = new Map();
+      const tradeStore = { get: async (k) => store.get(k), set: async (k, v) => void store.set(k, v) };
+      const read = async () => new Map((await pullPathWith({ tokens: async (tx) => flush.outputTokens(tx), tradeStore }).pullPath.history(99)).entries.map((e) => [e.txid, e]));
+      const id = (tx) => parseTx(tx).txid;
+      const entries = await read();
+
+      const p = entries.get(id(paid));
+      assert.deepEqual(p.trade, {
+        pool: POOL,
+        given: { asset: BROSEVELT, amount: "1234" },
+        fee: "400",
+        outcome: { state: "filled", back: { asset: "", amount: "12100" }, payout: { txid: id(payout), ...(p.trade.outcome.payout.time === undefined ? {} : { time: p.trade.outcome.payout.time }) } },
+      });
+      assert.deepEqual(p.amounts, [{ asset: BROSEVELT, amount: "-1234" }, { asset: "", amount: "11700" }], "its payout netted in, fee included");
+      assert.equal(entries.has(id(payout)), false, "the payout's own entry is folded into the trade's");
+
+      assert.deepEqual(entries.get(id(queued)).trade.outcome, { state: "filled", back: { asset: "", amount: "5000" }, payout: "queued" });
+      assert.deepEqual(entries.get(id(queued)).amounts, [{ asset: BROSEVELT, amount: "-500" }, { asset: "", amount: "-400" }]);
+
+      const m = entries.get(id(missedBuy));
+      assert.deepEqual([m.trade.given, m.trade.fee, m.trade.outcome.state, m.trade.outcome.back, m.trade.outcome.payout.txid], [{ asset: "", amount: "100000" }, "400", "missed", { asset: "", amount: "100000" }, id(refund)]);
+      assert.deepEqual(m.amounts, [{ asset: "", amount: "-400" }], "only the fee was spent");
+      assert.equal(entries.has(id(refund)), false);
+
+      assert.deepEqual(entries.get(id(tooNew)).trade.outcome, { state: "settling" }, "the index hasn't reached its block");
+      assert.deepEqual(entries.get(id(pending)).trade.outcome, { state: "settling" }, "not in a block yet");
+      const b = entries.get(id(broken)).trade.outcome;
+      assert.equal(b.state, "unknown");
+      assert.match(b.error, /list of trades/);
+      assert.deepEqual(entries.get(id(unrelated)).amounts, [{ asset: "", amount: "777" }], "a coinbase no trade explains stays its own entry");
+      assert.equal(entries.get(id(unrelated)).trade, undefined);
+
+      // Answers for trades in final blocks are kept for good, and read back instead of the index.
+      assert.deepEqual([...store.keys()].sort(), [paid, queued, missedBuy].map((tx) => `trade:${url}:${id(tx)}`).sort());
+      const saved = config.poolTrades;
+      config.poolTrades = {};
+      try {
+        assert.deepEqual((await read()).get(id(paid)).trade.outcome.back, { asset: "", amount: "12100" });
+      } finally {
+        config.poolTrades = saved;
+      }
+    });
   });
 
   test("a server that sends another transaction for a token output reports nothing", async () => {
