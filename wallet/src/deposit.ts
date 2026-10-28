@@ -17,6 +17,7 @@ import { ErrorCode, ProviderRpcError } from "./errors";
 import { feeRate, LISTED_CONFIRMED_TXS, QUERIES_AT_ONCE, type EsploraClient, type EsploraTx } from "./esplora";
 import { WATCHED_CHANGE_ADDRESSES, WATCHED_RECEIVE_ADDRESSES } from "./pull-path";
 import { rejected, type ApprovalContext, type SignPrompt, type SigningApproval } from "./signing";
+import { speaksEsplora } from "./server-api";
 import { SidechainServerError } from "./sidechain-server";
 import { findTreasury, TreasuryError } from "./treasury";
 
@@ -206,7 +207,7 @@ export function createDeposits(deps: DepositDeps) {
   /** The Slot's server, where its Deposits' credits show, if it speaks Esplora (Flush's explorer included). */
   function creditServer(target: { entry: ChainEntry; network: NetworkEntry }): EsploraClient | undefined {
     const { api } = target.network.sidechainServer;
-    return api === "esplora" || api === "flush" ? deps.esplora(target.entry, target.network) : undefined;
+    return speaksEsplora(api) ? deps.esplora(target.entry, target.network) : undefined;
   }
 
   /** A raw transaction, from the session's cache or else the server; kept only once it hashes to `txid`. */

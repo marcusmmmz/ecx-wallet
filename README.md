@@ -2,7 +2,7 @@
 
 A browser wallet for eCash (ECX) and its drivechains (sidechains). One extension holds your keys for eCash, the main chain, and for each sidechain you turn on. It shows your balances and history, sends, deposits coins from eCash into a sidechain, and signs for sidechain websites after you approve.
 
-**Status:** pre-release, on eCash's **betanet** only. It supports two sidechains: Slot 24, Elements+ (an Elements chain, explicit amounts only), and Slot 46, Flush (its ECX only, provisional). Mainnet support is [#32](https://github.com/marcusmmmz/ecx-wallet/issues/32).
+**Status:** pre-release, on eCash's **betanet** only. It supports two sidechains: Slot 24, Elements+ (an Elements chain, explicit amounts only), and Slot 99, Flush (ECX and its tokens, provisional; betanet's Flush, ADR 0014). Mainnet support is [#32](https://github.com/marcusmmmz/ecx-wallet/issues/32).
 
 Design work happens in GitHub issues; the [wayfinder map](https://github.com/marcusmmmz/ecx-wallet/issues/1) indexes every decision. The words used here (Slot, Starter, Chain Module, Grant, Clear Signing…) are defined in [GLOSSARY.md](GLOSSARY.md).
 
@@ -36,7 +36,7 @@ A pnpm workspace:
 
 | Directory | What's in it |
 |---|---|
-| `core/` | The signing core, in Rust: one `.wasm` per module (`vault.wasm` for keys, `l1.wasm` for eCash, `elements.wasm` for Slot 24, `flush.wasm` for Slot 46). See [core/README.md](core/README.md). |
+| `core/` | The signing core, in Rust: one `.wasm` per module (`vault.wasm` for keys, `l1.wasm` for eCash, `elements.wasm` for Slot 24, `flush.wasm` for Flush). See [core/README.md](core/README.md). |
 | `wallet/` | The wallet's logic, in TypeScript, independent of any browser: the Provider, Grants, the Vault, accounts, Sidechain Servers, Send, Deposit, history. |
 | `app/` | The UI: one SvelteKit static app. Every screen is a hash route (`index.html#/send/24`, `#/approve/<id>`…). |
 | `extension/` | The MV3 shells for Chromium and Firefox: the background script, the content script and the injected Provider. |
@@ -56,7 +56,7 @@ website ──client──▶ Provider (inpage.ts) ──▶ content script ─�
 
 The background gets the website's origin from the browser, never from the website. Only the background ever decrypts keys. Each chain's Chain Module (a `.wasm`) gets only its own chain's key, per call.
 
-The wallet reads each chain from that chain's **Sidechain Server**, named in its Chain Entry: today, Esplora explorers for eCash and Slot 24, and Flush's explorer, an Esplora with Flush's own additions, for Slot 46.
+The wallet reads each chain from that chain's **Sidechain Server**, named in its Chain Entry: today, Esplora explorers for eCash and Slot 24, and Flush's explorer, an Esplora with Flush's own additions, for Flush.
 
 ## Read more
 
