@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { activityDays, activityKind, localDay, type ActivityKind, type AssetAmount, type TradeEntry } from "@ecx/wallet";
+  import { activityDays, activityKind, localDay, NATIVE_COIN, type ActivityKind, type AssetAmount, type TradeEntry } from "@ecx/wallet";
   import { assetSource, shortAsset } from "$lib/asset";
   import AssetBadge from "$lib/AssetBadge.svelte";
   import type { ChainId, HistoryEntry } from "$lib/background";
@@ -97,11 +97,11 @@
   // Flush trades (docs/adr/0017): one row twice as tall, what it gave above and what came back below.
   const tickerOf = (view: ChainView, asset: string) => view.info.assets.find((a) => a.id === asset)?.ticker ?? "Unknown asset";
   function tradeTitle(view: ChainView, { given, outcome }: TradeEntry): string {
-    const selling = given.asset !== "";
+    const selling = given.asset !== NATIVE_COIN;
     if (outcome.state === "missed") return selling ? "Sale didn't fill" : "Buy didn't fill";
     if (outcome.state !== "filled" || outcome.payout === "queued") return selling ? `Selling ${tickerOf(view, given.asset)}` : "Buying";
     if (!selling) return `Bought ${tickerOf(view, outcome.back.asset)}`;
-    return outcome.back.asset === "" ? `Sold ${tickerOf(view, given.asset)}` : `Swapped ${tickerOf(view, given.asset)}`;
+    return outcome.back.asset === NATIVE_COIN ? `Sold ${tickerOf(view, given.asset)}` : `Swapped ${tickerOf(view, given.asset)}`;
   }
   /**
    * What came back, as the row's second half: `reported` while only the market index vouches for
@@ -120,7 +120,7 @@
   /** A fill between ECX and a token, as ECX per whole token. */
   function tradePrice(view: ChainView, { given, outcome }: TradeEntry): string | undefined {
     if (outcome.state !== "filled") return undefined;
-    const [ecx, token] = given.asset === "" ? [given, outcome.back] : outcome.back.asset === "" ? [outcome.back, given] : [];
+    const [ecx, token] = given.asset === NATIVE_COIN ? [given, outcome.back] : outcome.back.asset === NATIVE_COIN ? [outcome.back, given] : [];
     if (ecx === undefined || token === undefined || BigInt(token.amount) === 0n) return undefined;
     const decimals = view.info.assets.find((a) => a.id === token.asset)?.decimals;
     if (decimals === undefined) return undefined;
@@ -268,7 +268,7 @@
                     <span class="end">
                       {@render amount(chain, { asset: t.given.asset, amount: `-${t.given.amount}` }, "in-row", {})}
                       <!-- The fee is an amount like any other that left the wallet, so a Send and a trade read alike. -->
-                      {#if BigInt(t.fee) > 0n}{@render amount(chain, { asset: "", amount: `-${t.fee}` }, "in-row", {})}{/if}
+                      {#if BigInt(t.fee) > 0n}{@render amount(chain, { asset: NATIVE_COIN, amount: `-${t.fee}` }, "in-row", {})}{/if}
                     </span>
                   </span>
                   <span class="half back" class:waiting={back.queued || back.amount === undefined}>
@@ -331,7 +331,7 @@
       <div class="sheet-amounts" data-trade-sheet>
         <span class="muted tiny">You gave</span>
         {@render amount(chain, { asset: t.given.asset, amount: `-${t.given.amount}` }, "in-sheet", {})}
-        <span class="muted tiny">fee {amountText(t.fee, "", chain.info.assets)}{price ? ` · ${price}` : ""}</span>
+        <span class="muted tiny">fee {amountText(t.fee, NATIVE_COIN, chain.info.assets)}{price ? ` · ${price}` : ""}</span>
         <span class="sheet-arrow" aria-hidden="true"><Icon name="chevron" size={16} /></span>
         <span class="muted tiny">{back.label}{back.time !== undefined ? ` at ${timeOf(back.time)}` : ""}</span>
         {#if back.amount}

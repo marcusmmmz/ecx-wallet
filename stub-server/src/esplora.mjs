@@ -21,7 +21,8 @@ import { parseElementsTx } from "./elements-tx.mjs";
  *   broadcastTxid?: string, assets?: Record<string, object>, flush?: boolean,
  *   finality?: Record<string, "soft" | "anchored" | "final">, tipTime?: number,
  *   flushAssets?: Record<string, object>, holdings?: Record<string, object[]>, rejectReason?: string,
- *   marketHeight?: number, poolTrades?: Record<string, object[]> }} EsploraStubConfig
+ *   marketHeight?: number, poolTrades?: Record<string, object[]>,
+ *   flushRpc?: Record<string, ((args: unknown[]) => unknown) | unknown>, flushRpcStatus?: Record<string, number> }} EsploraStubConfig
  */
 
 /** How many confirmed transactions an address's list holds per page, as both electrs forks list them. */
@@ -63,8 +64,8 @@ const PAGE = 25;
  * `{ items: config.holdings[address] ?? [], address }`; `/flush/market/status` answers the height its
  * index reached (`config.marketHeight`, else the tip); `/flush/market/pools/{id}/trades?limit=&cursor=`
  * pages `config.poolTrades[id]` (the API's items, newest first; `next_cursor` an offset, null at the
- * end); `POST /txs/test` answers each transaction
- * `allowed`, or refused with `config.rejectReason` as its `reject-reason`. Any other
+ * end); `POST /txs/test` answers each transaction `allowed`, or refused with `config.rejectReason`
+ * as its `reject-reason`. Any other
  * `/flush/rpc/{method}` answers `config.flushRpc[method]` (a function of the args, or JSON as is;
  * `undefined` from the function: 404), else 404; `config.flushRpcStatus[method]` answers that HTTP
  * status with `{ error }` instead, as the explorer does when the node can't answer (501, 503).

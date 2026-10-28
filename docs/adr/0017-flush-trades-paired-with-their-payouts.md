@@ -30,6 +30,7 @@ So the wallet reads a trade's outcome from the market index and pairs its ECX wi
 
 - A filled buy's tokens, a missed sale's returned tokens and a queued payout's amount are the market index's word. Only a coinbase paying exactly the expected amount backs a fill with the chain.
 - If the index reports an amount no coinbase pays, the payout stays queued, and the coinbase stays its own "Received" entry. Pairing never relaxes the exact amount.
+- Exact-amount pairing still has a narrow form of the risk rejected below: another coinbase paying `chn_to` exactly the expected amount (a Deposit's credit, a liquidity or order payout) at or after the trade's block can be taken for its payout. The amounts then match, so only the payout's txid and time can be wrong.
 - A launch buy's ECX change paid back through a coinbase isn't paired: the index doesn't report it yet (`trades/{txid}` will, from 8.2.0), so it stays a "Received" entry.
 - Trades through more than one pool, and other operations that pay ECX by coinbase (liquidity, positions, orders, Collect), aren't paired: they show as their own transactions.
 - A trade costs one `getpool` and the pages of its pool's trades back to its block (100 a page, at most 10) until its block is final, then nothing.

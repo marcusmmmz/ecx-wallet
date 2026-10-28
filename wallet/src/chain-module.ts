@@ -445,9 +445,9 @@ export interface OutputTokens {
 
 /** A kind-21 order as its marker states it. What comes out is the pool's other asset. */
 export interface SwapOrder {
-  /** Display hex. */
+  /** Display order. */
   assetIn: string;
-  /** Display hex, in the order traded through. */
+  /** Display order, in the order traded through. */
   pools: string[];
   /** Base units, decimal. */
   amountIn: string;
