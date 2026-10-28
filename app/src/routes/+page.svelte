@@ -110,7 +110,7 @@
       <button class="primary block" type="submit" disabled={busy} data-unlock>Unlock</button>
     </form>
   {:else if vaultState === "unlocked"}
-    <header class="wallet-head">
+    <header class="wallet-head sticky-head">
       <Mark size={30} />
       <span class="title-block">
         <span class="title">ECX Wallet{#if network}<span class="net-tag" data-network>{network}</span>{/if}</span>
@@ -292,6 +292,10 @@
     background: none;
     color: var(--muted);
   }
+  .icon-button:hover {
+    background: var(--surface-2);
+    color: var(--text);
+  }
   .hero {
     display: flex;
     flex-direction: column;
@@ -305,8 +309,9 @@
     border: none;
     background: none;
     color: var(--text);
-    font-size: 2rem;
+    font-size: 2.25rem;
     font-weight: 700;
+    letter-spacing: -0.02em;
     font-variant-numeric: tabular-nums;
     line-height: 1.15;
   }
@@ -346,10 +351,11 @@
     border-radius: 0;
     background: none;
     color: var(--muted);
+    transition: color 0.2s, border-color 0.2s;
   }
   .tabs button[aria-selected="true"] {
     border-bottom-color: var(--accent);
-    color: var(--accent-text);
+    color: var(--text);
   }
   .count {
     display: inline-flex;

@@ -174,11 +174,15 @@
     width: 44px;
     height: 44px;
     border-radius: 50%;
-    background: var(--accent);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--accent), #fff 18%), var(--accent));
     color: var(--on-accent);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 40%), 0 6px 18px -8px var(--glow);
+    transition: transform 0.2s cubic-bezier(0.2, 0.7, 0.2, 1), box-shadow 0.2s;
   }
   .action:hover .circle {
     background: var(--accent-hover);
+    transform: translateY(-2px);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 40%), 0 0 24px var(--glow);
   }
   .off {
     opacity: 0.45;

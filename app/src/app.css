@@ -41,7 +41,12 @@
 
   --radius: 12px;
   --radius-sm: 8px;
-  --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 8%);
+  --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 12px 28px -18px rgb(16 24 40 / 28%);
+  /* The light catching a surface's top edge, and the gold's glow (the action circles, the background). */
+  --highlight: inset 0 1px 0 rgb(255 255 255 / 70%);
+  --glow: color-mix(in srgb, var(--accent) 38%, transparent);
+  --halo: color-mix(in srgb, var(--accent) 16%, transparent);
+  --grid: rgb(9 9 11 / 2.5%);
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 }
@@ -73,7 +78,11 @@
     --focus: #e8a84a;
     --sidechain: #a78bfa;
     --on-sidechain: #0a0a0c;
-    --shadow: none;
+    --shadow: 0 18px 40px -24px rgb(0 0 0 / 80%);
+    --highlight: inset 0 1px 0 rgb(255 255 255 / 5%);
+    --glow: color-mix(in srgb, var(--accent) 32%, transparent);
+    --halo: color-mix(in srgb, var(--accent) 15%, transparent);
+    --grid: rgb(255 255 255 / 3%);
   }
 }
 
@@ -88,6 +97,8 @@ html {
 }
 
 body {
+  position: relative;
+  isolation: isolate;
   margin: 0;
   /* The action popup sizes itself to the page; this keeps it from collapsing to its content. */
   min-width: 360px;
@@ -95,6 +106,21 @@ body {
   color: var(--text);
   font: 15px/1.5 var(--font);
   -webkit-font-smoothing: antialiased;
+}
+
+/* A gold halo at the top of every screen, over a faint grid that fades out below it. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(110% 55% at 50% -14%, var(--halo), transparent 70%),
+    linear-gradient(var(--grid) 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0 / 24px 24px;
+  -webkit-mask-image: linear-gradient(#000 0, #000 30%, transparent 75%);
+  mask-image: linear-gradient(#000 0, #000 30%, transparent 75%);
 }
 
 /* The toolbar popup is as tall as the browser lets it be (600px), not just its content. */
@@ -166,6 +192,34 @@ dd {
   gap: 16px;
 }
 
+/* Each screen's sections rise into place one after another. */
+.screen > * {
+  animation: rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.screen > :nth-child(2) { animation-delay: 40ms; }
+.screen > :nth-child(3) { animation-delay: 80ms; }
+.screen > :nth-child(4) { animation-delay: 120ms; }
+.screen > :nth-child(5) { animation-delay: 160ms; }
+.screen > :nth-child(n + 6) { animation-delay: 200ms; }
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* A screen's header stays at the top, frosting what scrolls under it. */
+.sticky-head {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  margin: -16px -16px 0;
+  padding: 12px 16px;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+}
+
 .stack {
   display: flex;
   flex-direction: column;
@@ -173,10 +227,10 @@ dd {
 }
 
 .card {
-  background: var(--surface);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface), var(--text) 2%), var(--surface) 40%);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  box-shadow: var(--highlight), var(--shadow);
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -227,6 +281,7 @@ textarea {
   background: var(--surface);
   color: var(--text);
   font: 400 15px/1.4 var(--font);
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 textarea {
   resize: vertical;
@@ -260,12 +315,17 @@ button,
   min-height: 42px;
   padding: 0 18px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: 999px;
   background: var(--surface);
   color: var(--text);
   font: 600 15px/1 var(--font);
   text-decoration: none;
   cursor: pointer;
+  transition: background-color 0.2s, border-color 0.2s, box-shadow 0.2s, color 0.2s, transform 0.1s;
+}
+button:active:not(:disabled),
+.button:active {
+  transform: translateY(1px);
 }
 button:hover,
 .button:hover {
@@ -281,7 +341,7 @@ button:disabled {
   border-color: var(--accent);
   color: var(--on-accent);
 }
-.primary:hover {
+.primary:hover:not(:disabled) {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
 }
@@ -468,4 +528,14 @@ button:disabled {
   align-items: center;
   gap: 10px;
   color: var(--muted);
+}
+
+/* No motion for those who asked for none. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
 }

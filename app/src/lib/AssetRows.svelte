@@ -2,7 +2,7 @@
   import { shortAsset } from "$lib/asset";
   import AssetBadge from "$lib/AssetBadge.svelte";
   import ChainMark from "$lib/ChainMark.svelte";
-  import { assetMark, type ChainView } from "$lib/chains.svelte";
+  import { assetMark, chainMark, type ChainView } from "$lib/chains.svelte";
   import Icon from "$lib/Icon.svelte";
   import { amountText, assetsOf } from "$lib/unit.svelte";
 
@@ -35,7 +35,11 @@
     {#each assetsOf(report) as { asset, amount, unconfirmed, unverified, preconfirmed } (asset)}
       {@const entry = view.info.assets.find((a) => a.id === asset)}
       <li class="asset" data-asset={asset}>
-        <ChainMark {...assetMark(entry)} size={30} />
+        <span class="icon">
+          <ChainMark {...assetMark(entry)} size={36} />
+          <!-- On a sidechain, its mark on the asset's: which chain this ECX or token is on. -->
+          {#if view.info.id !== "l1"}<span class="on-chain"><ChainMark {...chainMark(view.info)} size={16} /></span>{/if}
+        </span>
         <span class="name">
           <strong>{entry ? entry.ticker : "Unknown asset"}<AssetBadge {entry} /></strong>
           <span class="muted tiny">
@@ -87,9 +91,26 @@
     display: flex;
     align-items: center;
     gap: 12px;
-    min-height: 58px;
-    padding: 8px 0 8px 12px;
-    border-bottom: 1px solid var(--border);
+    min-height: 60px;
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    transition: background-color 0.15s;
+  }
+  .asset:hover {
+    background: var(--surface-2);
+  }
+  .icon {
+    position: relative;
+    flex: none;
+    display: flex;
+  }
+  .on-chain {
+    position: absolute;
+    right: -4px;
+    bottom: -3px;
+    display: flex;
+    border: 2px solid var(--bg);
+    border-radius: 50%;
   }
   .name {
     flex: 1;

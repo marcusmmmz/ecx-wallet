@@ -7,7 +7,7 @@
   let { title, back, actions }: { title: string; back?: string; actions?: Snippet } = $props();
 </script>
 
-<header>
+<header class="sticky-head">
   {#if back}
     <a class="back" href={back} aria-label="Back"><Icon name="back" size={20} /></a>
   {:else}
