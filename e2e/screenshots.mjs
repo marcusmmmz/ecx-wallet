@@ -3,19 +3,27 @@
 //   pnpm build && pnpm build:e2e && node e2e/screenshots.mjs <out dir> [light|dark]
 //
 // Drives the e2e build through the same harness as the e2e suite: onboarding, create, import,
-// the account screen with balances from the stub Esplora server, Send, History, Grants, the
-// locked screens, and each kind of approval window. Brave only: over BiDi, Firefox can't resize
+// the account screen with balances from the stub Esplora server, Send, History, Grants, Flush
+// with a trade in History and its details, the locked screens, and each kind of approval window. Brave only: over BiDi, Firefox can't resize
 // or capture extension pages.
 import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import { flushSale } from "./flush-sale.mjs";
 import {
+  ABANDON,
+  activitySettled,
+  DIST,
+  homeSettled,
+  importWallet,
   ROOT,
   launchWallet,
   openTestApp,
   openWalletPage,
   serveEsplora,
+  serveFlushEsplora,
   serveTestApp,
   setUpWallet,
+  turnOnChain,
 } from "./harness.mjs";
 
 const out = path.resolve(process.argv[2] ?? "screenshots");
@@ -34,6 +42,14 @@ const historyTx = (seed, vin, vout, status) => ({
   vout: vout.map(([scriptpubkey, value, asset = POLICY_ASSET]) => ({ scriptpubkey, value, asset })),
   status,
 });
+/** Flush (Slot 99, off until its screenshots): a sale of BROSEVELT, paid by a coinbase. */
+const wallet = await importWallet();
+const [vault, flush] = await Promise.all([
+  readFile(path.join(DIST.chromium, "vault.wasm")).then(wallet.loadVaultModule),
+  readFile(path.join(DIST.chromium, "flush.wasm")).then(wallet.loadChainModule),
+]);
+const FLUSH_RECEIVE = flush.deriveAccount(vault.starter(ABANDON, "", 99), { receive: 1 }).receive[0];
+const FLUSH_SALE = flushSale(FLUSH_RECEIVE.scriptPubkey, "f0".repeat(32));
 const block = (height, time) => ({ confirmed: true, block_height: height, block_hash: "00".repeat(32), block_time: time });
 const SLOT_24_HISTORY = [
   historyTx("e3", [[FOREIGN_SCRIPT, 9000]], [[SLOT_24_SCRIPT, 2500], [FOREIGN_SCRIPT, 6400], ["", 100]], { confirmed: false }),
@@ -58,7 +74,7 @@ const signingRequest = (payload, overrides = {}) => ({
 const request = (page, method, params) => page.evaluate((m, p) => window.testApp.request(m, p), method, params);
 
 await mkdir(out, { recursive: true });
-const [session, app, stub] = await Promise.all([
+const [session, app, stub, flushStub] = await Promise.all([
   launchWallet("brave"),
   serveTestApp(),
   serveEsplora({
@@ -71,6 +87,15 @@ const [session, app, stub] = await Promise.all([
       ],
     },
     addressTxs: { [SLOT_24_ADDRESS]: SLOT_24_HISTORY },
+  }),
+  serveFlushEsplora({
+    identityBlock: flush.chainEntry().networks.betanet.identityBlock,
+    tipHeight: 3300,
+    feeEstimates: { 1: 1, 6: 0.1, 1008: 0.1 },
+    txs: FLUSH_SALE.txs,
+    utxos: { [FLUSH_RECEIVE.address]: [FLUSH_SALE.change] },
+    flushAssets: FLUSH_SALE.flushAssets,
+    marketTrades: FLUSH_SALE.marketTrades,
   }),
 ]);
 
@@ -189,6 +214,25 @@ try {
   await shot(page, "12-assets");
   await page.close();
 
+  // Flush: its mark and a token on home, then a trade in History (one double row) and its details.
+  page = await open("#/", "[data-balance]");
+  await turnOnChain(page, 99);
+  await page.reload();
+  await page.waitForFunction(() => document.querySelector('[data-account="99"] li[data-asset] .name strong')?.textContent.trim() === "BROSEVELT", { timeout: 20_000 });
+  await homeSettled(page);
+  await shot(page, "12-flush-home");
+  await page.close();
+  page = await openWalletPage(session, "#/chain/99/activity");
+  await page.setViewport(POPUP);
+  const tradeRow = `[data-history-entry="${FLUSH_SALE.txid}"]`;
+  await page.waitForSelector(`${tradeRow}[data-trade-state="filled"]`, { timeout: 20_000 });
+  await activitySettled(page);
+  await shot(page, "12-flush-trade");
+  await page.click(tradeRow);
+  await page.waitForSelector("[data-details-payout]");
+  await shot(page, "12-flush-trade-details");
+  await page.close();
+
   const home = await open("#/", "[data-lock]");
   await home.click("[data-lock]");
   await home.waitForSelector('[data-vault-state="locked"]');
@@ -205,4 +249,5 @@ try {
   await session.close();
   await app.close();
   await stub.close();
+  await flushStub.close();
 }
