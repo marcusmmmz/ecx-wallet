@@ -35,11 +35,11 @@ jobs:
         working-directory: core
         run: rustup toolchain install
 
-      - uses: pnpm/action-setup@v4
+      # Node first: pnpm 11 (packageManager) needs node >= 22.13, newer than the runner's own.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
+      - uses: pnpm/action-setup@v4
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
