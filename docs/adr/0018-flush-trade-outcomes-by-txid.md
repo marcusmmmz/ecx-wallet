@@ -12,7 +12,7 @@ So:
 
 - **Outcome:** asked once per trade, by txid. The index's answer stands until the trade's block changes (the session cache is keyed by block), and for good once the block is `final`. Until the index has reached the trade's block (`/flush/market/status`) the trade is **settling**. Past that height, a 404 means the transaction is no order the index knows, and it shows as a plain transaction. An answer that can't be read makes the trade **unknown**, and so does a market status that can't be read when the trade has ECX to pair: without `v7_height`, the wallet can't tell which block may pay it. A trade with no ECX to pair (its tokens come back on its result) still shows its outcome.
 - **Pairing:** each ECX payout the index reports (`out` or `refund`, and `back`) is paired with an unclaimed coinbase output paying `chn_to` exactly that amount. From `v7_height` the output must be in the trade's own block; before it, in a block at or after the trade's, as in ADR 0017. Trades are still paired oldest first.
-- **Which trades:** a kind-21 order through any number of pools, funded by the wallet alone (so its fee is known), whose `chn_to` is one of the wallet's addresses. A trade's entry lists its pools (`pools`). A launch buy's ECX back is `returned` on its outcome, folded into the entry like the payout.
+- **Which trades:** a kind-21 order through any number of pools, funded by the wallet alone (so its fee is known), whose `chn_to` is one of the wallet's addresses. A trade's entry lists its pools (`pools`), from its own marker: the transaction's word, where the index's `swap.hops` is the server's. A launch buy's ECX back is `returned` on its outcome, folded into the entry like the payout.
 
 ## Considered options
 
