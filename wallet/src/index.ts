@@ -99,6 +99,7 @@ export {
   type HistoryEntry,
   type TradeEntry,
   type TradeOutcome,
+  type PayoutState,
   type TradePayout,
   type Issuance,
   type ReportedHistory,

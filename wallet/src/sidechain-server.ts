@@ -97,7 +97,10 @@ export interface TradeEntry {
 export type TradeOutcome =
   | { state: "settling" }
   | { state: "unknown"; error: string }
-  | { state: "filled" | "missed"; back: AssetAmount; payout?: TradePayout | "queued"; returned?: { amount: string; payout: TradePayout | "queued" } };
+  | { state: "filled" | "missed"; back: AssetAmount; payout?: PayoutState; returned?: { amount: string; payout: PayoutState } };
+
+/** Where an ECX payout stands: the coinbase output that paid it, or `queued` while none has. */
+export type PayoutState = TradePayout | "queued";
 
 /** The coinbase output that paid a trade's ECX. */
 export interface TradePayout {

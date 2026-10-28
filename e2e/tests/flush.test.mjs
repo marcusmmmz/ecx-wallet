@@ -397,40 +397,41 @@ describe("Flush", () => {
       swap: { payouts: payouts.map(([what, asset_id, units, via]) => ({ what, asset_id, amount_units: String(units), via })) },
     });
 
+    /** The coins the trades below spend, each funded in its own block from 400. */
+    const funding = [];
+    const own = (hex) => (funding.push(hex), hex);
+
     // Payouts are instant (in the trade's own block) from 455.
     // Paid before that: 1,234 units for 12,100 sat, by the next block's coinbase.
-    const paid = sale(tokenCoin("d1", 5_000), ecxCoin("d2", 10_000), 1_234);
+    const paid = sale(own(tokenCoin("d1", 5_000)), own(ecxCoin("d2", 10_000)), 1_234);
     const payout = coinbase(451, [["", 0], [RECEIVE_1.scriptPubkey, 12_100]]);
+    // Filled at exactly 455 for 4,000 sat: its own block's coinbase only, so a later one doesn't pay it.
+    const atV7 = sale(own(tokenCoin("e8", 5_000)), own(ecxCoin("e9", 10_000)), 400);
+    const afterV7 = coinbase(456, [["", 0], [RECEIVE_1.scriptPubkey, 4_000]]);
     // Filled for 5,000 sat after 455: only its own block's coinbase can pay it, and a later one of that amount doesn't.
-    const queued = sale(tokenCoin("d3", 5_000), ecxCoin("d4", 10_000), 500);
+    const queued = sale(own(tokenCoin("d3", 5_000)), own(ecxCoin("d4", 10_000)), 500);
     const later = coinbase(461, [["", 0], [RECEIVE_1.scriptPubkey, 5_000]]);
     // Missed: a buy of 100,000 sat, refunded exactly in its own block.
-    const missedBuy = buy(ecxCoin("d9", 200_000), 100_000);
+    const missedBuy = buy(own(ecxCoin("d9", 200_000)), 100_000);
     const refund = coinbase(470, [["", 0], [RECEIVE_1.scriptPubkey, 100_000]]);
     // Through two pools: paid 9,000 sat in its own block.
-    const routed = sale(tokenCoin("e1", 5_000), ecxCoin("e2", 10_000), 300, [POOL, POOL_2]);
+    const routed = sale(own(tokenCoin("e1", 5_000)), own(ecxCoin("e2", 10_000)), 300, [POOL, POOL_2]);
     const routedPayout = coinbase(473, [["", 0], [RECEIVE_1.scriptPubkey, 9_000]]);
     // A launch buy past the curve's end: 3,000 units on its result, and 2,000 sat back by coinbase.
-    const launchBuy = buy(ecxCoin("e3", 200_000), 50_000);
+    const launchBuy = buy(own(ecxCoin("e3", 200_000)), 50_000);
     const launchBack = coinbase(474, [["", 0], [RECEIVE_1.scriptPubkey, 2_000]]);
     // A kind-21 marker the index knows no order by; a malformed answer; past the index (477); not in a block.
-    const notAnOrder = sale(tokenCoin("e4", 5_000), ecxCoin("e5", 10_000), 100);
-    const broken = sale(tokenCoin("da", 5_000), ecxCoin("db", 10_000), 300);
-    const tooNew = sale(tokenCoin("d5", 5_000), ecxCoin("d6", 10_000), 100);
-    const pending = sale(tokenCoin("d7", 5_000), ecxCoin("d8", 10_000), 200);
+    const notAnOrder = sale(own(tokenCoin("e4", 5_000)), own(ecxCoin("e5", 10_000)), 100);
+    const broken = sale(own(tokenCoin("da", 5_000)), own(ecxCoin("db", 10_000)), 300);
+    const tooNew = sale(own(tokenCoin("d5", 5_000)), own(ecxCoin("d6", 10_000)), 100);
+    const pending = sale(own(tokenCoin("d7", 5_000)), own(ecxCoin("d8", 10_000)), 200);
     const unrelated = coinbase(490, [["", 0], [RECEIVE_0.scriptPubkey, 777]]);
 
     before(() => {
-      const coins = [paid, queued, missedBuy, routed, launchBuy, notAnOrder, broken, tooNew, pending].flatMap((tx) => parseTx(tx).inputs.map((i) => i.txid));
-      const funding = [
-        ["d1", tokenCoin("d1", 5_000)], ["d2", ecxCoin("d2", 10_000)], ["d3", tokenCoin("d3", 5_000)], ["d4", ecxCoin("d4", 10_000)],
-        ["d5", tokenCoin("d5", 5_000)], ["d6", ecxCoin("d6", 10_000)], ["d7", tokenCoin("d7", 5_000)], ["d8", ecxCoin("d8", 10_000)],
-        ["d9", ecxCoin("d9", 200_000)], ["da", tokenCoin("da", 5_000)], ["db", ecxCoin("db", 10_000)], ["e1", tokenCoin("e1", 5_000)],
-        ["e2", ecxCoin("e2", 10_000)], ["e3", ecxCoin("e3", 200_000)], ["e4", tokenCoin("e4", 5_000)], ["e5", ecxCoin("e5", 10_000)],
-      ];
-      assert.equal(funding.length, coins.length);
       fund([
-        ...funding.map(([, hex], i) => ({ hex, blockHeight: 400 + i, blockHash: FINAL })),
+        ...funding.map((hex, i) => ({ hex, blockHeight: 400 + i, blockHash: FINAL })),
+        { hex: atV7, blockHeight: 455, blockHash: FINAL },
+        { hex: afterV7, blockHeight: 456, blockHash: FINAL },
         { hex: paid, blockHeight: 450, blockHash: FINAL },
         { hex: payout, blockHeight: 451, blockHash: FINAL },
         { hex: queued, blockHeight: 460, blockHash: FINAL },
@@ -449,6 +450,7 @@ describe("Flush", () => {
       ]);
       config.marketTrades = {
         [id(paid)]: outcome(paid, "filled", 450, [["out", "", 12_100, "coinbase"]]),
+        [id(atV7)]: outcome(atV7, "filled", 455, [["out", "", 4_000, "coinbase"]]),
         [id(queued)]: outcome(queued, "filled", 460, [["out", "", 5_000, "coinbase"]]),
         [id(missedBuy)]: outcome(missedBuy, "missed", 470, [["refund", "", 100_000, "coinbase"]]),
         [id(routed)]: outcome(routed, "filled", 473, [["out", "", 9_000, "coinbase"]]),
@@ -476,6 +478,8 @@ describe("Flush", () => {
       assert.deepEqual(entries.get(id(paid)).amounts, [{ asset: BROSEVELT, amount: "-1234" }, { asset: "", amount: "11700" }], "its payout netted in, fee included");
       assert.equal(entries.has(id(payout)), false, "before instant payouts, a later block's coinbase pays it, and its own entry is folded in");
 
+      assert.equal(tradeOf(atV7).outcome.payout, "queued", "from exactly v7_height, only its own block's coinbase pays it");
+      assert.deepEqual(entries.get(id(afterV7)).amounts, [{ asset: "", amount: "4000" }]);
       assert.equal(tradeOf(queued).outcome.payout, "queued", "after them, only its own block's coinbase pays it");
       assert.deepEqual(entries.get(id(later)).amounts, [{ asset: "", amount: "5000" }], "the later coinbase of that amount stays its own entry");
 
@@ -502,13 +506,24 @@ describe("Flush", () => {
       assert.deepEqual(entries.get(id(unrelated)).amounts, [{ asset: "", amount: "777" }], "a coinbase no trade explains stays its own entry");
 
       // Answers for trades in final blocks are kept for good, and read back instead of the index.
-      assert.deepEqual([...store.keys()].sort(), [paid, queued, missedBuy, routed, launchBuy, notAnOrder].map((tx) => `trade:${url}:${id(tx)}`).sort());
+      assert.deepEqual([...store.keys()].sort(), [paid, atV7, queued, missedBuy, routed, launchBuy, notAnOrder].map((tx) => `trade:${url}:${id(tx)}`).sort());
       const saved = config.marketTrades;
       config.marketTrades = {};
       try {
         assert.deepEqual((await read()).get(id(paid)).trade.outcome.back, { asset: "", amount: "12100" });
+
+        // The market's status is down: kept answers still show, but an ECX payout can't be paired without it.
+        config.marketDown = true;
+        const down = await read();
+        const why = down.get(id(paid)).trade.outcome;
+        assert.equal(why.state, "unknown");
+        assert.match(why.error, /refused: Busy/);
+        assert.deepEqual(down.get(id(paid)).amounts, [{ asset: BROSEVELT, amount: "-1234" }, { asset: "", amount: "-400" }], "no payout folded in");
+        assert.deepEqual(down.get(id(payout)).amounts, [{ asset: "", amount: "12100" }], "its coinbase shows as itself");
+        assert.equal(down.get(id(launchBuy)).trade.outcome.state, "unknown", "its ECX back can't be paired either");
       } finally {
         config.marketTrades = saved;
+        config.marketDown = undefined;
       }
     });
 

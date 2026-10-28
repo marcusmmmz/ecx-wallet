@@ -574,7 +574,7 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
     },
 
     /**
-     * A swap order's outcome by its transaction (`/flush/market/trades/:txid`, flushd 8.2.0): the
+     * A swap order's outcome by its transaction (`/flush/market/trades/:txid`, Flush 8.2.0): the
      * server's word (docs/adr/0018). Undefined if the index knows no order by that txid (404).
      */
     async marketTrade(txid: string): Promise<MarketTrade | undefined> {

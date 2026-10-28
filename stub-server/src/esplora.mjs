@@ -21,7 +21,7 @@ import { parseElementsTx } from "./elements-tx.mjs";
  *   broadcastTxid?: string, assets?: Record<string, object>, flush?: boolean,
  *   finality?: Record<string, "soft" | "anchored" | "final">, tipTime?: number,
  *   flushAssets?: Record<string, object>, holdings?: Record<string, object[]>, rejectReason?: string,
- *   marketHeight?: number, instantPayoutsFrom?: number, marketTrades?: Record<string, object>,
+ *   marketHeight?: number, instantPayoutsFrom?: number, marketTrades?: Record<string, object>, marketDown?: boolean,
  *   flushRpc?: Record<string, ((args: unknown[]) => unknown) | unknown>, flushRpcStatus?: Record<string, number> }} EsploraStubConfig
  */
 
@@ -63,10 +63,11 @@ const PAGE = 25;
  * `{ error: "Not found" }`; `/flush/market/addresses/{address}/holdings` answers
  * `{ items: config.holdings[address] ?? [], address }`; `/flush/market/status` answers the height its
  * index reached (`config.marketHeight`, else the tip) and, with `config.instantPayoutsFrom`, the
- * height payouts are instant from (`launch_params.v7_height`); `/flush/market/trades/{txid}` answers
- * `config.marketTrades[txid]` (the API's outcome, as given), else 404 `{ error: "Not found" }`; `POST /txs/test` answers each transaction `allowed`, or refused with `config.rejectReason`
- * as its `reject-reason`. Any other
- * `/flush/rpc/{method}` answers `config.flushRpc[method]` (a function of the args, or JSON as is;
+ * height payouts are instant from (`launch_params.v7_height`), or 503 with `config.marketDown`;
+ * `/flush/market/trades/{txid}` answers `config.marketTrades[txid]` (the API's outcome, as given),
+ * else 404 `{ error: "Not found" }`; `POST /txs/test` answers each transaction `allowed`, or
+ * refused with `config.rejectReason` as its `reject-reason`. Any other `/flush/rpc/{method}`
+ * answers `config.flushRpc[method]` (a function of the args, or JSON as is;
  * `undefined` from the function: 404), else 404; `config.flushRpcStatus[method]` answers that HTTP
  * status with `{ error }` instead, as the explorer does when the node can't answer (501, 503).
  */
@@ -212,6 +213,7 @@ export function createEsploraStub(config) {
       return [200, { items: config.holdings?.[address] ?? [], address }];
     }
     if (config.flush && pathname === "/flush/market/status") {
+      if (config.marketDown) return [503, { error: "Busy" }];
       const instant = config.instantPayoutsFrom === undefined ? {} : { launch_params: { v7_height: config.instantPayoutsFrom, instant_payouts_active: true } };
       return [200, { flush: { height: config.marketHeight ?? config.tipHeight ?? 0 }, market_index: true, ...instant }];
     }

@@ -99,7 +99,7 @@ The protocol the Wallet Base speaks to a Sidechain Server, named next to its URL
 _Avoid_: Backend type, server kind
 
 **History Entry**:
-A transaction touching the addresses the Wallet Base watches on one chain, shown as the wallet's net change per asset (fee included), pending or confirmed, as reported by the chain's Sidechain Server. A pending one is trusted when it spends only the wallet's own coins, each confirmed or from a trusted transaction. A Flush trade's entry also holds the coinbase output that paid it, which nothing on the chain links to it: the wallet pairs them (ADR 0017).
+A transaction touching the addresses the Wallet Base watches on one chain, shown as the wallet's net change per asset (fee included), pending or confirmed, as reported by the chain's Sidechain Server. A pending one is trusted when it spends only the wallet's own coins, each confirmed or from a trusted transaction. A Flush trade's entry also holds the coinbase outputs that paid it (its payout or refund, and a launch buy's ECX back), which nothing on the chain links to it: the wallet pairs them (ADR 0017, 0018).
 _Avoid_: Activity, transfer (a Standard Sidechain API build request)
 
 **Standard Sidechain API**:

@@ -103,7 +103,7 @@ The API this project defines, for a sidechain with no indexer. Its protocol draf
   - **Pending:** trusted. It spends only the wallet's own coins, each confirmed or from a trusted transaction.
   - **Unconfirmed:** anything else, with a warning (for a Deposit's credit: the operator credited it, not in a block yet).
 - **A Flush trade** (ADR 0017, 0018) is one row twice as tall: its title by outcome (Sold, Bought, Swapped for a token-for-token trade; "Selling" or "Buying" while its payout is queued; "Sale didn't fill" or "Buy didn't fill"), its time, and what it gave above, its fee as a second amount; what came back below ("Paid", "Received", "Refunded", "Returned", a queued payout greyed with "≈"; before an outcome, "Settles once it's in a block", "Waiting for the market's index" or "Couldn't read the outcome"). Beside them, the asset given, a down arrow and the asset back. An amount only the market index vouches for is underlined dotted. Its sheet names every pool it went through, and a launch buy's ECX back past the curve's end.
-- **Tapping a row** shows its status, when it was mined, the chain and its id, the txid with Copy, a Deposit's credit's main-chain txid, and who reported it. A trade's shows "You gave" with its fee and price, what came back, the coinbase that paid it, its pool, and Retry when its outcome couldn't be read.
+- **Tapping a row** shows its status, when it was mined, the chain and its id, the txid with Copy, a Deposit's credit's main-chain txid, and who reported it. A trade's shows "You gave" with its fee and price, what came back, the coinbase that paid it, its pools, a launch buy's ECX back past the curve's end (and the coinbase that paid that), and Retry when its outcome couldn't be read.
 
 **How:**
 

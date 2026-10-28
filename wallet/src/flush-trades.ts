@@ -8,7 +8,7 @@
 import { cacheKey, type SessionCache } from "./cache";
 import { NATIVE_COIN, type AssetAmount, type OutputTokens } from "./chain-module";
 import { isCoinbase, type EsploraClient, type EsploraTx, type MarketPayout, type MarketStatus, type MarketTrade } from "./esplora";
-import type { HistoryEntry, TradeOutcome, TradePayout } from "./sidechain-server";
+import type { HistoryEntry, PayoutState, TradeOutcome } from "./sidechain-server";
 
 /** What the market index said of a transaction: its outcome, or that it knows no order by it. */
 type Answer = MarketTrade | { none: true };
@@ -16,7 +16,7 @@ type Answer = MarketTrade | { none: true };
 /** Where answers are kept for good: only for trades in a final block, which no reorg can undo. */
 export type TradeStore = Pick<SessionCache, "get" | "set">;
 
-/** Flush writes ECX as the null hash, or empty; the wallet as NATIVE_COIN. */
+/** Flush writes ECX as the null hash, or as `""`, which is already NATIVE_COIN. */
 const assetOf = (id: string) => (/^0{64}$/.test(id) ? NATIVE_COIN : id);
 
 /**
@@ -60,29 +60,38 @@ export async function withTrades(
   }
 
   // Each trade's outcome, and the ECX payouts a coinbase pays it; undefined if the index knows no order by it.
-  const outcomes = await Promise.all(
-    trades.map(async ({ tx }): Promise<{ outcome: TradeOutcome; coinbase: MarketPayout[] } | undefined> => {
-      if (!tx.status.confirmed) return { outcome: { state: "settling" }, coinbase: [] };
+  const read = await Promise.all(
+    trades.map(async ({ tx }): Promise<{ outcome: TradeOutcome; ecxPayouts: MarketPayout[] } | undefined> => {
+      if (!tx.status.confirmed) return { outcome: { state: "settling" }, ecxPayouts: [] };
       try {
         const said = await answer(tx);
-        if (said === "settling") return { outcome: { state: "settling" }, coinbase: [] };
+        if (said === "settling") return { outcome: { state: "settling" }, ecxPayouts: [] };
         if ("none" in said) return undefined;
         const main = said.payouts.find((p) => p.what === (said.status === "filled" ? "out" : "refund"));
         if (main === undefined) throw new Error(`The market index reports no ${said.status === "filled" ? "payout" : "refund"} for it.`);
-        const coinbase = said.payouts.filter((p) => p.via === "coinbase" && assetOf(p.asset) === NATIVE_COIN && (p === main || p.what === "back"));
-        return { outcome: { state: said.status, back: { asset: assetOf(main.asset), amount: main.amount } }, coinbase };
+        const ecxPayouts = said.payouts.filter((p) => p.via === "coinbase" && assetOf(p.asset) === NATIVE_COIN && (p === main || p.what === "back"));
+        return { outcome: { state: said.status, back: { asset: assetOf(main.asset), amount: main.amount } }, ecxPayouts };
       } catch (error) {
-        return { outcome: { state: "unknown", error: error instanceof Error ? error.message : String(error) }, coinbase: [] };
+        return { outcome: unknown(error), ecxPayouts: [] };
       }
     }),
   );
-  const instantFrom = outcomes.some((o) => o !== undefined && o.coinbase.length > 0) ? (await market()).instantPayoutsFrom : undefined;
+  // Pairing needs the height payouts are instant from; without it, no ECX payout is paired.
+  let instantFrom: number | undefined;
+  let statusError: unknown;
+  if (read.some((r) => r !== undefined && r.ecxPayouts.length > 0)) {
+    try {
+      instantFrom = (await market()).instantPayoutsFrom;
+    } catch (error) {
+      statusError = error;
+    }
+  }
 
   // Pair ECX payouts with coinbase outputs, oldest trade first: the node pays its queue in order.
   const coinbases = [...txs.values()].filter((tx) => tx.status.confirmed && isCoinbase(tx)).sort((x, y) => x.status.blockHeight! - y.status.blockHeight!);
   const claimed = new Set<string>();
   const folded = new Map<string, bigint>();
-  const pair = (height: number, chnTo: string, amount: string): TradePayout | "queued" => {
+  const pair = (height: number, chnTo: string, amount: string): PayoutState => {
     const ownBlock = instantFrom !== undefined && height >= instantFrom;
     const match = coinbases
       .filter((cb) => (ownBlock ? cb.status.blockHeight === height : cb.status.blockHeight! >= height))
@@ -94,35 +103,43 @@ export async function withTrades(
     const { blockTime } = match.cb.status;
     return { txid: match.cb.txid, ...(blockTime === undefined ? {} : { time: blockTime }) };
   };
+  const outcomes: (TradeOutcome | undefined)[] = read.map((r) => r?.outcome);
   const byHeight = trades.map((_, i) => i).sort((i, j) => (trades[i].tx.status.blockHeight ?? Infinity) - (trades[j].tx.status.blockHeight ?? Infinity));
   for (const i of byHeight) {
-    const said = outcomes[i];
-    if (said === undefined || !("back" in said.outcome)) continue;
-    const { tx, order } = trades[i];
-    for (const payout of said.coinbase) {
-      const paid = pair(tx.status.blockHeight!, order.chnTo, payout.amount);
-      said.outcome = payout.what === "back" ? { ...said.outcome, returned: { amount: payout.amount, payout: paid } } : { ...said.outcome, payout: paid };
+    const r = read[i];
+    if (r === undefined || !("back" in r.outcome) || r.ecxPayouts.length === 0) continue;
+    if (statusError !== undefined) {
+      outcomes[i] = unknown(statusError);
+      continue;
     }
+    const { tx, order } = trades[i];
+    let outcome = r.outcome;
+    for (const payout of r.ecxPayouts) {
+      const state = pair(tx.status.blockHeight!, order.chnTo, payout.amount);
+      outcome = payout.what === "back" ? { ...outcome, returned: { amount: payout.amount, payout: state } } : { ...outcome, payout: state };
+    }
+    outcomes[i] = outcome;
   }
 
   const tradeAt = new Map(trades.map((t, i) => [t.entry.txid, i]));
+  const paidOut = (state: PayoutState | undefined, amount: string) => (typeof state === "object" ? BigInt(amount) : 0n);
   return entries.flatMap((entry): HistoryEntry[] => {
     const i = tradeAt.get(entry.txid);
-    const said = i === undefined ? undefined : outcomes[i];
-    if (i !== undefined && said !== undefined) {
+    const outcome = i === undefined ? undefined : outcomes[i];
+    if (i !== undefined && outcome !== undefined) {
       const { order, fee } = trades[i];
-      const { outcome } = said;
-      const paid = (p: TradePayout | "queued" | undefined, amount: string) => (typeof p === "object" ? BigInt(amount) : 0n);
-      const back = "back" in outcome ? paid(outcome.payout, outcome.back.amount) + (outcome.returned ? paid(outcome.returned.payout, outcome.returned.amount) : 0n) : 0n;
-      return [{ ...entry, amounts: add(entry.amounts, NATIVE_COIN, back), trade: { pools: order.pools, given: { asset: assetOf(order.assetIn), amount: order.amountIn }, fee: fee.toString(), outcome } }];
+      const ecxBack = "back" in outcome ? paidOut(outcome.payout, outcome.back.amount) + (outcome.returned ? paidOut(outcome.returned.payout, outcome.returned.amount) : 0n) : 0n;
+      return [{ ...entry, amounts: add(entry.amounts, NATIVE_COIN, ecxBack), trade: { pools: order.pools, given: { asset: assetOf(order.assetIn), amount: order.amountIn }, fee: fee.toString(), outcome } }];
     }
     // A coinbase whose outputs to the wallet all paid trades leaves the list; otherwise what's left shows.
-    const paid = folded.get(entry.txid);
-    if (paid === undefined) return [entry];
-    const amounts = add(entry.amounts, NATIVE_COIN, -paid);
+    const folds = folded.get(entry.txid);
+    if (folds === undefined) return [entry];
+    const amounts = add(entry.amounts, NATIVE_COIN, -folds);
     return amounts.length === 0 ? [] : [{ ...entry, amounts }];
   });
 }
+
+const unknown = (error: unknown): TradeOutcome => ({ state: "unknown", error: error instanceof Error ? error.message : String(error) });
 
 /** `amounts` with `delta` added to `asset`, dropping what nets to zero. */
 function add(amounts: AssetAmount[], asset: string, delta: bigint): AssetAmount[] {
