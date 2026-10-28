@@ -30,6 +30,10 @@ pnpm typecheck
 - One browser only: `E2E_BROWSERS=brave pnpm test`. Watch the browser: `HEADFUL=1`.
 - How the tests work and how to write one: [docs/testing.md](docs/testing.md).
 
+## Release
+
+Bump `version` in both `extension/manifests/*.json`, then push a matching tag (`git tag v0.0.2 && git push origin v0.0.2`). [`.github/workflows/release.yml`](.github/workflows/release.yml) builds and publishes a GitHub pre-release with one zip per browser and `SHA256SUMS`; its install steps come from [`.github/release-notes.md`](.github/release-notes.md). It doesn't run the tests: run `pnpm test` before tagging.
+
 ## Layout
 
 A pnpm workspace:

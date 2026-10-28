@@ -1,0 +1,63 @@
+# Push a tag vX.Y.Z (matching both manifests' version) to build the extension and publish it as a
+# GitHub pre-release: one zip per browser, plus SHA256SUMS.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches the manifests' version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          for target in chromium firefox; do
+            version=$(jq -r .version "extension/manifests/$target.json")
+            if [ "$version" != "$tag" ]; then
+              echo "::error::tag $GITHUB_REF_NAME but extension/manifests/$target.json is $version"
+              exit 1
+            fi
+          done
+
+      # libsecp256k1's C code needs a clang with the WebAssembly backend and llvm-ar (core/README.md).
+      - name: Install clang and llvm-ar
+        run: sudo apt-get update && sudo apt-get install -y clang llvm
+
+      # Installs the toolchain core/rust-toolchain.toml pins.
+      - name: Install Rust
+        working-directory: core
+        run: rustup toolchain install
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: Package
+        run: |
+          mkdir release
+          for target in chromium firefox; do
+            (cd "extension/dist/$target" && zip -qrX "$GITHUB_WORKSPACE/release/ecx-wallet-$target-$GITHUB_REF_NAME.zip" .)
+          done
+          (cd release && sha256sum *.zip > SHA256SUMS && cat SHA256SUMS)
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --title "ECX Wallet $GITHUB_REF_NAME" \
+            --prerelease \
+            --notes-file .github/release-notes.md \
+            --generate-notes
