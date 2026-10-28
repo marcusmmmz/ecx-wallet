@@ -89,12 +89,29 @@ export interface EsploraServerConfig {
   now?: () => number;
 }
 
-/** A fill the node's DEX API lists through a pool (`amountIn`, `amountOut`: base units, decimal). */
-export interface PoolTrade {
-  txid: string;
+/** How far the node's DEX API has indexed, and from which height it pays ECX in the trade's own block. */
+export interface MarketStatus {
+  /** The Flush height it has indexed: every order up to it has an outcome. */
   height: number;
-  amountIn: string;
-  amountOut: string;
+  /** Flush's `v7_height`: from it, ECX out of an order is paid by the coinbase of the order's block. */
+  instantPayoutsFrom?: number;
+}
+
+/** What an order paid out, as the node's DEX API reports it (`amount`: base units, decimal). */
+export interface MarketPayout {
+  /** `out`: what it filled with; `refund`: a miss's; `back`: a launch buy's ECX past the curve's end. */
+  what: "out" | "refund" | "back";
+  asset: string;
+  amount: string;
+  /** `coinbase`: ECX, to its `chn_to`; `output`: a token, on its result output. */
+  via: "coinbase" | "output";
+}
+
+/** A swap order's outcome, as the node's DEX API reports it (`trades/{txid}`, docs/adr/0018). */
+export interface MarketTrade {
+  status: "filled" | "missed";
+  height: number;
+  payouts: MarketPayout[];
 }
 
 /** An unspent output, as Esplora lists it for an address or a script. */
@@ -547,29 +564,36 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
       });
     },
 
-    /** The Flush height the node's DEX API has indexed (`/flush/market/status`): its trades up to it are listed. */
-    async marketHeight(): Promise<number> {
+    /** How far the node's DEX API has indexed (`/flush/market/status`), and since when payouts are instant. */
+    async marketStatus(): Promise<MarketStatus> {
       const answer = (await getJson("/flush/market/status", "market status")) as Record<string, unknown> | null;
       const height = (answer?.flush as Record<string, unknown> | undefined)?.height;
       if (!isCount(height) || answer?.market_index !== true) throw malformed("market status");
-      return height;
+      const { v7_height: from, instant_payouts_active: active } = (answer.launch_params ?? {}) as Record<string, unknown>;
+      return { height, ...(active === true && isCount(from) ? { instantPayoutsFrom: from } : {}) };
     },
 
     /**
-     * A page of the trades the node's DEX API lists through `pool` (`/flush/market/pools/:id/trades`),
-     * newest first: fills only, the server's word (docs/adr/0017). `cursor` is the last page's `next`.
+     * A swap order's outcome by its transaction (`/flush/market/trades/:txid`, flushd 8.2.0): the
+     * server's word (docs/adr/0018). Undefined if the index knows no order by that txid (404).
      */
-    async poolTrades(pool: string, cursor?: string): Promise<{ trades: PoolTrade[]; next?: string }> {
-      const query = cursor === undefined ? "?limit=100" : `?limit=100&cursor=${encodeURIComponent(cursor)}`;
-      const answer = (await getJson(`/flush/market/pools/${pool}/trades${query}`, "list of trades")) as Record<string, unknown>;
-      if (!Array.isArray(answer?.items) || (answer.next_cursor != null && typeof answer.next_cursor !== "string")) throw malformed("list of trades");
-      const trades = answer.items.map((item: Record<string, unknown>) => {
-        const { txid, height, amount_in_units, amount_out_units } = item ?? {};
-        const units = (n: unknown) => typeof n === "string" && /^[0-9]+$/.test(n);
-        if (typeof txid !== "string" || !HASH.test(txid) || !isCount(height) || !units(amount_in_units) || !units(amount_out_units)) throw malformed("list of trades");
-        return { txid, height, amountIn: amount_in_units as string, amountOut: amount_out_units as string };
-      });
-      return { trades, ...(typeof answer.next_cursor === "string" && answer.next_cursor !== "" ? { next: answer.next_cursor } : {}) };
+    async marketTrade(txid: string): Promise<MarketTrade | undefined> {
+      const answer = await response(`/flush/market/trades/${txid}`);
+      if (answer.status === 404) return undefined;
+      if (!answer.ok) throw refused(answer);
+      const { txid: said, kind, status, height, swap } = (parsed(answer.body, "trade") ?? {}) as Record<string, unknown>;
+      const payouts = (swap as Record<string, unknown> | null)?.payouts;
+      if (said !== txid || kind !== "swap" || (status !== "filled" && status !== "missed") || !isCount(height) || !Array.isArray(payouts)) throw malformed("trade");
+      return {
+        status,
+        height,
+        payouts: payouts.map((p: Record<string, unknown>) => {
+          const { what, asset_id: asset, amount_units: amount, via } = p ?? {};
+          if ((what !== "out" && what !== "refund" && what !== "back") || (via !== "coinbase" && via !== "output")) throw malformed("trade");
+          if (typeof asset !== "string" || (asset !== "" && !HASH.test(asset)) || typeof amount !== "string" || !/^[0-9]+$/.test(amount)) throw malformed("trade");
+          return { what, asset, amount, via };
+        }),
+      };
     },
 
     /** Fee rates (sat/vB) by confirmation target in blocks. */

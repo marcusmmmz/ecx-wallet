@@ -71,12 +71,13 @@ export interface HistoryEntry {
 }
 
 /**
- * A Flush trade (kind 21, one pool) the wallet funded, paying ECX to one of its addresses. Its entry
- * is the trade's, with its coinbase payout or refund folded in: `amounts` nets both, and the payout's
- * own entry is left out (docs/adr/0017).
+ * A Flush trade (kind 21) the wallet funded, paying ECX to one of its addresses. Its entry is the
+ * trade's, with the coinbase outputs that paid it folded in: `amounts` nets them, and a coinbase
+ * that paid only it is left out (docs/adr/0017, 0018).
  */
 export interface TradeEntry {
-  pool: string;
+  /** The pools it trades through, in order. */
+  pools: string[];
   /** What it paid in: its order's asset and amount. */
   given: AssetAmount;
   /** The ECX fee, base units. */
@@ -88,14 +89,15 @@ export interface TradeEntry {
  * - `settling`: not in a block yet, or the market index hasn't reached its block.
  * - `unknown`: the market index couldn't be read (`error`).
  * - `filled`: what came out (`back`), as the market index reports it.
- * - `missed`: no fill listed: what it paid in comes back (`back`), on its result or, for ECX, by coinbase.
+ * - `missed`: what it paid in comes back (`back`), on its result or, for ECX, by coinbase.
  *
- * `payout`, when ECX comes back: the coinbase that paid it, or `queued` while none has.
+ * `payout`, when ECX comes back: the coinbase that paid it, or `queued` while none has. `returned`:
+ * a launch buy's ECX past the curve's end, paid the same way.
  */
 export type TradeOutcome =
   | { state: "settling" }
   | { state: "unknown"; error: string }
-  | { state: "filled" | "missed"; back: AssetAmount; payout?: TradePayout | "queued" };
+  | { state: "filled" | "missed"; back: AssetAmount; payout?: TradePayout | "queued"; returned?: { amount: string; payout: TradePayout | "queued" } };
 
 /** The coinbase output that paid a trade's ECX. */
 export interface TradePayout {

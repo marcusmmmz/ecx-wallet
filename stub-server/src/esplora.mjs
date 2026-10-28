@@ -21,7 +21,7 @@ import { parseElementsTx } from "./elements-tx.mjs";
  *   broadcastTxid?: string, assets?: Record<string, object>, flush?: boolean,
  *   finality?: Record<string, "soft" | "anchored" | "final">, tipTime?: number,
  *   flushAssets?: Record<string, object>, holdings?: Record<string, object[]>, rejectReason?: string,
- *   marketHeight?: number, poolTrades?: Record<string, object[]>,
+ *   marketHeight?: number, instantPayoutsFrom?: number, marketTrades?: Record<string, object>,
  *   flushRpc?: Record<string, ((args: unknown[]) => unknown) | unknown>, flushRpcStatus?: Record<string, number> }} EsploraStubConfig
  */
 
@@ -62,9 +62,9 @@ const PAGE = 25;
  * `/flush/rpc/getasset?args=["0x<id>"]` answers `config.flushAssets[id]` (getasset's JSON), else 404
  * `{ error: "Not found" }`; `/flush/market/addresses/{address}/holdings` answers
  * `{ items: config.holdings[address] ?? [], address }`; `/flush/market/status` answers the height its
- * index reached (`config.marketHeight`, else the tip); `/flush/market/pools/{id}/trades?limit=&cursor=`
- * pages `config.poolTrades[id]` (the API's items, newest first; `next_cursor` an offset, null at the
- * end); `POST /txs/test` answers each transaction `allowed`, or refused with `config.rejectReason`
+ * index reached (`config.marketHeight`, else the tip) and, with `config.instantPayoutsFrom`, the
+ * height payouts are instant from (`launch_params.v7_height`); `/flush/market/trades/{txid}` answers
+ * `config.marketTrades[txid]` (the API's outcome, as given), else 404 `{ error: "Not found" }`; `POST /txs/test` answers each transaction `allowed`, or refused with `config.rejectReason`
  * as its `reject-reason`. Any other
  * `/flush/rpc/{method}` answers `config.flushRpc[method]` (a function of the args, or JSON as is;
  * `undefined` from the function: 404), else 404; `config.flushRpcStatus[method]` answers that HTTP
@@ -212,16 +212,11 @@ export function createEsploraStub(config) {
       return [200, { items: config.holdings?.[address] ?? [], address }];
     }
     if (config.flush && pathname === "/flush/market/status") {
-      return [200, { flush: { height: config.marketHeight ?? config.tipHeight ?? 0 }, market_index: true }];
+      const instant = config.instantPayoutsFrom === undefined ? {} : { launch_params: { v7_height: config.instantPayoutsFrom, instant_payouts_active: true } };
+      return [200, { flush: { height: config.marketHeight ?? config.tipHeight ?? 0 }, market_index: true, ...instant }];
     }
-    const poolTrades = config.flush ? /^\/flush\/market\/pools\/([0-9a-f]{64})\/trades$/.exec(pathname) : null;
-    if (poolTrades) {
-      const all = config.poolTrades?.[poolTrades[1]] ?? [];
-      const from = Number(query.get("cursor") ?? 0);
-      const limit = Number(query.get("limit") ?? 50);
-      const items = all.slice(from, from + limit);
-      return [200, { items, next_cursor: from + limit < all.length ? String(from + limit) : null, total: all.length }];
-    }
+    const marketTrade = config.flush ? /^\/flush\/market\/trades\/([0-9a-f]{64})$/.exec(pathname) : null;
+    if (marketTrade) return config.marketTrades?.[marketTrade[1]] ? [200, config.marketTrades[marketTrade[1]]] : [404, { error: "Not found" }];
     const asset = /^\/asset\/([0-9a-f]{64})$/.exec(pathname);
     if (asset) return config.assets?.[asset[1]] ? [200, config.assets[asset[1]]] : [404, "Asset id not found"];
 

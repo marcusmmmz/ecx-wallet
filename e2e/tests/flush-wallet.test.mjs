@@ -313,8 +313,9 @@ for (const browserName of BROWSERS) describe(browserName, () => {
       { hex: LIVE_TXS[REGISTRATION], blockHeight: 604, blockHash: FINAL },
     ];
     FLUSH.flushAssets = { [BROSEVELT]: { asset: BROSEVELT, registered: 604, registration: REGISTRATION } };
-    FLUSH.poolTrades = { [POOL]: [{ txid: parseTx(SALE).txid, height: 3290, amount_in_units: "1234", amount_out_units: "12100" }] };
-    FLUSH.flushRpc = { getpool: () => ({ asset_a_id: BROSEVELT, asset_b_id: "00".repeat(32) }) };
+    FLUSH.marketTrades = {
+      [parseTx(SALE).txid]: { txid: parseTx(SALE).txid, kind: "swap", height: 3290, status: "filled", swap: { payouts: [{ what: "out", asset_id: "", amount_units: "12100", via: "coinbase" }] } },
+    };
     const utxos = FLUSH.utxos[RECEIVE_0.address];
     // The sale's BROSEVELT change, as a coin: home names an asset from its registration once a balance shows it.
     FLUSH.utxos[RECEIVE_0.address] = [...utxos, { txid: parseTx(SALE).txid, vout: 0, value: 0, confirmed: true, blockHash: FINAL }];
@@ -347,7 +348,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
     } finally {
       FLUSH.txs = txs;
       FLUSH.utxos[RECEIVE_0.address] = utxos;
-      FLUSH.flushAssets = FLUSH.poolTrades = FLUSH.flushRpc = undefined;
+      FLUSH.flushAssets = FLUSH.marketTrades = undefined;
     }
   });
 

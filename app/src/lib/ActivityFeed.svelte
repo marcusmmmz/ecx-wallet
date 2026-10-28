@@ -361,8 +361,16 @@
         <dd class="txid"><code title="The coinbase output that paid it: the wallet paired it by its address and amount" data-details-payout>{entry.trade.outcome.payout.txid}</code></dd>
       {/if}
       {#if entry.trade}
-        <dt>Pool</dt>
-        <dd class="txid"><code>{entry.trade.pool}</code></dd>
+        <dt>{entry.trade.pools.length > 1 ? "Pools" : "Pool"}</dt>
+        <dd class="txid">{#each entry.trade.pools as pool (pool)}<code>{pool}</code>{/each}</dd>
+      {/if}
+      {#if entry.trade && "returned" in entry.trade.outcome && entry.trade.outcome.returned}
+        {@const returned = entry.trade.outcome.returned}
+        <dt>ECX back</dt>
+        <dd data-details-returned>
+          {amountText(returned.amount, NATIVE_COIN, chain.info.assets)} past the launch curve's end{returned.payout === "queued" ? ", queued" : ""}
+          {#if typeof returned.payout === "object"}<code class="txid">{returned.payout.txid}</code>{/if}
+        </dd>
       {/if}
       {#if entry.depositFrom !== undefined}
         <dt>Deposit</dt>
