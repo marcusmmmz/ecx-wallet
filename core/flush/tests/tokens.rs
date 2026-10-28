@@ -41,6 +41,27 @@ fn a_listed_output_carries_the_token_its_marker_names_and_a_result_carries_none_
 }
 
 #[test]
+fn a_listed_output_names_the_script_it_pays() {
+    let raw = tx(ADD_LIQUIDITY);
+    let parsed: bitcoin::Transaction = bitcoin::consensus::encode::deserialize_hex(&raw).unwrap();
+    let add = output_tokens(&raw).unwrap();
+    for listed in &add.outputs {
+        let script = &parsed.output[listed.vout as usize].script_pubkey;
+        assert_eq!(listed.script, script.as_bytes().iter().map(|b| format!("{b:02x}")).collect::<String>());
+    }
+}
+
+#[test]
+fn a_listed_output_to_a_script_the_node_cant_spend_is_refused() {
+    // Flush Core's `Spendable`: P2PKH, P2SH, P2WPKH, P2WSH or P2TR, else `bad-ba-token-output`.
+    let mut parsed: bitcoin::Transaction = bitcoin::consensus::encode::deserialize_hex(&tx(ADD_LIQUIDITY)).unwrap();
+    parsed.output[0].script_pubkey = bitcoin::ScriptBuf::from_bytes(vec![0x51]);
+    let refusal = output_tokens(&bitcoin::consensus::encode::serialize_hex(&parsed)).unwrap_err();
+    assert_eq!(refusal.code, RefusalCode::Malformed);
+    assert!(refusal.message.contains("lists output 0, whose script"), "{}", refusal.message);
+}
+
+#[test]
 fn a_registration_names_its_asset_by_its_ticker_and_display_name() {
     let reg = asset_registration(BROSEVELT, &tx(REGISTRATION)).unwrap();
     assert_eq!(reg.txid, REGISTRATION);

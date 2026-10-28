@@ -120,6 +120,11 @@ pub(crate) fn marker(tx: &Transaction) -> Result<Option<(usize, Marker)>, Refusa
         if output.value.to_sat() != 0 {
             return Err(malformed(format!("Its marker lists output {n}, which isn't of value 0.")));
         }
+        // Flush Core's `Spendable`, else `bad-ba-token-output`.
+        let script = &output.script_pubkey;
+        if !(script.is_p2pkh() || script.is_p2sh() || script.is_p2wpkh() || script.is_p2wsh() || script.is_p2tr()) {
+            return Err(malformed(format!("Its marker lists output {n}, whose script the node can't hold a token on.")));
+        }
         previous = Some(n);
     }
     Ok(Some((index, marker)))
