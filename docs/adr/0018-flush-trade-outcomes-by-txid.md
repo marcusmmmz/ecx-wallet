@@ -25,4 +25,5 @@ So:
 - Pool paging, `MAX_TRADE_PAGES`, the miss rule and `getpool` for a trade's assets are gone. The stub server answers `/flush/market/trades/:txid` instead of a pool's trades.
 - ADR 0017's remaining pairing risk is narrower. Only a coinbase output in the trade's own block, to the same address and of the same amount, can be taken for its payout, and then only its txid and time can be wrong.
 - A trade whose txid the index doesn't know is shown as an ordinary transaction, not as a trade that went wrong.
+- Answers kept for good by ADR 0017's wallet (`{ filled }` or `{ missed }`, under the same `trade:<server>:<txid>` key) aren't this one's: they're asked again once, and kept in the new shape.
 - Other operations that pay ECX by coinbase (liquidity, positions, orders, Collect) still aren't paired.

@@ -512,6 +512,13 @@ describe("Flush", () => {
       try {
         assert.deepEqual((await read()).get(id(paid)).trade.outcome.back, { asset: "", amount: "12100" });
 
+        // An answer kept by an older wallet ({ filled } / { missed }) is asked again, not taken for this one.
+        store.set(`trade:${url}:${id(paid)}`, { filled: "12100" });
+        config.marketTrades = saved;
+        assert.deepEqual((await read()).get(id(paid)).trade.outcome.back, { asset: "", amount: "12100" });
+        assert.ok(Array.isArray(store.get(`trade:${url}:${id(paid)}`).payouts), "kept again, in this wallet's shape");
+        config.marketTrades = {};
+
         // The market's status is down: kept answers still show, but an ECX payout can't be paired without it.
         config.marketDown = true;
         const down = await read();

@@ -49,7 +49,7 @@ export async function withTrades(
   /** The index's answer: kept for good, else for the session (by block: a soft one can be replaced), else asked. */
   async function answer(tx: EsploraTx): Promise<Answer | "settling"> {
     const sessionKey = cacheKey.trade(client.url, tx.txid, tx.status.blockHash!);
-    const kept = (await caches.store?.get<Answer>(key(tx.txid))) ?? (await caches.session?.get<Answer>(sessionKey));
+    const kept = [await caches.store?.get<unknown>(key(tx.txid)), await caches.session?.get<unknown>(sessionKey)].find(isAnswer);
     if (kept !== undefined) return kept;
     // Until the index reaches the trade's block, it has no outcome: only past it does a 404 mean no order.
     if ((await market()).height < tx.status.blockHeight!) return "settling";
@@ -138,6 +138,10 @@ export async function withTrades(
     return amounts.length === 0 ? [] : [{ ...entry, amounts }];
   });
 }
+
+/** An answer this wallet kept: an older one (ADR 0017's `{ filled }` or `{ missed }`) is asked again. */
+const isAnswer = (kept: unknown): kept is Answer =>
+  typeof kept === "object" && kept !== null && ("none" in kept || Array.isArray((kept as { payouts?: unknown }).payouts));
 
 const unknown = (error: unknown): TradeOutcome => ({ state: "unknown", error: error instanceof Error ? error.message : String(error) });
 
