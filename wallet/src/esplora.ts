@@ -146,6 +146,9 @@ export interface EsploraTx {
   status: EsploraTxStatus;
 }
 
+/** True for a coinbase: one input, spending the null outpoint, as the client writes it from `is_coinbase`. */
+export const isCoinbase = (tx: EsploraTx) => tx.vin.length === 1 && tx.vin[0].txid === "00".repeat(32) && tx.vin[0].vout === 0xffffffff;
+
 export type EsploraClient = ReturnType<typeof esploraClient>;
 
 /** An output the wallet holds, as `state` adds it up. */

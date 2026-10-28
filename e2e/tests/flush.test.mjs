@@ -108,7 +108,7 @@ describe("Flush", () => {
     }
   }
 
-  function pullPathWith({ lock = lockState(), prompts = [], tokens, tradeStore } = {}) {
+  function pullPathWith({ lock = lockState(), prompts = [], tokens, tradeStore, cache } = {}) {
     const flushModule = module();
     const deps = {
       supportedSlots: [99],
@@ -126,7 +126,7 @@ describe("Flush", () => {
       l1Module: async () => l1,
       l1AccountKey: async () => assert.fail("Flush asked for the L1 Account Key"),
       now: () => Date.now(),
-      sidechainServer: (entry, network) => wallet.sidechainServer(entry, network, undefined, undefined, tokens, tradeStore),
+      sidechainServer: (entry, network) => wallet.sidechainServer(entry, network, undefined, cache, tokens, tradeStore),
     };
     return { pullPath: wallet.createPullPath(deps), deps, prompts };
   }
@@ -470,6 +470,31 @@ describe("Flush", () => {
         assert.deepEqual((await read()).get(id(paid)).trade.outcome.back, { asset: "", amount: "12100" });
       } finally {
         config.poolTrades = saved;
+      }
+    });
+
+    test("a trade's answer is kept for the session only while it stays in the same block", async () => {
+      const store = new Map();
+      const cache = { get: async (k) => store.get(k), set: async (k, v) => void store.set(k, v) };
+      const read = async () => new Map((await pullPathWith({ tokens: async (tx) => flush.outputTokens(tx), cache }).pullPath.history(99)).entries.map((e) => [e.txid, e]));
+      const [coin, ecx] = [tokenCoin("e5", 5_000), ecxCoin("e6", 10_000)];
+      const sold = sale(coin, ecx, 700);
+      const REPLACING = "51".repeat(32);
+      const funded = [{ hex: coin, blockHeight: 400, blockHash: FINAL }, { hex: ecx, blockHeight: 401, blockHash: FINAL }];
+      config.marketHeight = 510;
+      config.finality = { [SOFT]: "soft", [REPLACING]: "soft" };
+      try {
+        // In a soft block, and no fill listed: a miss.
+        fund([...funded, { hex: sold, blockHeight: 500, blockHash: SOFT }]);
+        config.poolTrades = { [POOL]: [] };
+        assert.equal((await read()).get(parseTx(sold).txid).trade.outcome.state, "missed");
+
+        // That block is replaced, and the sale fills in the one that replaced it.
+        fund([...funded, { hex: sold, blockHeight: 505, blockHash: REPLACING }]);
+        config.poolTrades = { [POOL]: [fill(sold, 505, 700, 7_000)] };
+        assert.equal((await read()).get(parseTx(sold).txid).trade.outcome.state, "filled", "not the answer for the replaced block");
+      } finally {
+        config.finality = {};
       }
     });
   });

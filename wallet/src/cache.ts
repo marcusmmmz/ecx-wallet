@@ -16,8 +16,11 @@ export const cacheKey = {
   balance: (chain: string, url: string) => `${CACHE_PREFIX}balance:${chain}:${url}`,
   /** The last history a chain's server reported, for display while it refreshes. */
   history: (chain: string, url: string) => `${CACHE_PREFIX}history:${chain}:${url}`,
-  /** What a Flush server's market index said of a trade: its fill, or none (docs/adr/0017). */
-  trade: (url: string, txid: string) => `${CACHE_PREFIX}trade:${url}:${txid}`,
+  /**
+   * What a Flush server's market index said of a trade in a block: its fill, or none (docs/adr/0017).
+   * By block, since a soft one can be replaced and the trade mined again elsewhere.
+   */
+  trade: (url: string, txid: string, blockHash: string) => `${CACHE_PREFIX}trade:${url}:${txid}:${blockHash}`,
   /** A raw transaction (hex): it never changes. */
   tx: (txid: string) => `${CACHE_PREFIX}tx:${txid}`,
   /**

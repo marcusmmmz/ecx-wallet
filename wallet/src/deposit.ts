@@ -14,7 +14,7 @@ import { createKeyRouting, type ChainModules, type Keys } from "./accounts";
 import { cacheKey, type SessionCache } from "./cache";
 import { ChainModuleRefusal, type ChainEntry, type ClearView, type DepositCredit, type L1AccountKey, type L1Module, type NetworkEntry } from "./chain-module";
 import { ErrorCode, ProviderRpcError } from "./errors";
-import { feeRate, LISTED_CONFIRMED_TXS, QUERIES_AT_ONCE, type EsploraClient, type EsploraTx } from "./esplora";
+import { feeRate, isCoinbase, LISTED_CONFIRMED_TXS, QUERIES_AT_ONCE, type EsploraClient, type EsploraTx } from "./esplora";
 import { WATCHED_CHANGE_ADDRESSES, WATCHED_RECEIVE_ADDRESSES } from "./pull-path";
 import { rejected, type ApprovalContext, type SignPrompt, type SigningApproval } from "./signing";
 import { speaksEsplora } from "./server-api";
@@ -70,9 +70,8 @@ export async function flushCredit(
   claimed: Set<string>,
 ): Promise<{ txid: string; vout: number } | undefined> {
   const { txs } = await server.addressHistory(deposit.address);
-  const coinbase = (tx: EsploraTx) => tx.vin.length === 1 && tx.vin[0].txid === "00".repeat(32) && tx.vin[0].vout === 0xffffffff;
   const paid = txs
-    .filter((tx) => tx.status.confirmed && coinbase(tx) && (deposit.slotHeight === undefined || tx.status.blockHeight! > deposit.slotHeight))
+    .filter((tx) => tx.status.confirmed && isCoinbase(tx) && (deposit.slotHeight === undefined || tx.status.blockHeight! > deposit.slotHeight))
     .sort((a, b) => a.status.blockHeight! - b.status.blockHeight!);
   for (const tx of paid) {
     for (let vout = 1; vout < tx.vout.length; vout++) {

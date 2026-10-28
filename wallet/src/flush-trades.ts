@@ -6,7 +6,7 @@
 // `chn_to` of the amount expected, at or after its block, and folds it into the trade's entry.
 import { cacheKey, type SessionCache } from "./cache";
 import { NATIVE_COIN, type AssetAmount, type OutputTokens, type SwapOrder } from "./chain-module";
-import type { EsploraClient, EsploraTx, PoolTrade } from "./esplora";
+import { isCoinbase, type EsploraClient, type EsploraTx, type PoolTrade } from "./esplora";
 import type { HistoryEntry, TradeOutcome } from "./sidechain-server";
 
 /** The most pages of a pool's trades read to find one: 1,000 trades, newest first. */
@@ -20,8 +20,6 @@ export type TradeStore = Pick<SessionCache, "get" | "set">;
 
 /** Flush writes ECX as the null hash; the wallet as NATIVE_COIN. */
 const assetOf = (id: string) => (/^0{64}$/.test(id) ? NATIVE_COIN : id);
-
-const isCoinbase = (tx: EsploraTx) => tx.vin.length === 1 && tx.vin[0].prevout === null && tx.vin[0].vout === 0xffffffff;
 
 /**
  * Each of `entries` with its trade, if it is one: a kind-21 order through one pool, funded by the
@@ -71,7 +69,8 @@ export async function withTrades(
   const key = (txid: string) => `trade:${client.url}:${txid}`;
 
   async function answer(tx: EsploraTx, pool: string): Promise<Answer | "settling"> {
-    const kept = (await caches.store?.get<Answer>(key(tx.txid))) ?? (await caches.session?.get<Answer>(cacheKey.trade(client.url, tx.txid)));
+    const sessionKey = cacheKey.trade(client.url, tx.txid, tx.status.blockHash!);
+    const kept = (await caches.store?.get<Answer>(key(tx.txid))) ?? (await caches.session?.get<Answer>(sessionKey));
     if (kept !== undefined) return kept;
     const height = tx.status.blockHeight!;
     if ((await (indexed ??= client.marketHeight())) < height) return "settling";
@@ -88,7 +87,7 @@ export async function withTrades(
       if (next === undefined || listed.length === 0 || listed.at(-1)!.height < height) break;
       cursor = next;
     }
-    await caches.session?.set(cacheKey.trade(client.url, tx.txid), found);
+    await caches.session?.set(sessionKey, found);
     if (tx.status.final) await caches.store?.set(key(tx.txid), found);
     return found;
   }
