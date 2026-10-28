@@ -362,7 +362,7 @@
       {/if}
       {#if entry.trade}
         <dt>{entry.trade.pools.length > 1 ? "Pools" : "Pool"}</dt>
-        <dd class="txid">{#each entry.trade.pools as pool (pool)}<code>{pool}</code>{/each}</dd>
+        <dd class="txid pools">{#each entry.trade.pools as pool, i (i)}<code>{pool}</code>{/each}</dd>
       {/if}
       {#if entry.trade && "returned" in entry.trade.outcome && entry.trade.outcome.returned}
         {@const returned = entry.trade.outcome.returned}
@@ -660,6 +660,10 @@
   }
   .txid code {
     font-size: 0.72rem;
+  }
+  /* A route's pools, one per line, in the order traded through. */
+  .txid.pools {
+    flex-direction: column;
   }
   .copy {
     flex: none;

@@ -588,7 +588,8 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
         status,
         height,
         payouts: payouts.map((p: Record<string, unknown>) => {
-          const { what, asset_id: asset, amount_units: amount, via } = p ?? {};
+          const { what, asset_id: id, amount_units: amount, via } = p ?? {};
+          const asset = typeof id === "string" ? id.toLowerCase() : id;
           if ((what !== "out" && what !== "refund" && what !== "back") || (via !== "coinbase" && via !== "output")) throw malformed("trade");
           if (typeof asset !== "string" || (asset !== "" && !HASH.test(asset)) || typeof amount !== "string" || !/^[0-9]+$/.test(amount)) throw malformed("trade");
           return { what, asset, amount, via };

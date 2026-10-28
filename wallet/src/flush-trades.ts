@@ -7,7 +7,7 @@
 // and folds it into the trade's entry.
 import { cacheKey, type SessionCache } from "./cache";
 import { NATIVE_COIN, type AssetAmount, type OutputTokens } from "./chain-module";
-import { isCoinbase, type EsploraClient, type EsploraTx, type MarketPayout, type MarketStatus, type MarketTrade } from "./esplora";
+import { isCoinbase, QUERIES_AT_ONCE, type EsploraClient, type EsploraTx, type MarketPayout, type MarketStatus, type MarketTrade } from "./esplora";
 import type { HistoryEntry, PayoutState, TradeOutcome } from "./sidechain-server";
 
 /** What the market index said of a transaction: its outcome, or that it knows no order by it. */
@@ -45,56 +45,68 @@ export async function withTrades(
   const market = () => (status ??= client.marketStatus());
   // For good: under its own prefix, so locking (which forgets the session's cache) keeps it.
   const key = (txid: string) => `trade:${client.url}:${txid}`;
+  const statusKey = `trade-status:${client.url}`;
 
   /** The index's answer: kept for good, else for the session (by block: a soft one can be replaced), else asked. */
   async function answer(tx: EsploraTx): Promise<Answer | "settling"> {
+    const stored = await caches.store?.get<unknown>(key(tx.txid));
+    if (isAnswer(stored)) return stored;
     const sessionKey = cacheKey.trade(client.url, tx.txid, tx.status.blockHash!);
-    const kept = [await caches.store?.get<unknown>(key(tx.txid)), await caches.session?.get<unknown>(sessionKey)].find(isAnswer);
-    if (kept !== undefined) return kept;
+    const kept = await caches.session?.get<unknown>(sessionKey);
+    if (isAnswer(kept)) return kept;
     // Until the index reaches the trade's block, it has no outcome: only past it does a 404 mean no order.
     if ((await market()).height < tx.status.blockHeight!) return "settling";
     const found: Answer = (await client.marketTrade(tx.txid)) ?? { none: true };
     await caches.session?.set(sessionKey, found);
-    if (tx.status.final) await caches.store?.set(key(tx.txid), found);
+    // A 404 only for the session: an index being rebuilt may answer one for a real trade.
+    if (tx.status.final && !("none" in found)) await caches.store?.set(key(tx.txid), found);
     return found;
   }
 
-  // Each trade's outcome, and the ECX payouts a coinbase pays it; undefined if the index knows no order by it.
-  const read = await Promise.all(
-    trades.map(async ({ tx }): Promise<{ outcome: TradeOutcome; ecxPayouts: MarketPayout[] } | undefined> => {
-      if (!tx.status.confirmed) return { outcome: { state: "settling" }, ecxPayouts: [] };
-      try {
-        const said = await answer(tx);
-        if (said === "settling") return { outcome: { state: "settling" }, ecxPayouts: [] };
-        if ("none" in said) return undefined;
-        const main = said.payouts.find((p) => p.what === (said.status === "filled" ? "out" : "refund"));
-        if (main === undefined) throw new Error(`The market index reports no ${said.status === "filled" ? "payout" : "refund"} for it.`);
-        const ecxPayouts = said.payouts.filter((p) => p.via === "coinbase" && assetOf(p.asset) === NATIVE_COIN && (p === main || p.what === "back"));
-        return { outcome: { state: said.status, back: { asset: assetOf(main.asset), amount: main.amount } }, ecxPayouts };
-      } catch (error) {
-        return { outcome: unknown(error), ecxPayouts: [] };
-      }
-    }),
-  );
-  // Pairing needs the height payouts are instant from; without it, no ECX payout is paired.
+  /** A trade's outcome, and the ECX payouts a coinbase pays it; undefined if the index knows no order by it. */
+  type Read = { outcome: TradeOutcome; ecxPayouts: MarketPayout[] } | undefined;
+  async function outcomeOf(tx: EsploraTx): Promise<Read> {
+    if (!tx.status.confirmed) return { outcome: { state: "settling" }, ecxPayouts: [] };
+    try {
+      const said = await answer(tx);
+      if (said === "settling") return { outcome: { state: "settling" }, ecxPayouts: [] };
+      if ("none" in said) return undefined;
+      const main = said.payouts.find((p) => p.what === (said.status === "filled" ? "out" : "refund"));
+      if (main === undefined) throw new Error(`The market index reports no ${said.status === "filled" ? "payout" : "refund"} for it.`);
+      const ecxPayouts = said.payouts.filter((p) => p.via === "coinbase" && assetOf(p.asset) === NATIVE_COIN && (p === main || p.what === "back"));
+      return { outcome: { state: said.status, back: { asset: assetOf(main.asset), amount: main.amount } }, ecxPayouts };
+    } catch (error) {
+      return { outcome: unknown(error), ecxPayouts: [] };
+    }
+  }
+  // At most QUERIES_AT_ONCE at a time: each answer not kept is a request to the server.
+  const read: Read[] = [];
+  for (let i = 0; i < trades.length; i += QUERIES_AT_ONCE) read.push(...(await Promise.all(trades.slice(i, i + QUERIES_AT_ONCE).map(({ tx }) => outcomeOf(tx)))));
+  // Pairing needs the height payouts are instant from (`v7_height`, a chain constant, kept for good once
+  // read); without it, no ECX payout is paired.
   let instantFrom: number | undefined;
   let statusError: unknown;
   if (read.some((r) => r !== undefined && r.ecxPayouts.length > 0)) {
-    try {
-      instantFrom = (await market()).instantPayoutsFrom;
-    } catch (error) {
-      statusError = error;
+    const kept = await caches.store?.get<{ instantPayoutsFrom?: unknown }>(statusKey);
+    if (typeof kept?.instantPayoutsFrom === "number") instantFrom = kept.instantPayoutsFrom;
+    else {
+      try {
+        instantFrom = (await market()).instantPayoutsFrom;
+        if (instantFrom !== undefined) await caches.store?.set(statusKey, { instantPayoutsFrom: instantFrom });
+      } catch (error) {
+        statusError = error;
+      }
     }
   }
 
-  // Pair ECX payouts with coinbase outputs, oldest trade first: the node pays its queue in order.
+  // Pair ECX payouts with coinbase outputs, oldest trade first (the node pays its queue in order), own-block ones before.
   const coinbases = [...txs.values()].filter((tx) => tx.status.confirmed && isCoinbase(tx)).sort((x, y) => x.status.blockHeight! - y.status.blockHeight!);
   const claimed = new Set<string>();
   const folded = new Map<string, bigint>();
+  const ownBlock = (height: number) => instantFrom !== undefined && height >= instantFrom;
   const pair = (height: number, chnTo: string, amount: string): PayoutState => {
-    const ownBlock = instantFrom !== undefined && height >= instantFrom;
     const match = coinbases
-      .filter((cb) => (ownBlock ? cb.status.blockHeight === height : cb.status.blockHeight! >= height))
+      .filter((cb) => (ownBlock(height) ? cb.status.blockHeight === height : cb.status.blockHeight! >= height))
       .flatMap((cb) => cb.vout.map((o, vout) => ({ cb, o, vout })))
       .find(({ cb, o, vout }) => o.scriptpubkey === chnTo && String(o.value) === amount && !claimed.has(`${cb.txid}:${vout}`));
     if (match === undefined) return "queued";
@@ -104,7 +116,9 @@ export async function withTrades(
     return { txid: match.cb.txid, ...(blockTime === undefined ? {} : { time: blockTime }) };
   };
   const outcomes: (TradeOutcome | undefined)[] = read.map((r) => r?.outcome);
-  const byHeight = trades.map((_, i) => i).sort((i, j) => (trades[i].tx.status.blockHeight ?? Infinity) - (trades[j].tx.status.blockHeight ?? Infinity));
+  // Trades paid in their own block first: an older trade's looser rule mustn't take a payout that can only be theirs.
+  const height = (i: number) => trades[i].tx.status.blockHeight ?? Infinity;
+  const byHeight = trades.map((_, i) => i).sort((i, j) => Number(ownBlock(height(j))) - Number(ownBlock(height(i))) || height(i) - height(j));
   for (const i of byHeight) {
     const r = read[i];
     if (r === undefined || !("back" in r.outcome) || r.ecxPayouts.length === 0) continue;
@@ -140,8 +154,11 @@ export async function withTrades(
 }
 
 /** An answer this wallet kept: an older one (ADR 0017's `{ filled }` or `{ missed }`) is asked again. */
-const isAnswer = (kept: unknown): kept is Answer =>
-  typeof kept === "object" && kept !== null && ("none" in kept || Array.isArray((kept as { payouts?: unknown }).payouts));
+const isAnswer = (kept: unknown): kept is Answer => {
+  if (typeof kept !== "object" || kept === null) return false;
+  const { none, status, height, payouts } = kept as Record<string, unknown>;
+  return none === true || ((status === "filled" || status === "missed") && typeof height === "number" && Array.isArray(payouts));
+};
 
 const unknown = (error: unknown): TradeOutcome => ({ state: "unknown", error: error instanceof Error ? error.message : String(error) });
 

@@ -408,6 +408,11 @@ describe("Flush", () => {
     // Filled at exactly 455 for 4,000 sat: its own block's coinbase only, so a later one doesn't pay it.
     const atV7 = sale(own(tokenCoin("e8", 5_000)), own(ecxCoin("e9", 10_000)), 400);
     const afterV7 = coinbase(456, [["", 0], [RECEIVE_1.scriptPubkey, 4_000]]);
+    // Before 455, filled for 6,000 sat and never paid; after it, one of 6,000 paid in its own block. The older
+    // trade's looser rule mustn't take the newer one's payout.
+    const stale = sale(own(tokenCoin("f6", 5_000)), own(ecxCoin("f7", 10_000)), 200);
+    const fresh = sale(own(tokenCoin("f8", 5_000)), own(ecxCoin("f9", 10_000)), 250);
+    const freshPayout = coinbase(465, [["", 0], [RECEIVE_1.scriptPubkey, 6_000]]);
     // Filled for 5,000 sat after 455: only its own block's coinbase can pay it, and a later one of that amount doesn't.
     const queued = sale(own(tokenCoin("d3", 5_000)), own(ecxCoin("d4", 10_000)), 500);
     const later = coinbase(461, [["", 0], [RECEIVE_1.scriptPubkey, 5_000]]);
@@ -434,7 +439,10 @@ describe("Flush", () => {
         { hex: afterV7, blockHeight: 456, blockHash: FINAL },
         { hex: paid, blockHeight: 450, blockHash: FINAL },
         { hex: payout, blockHeight: 451, blockHash: FINAL },
+        { hex: stale, blockHeight: 452, blockHash: FINAL },
         { hex: queued, blockHeight: 460, blockHash: FINAL },
+        { hex: fresh, blockHeight: 465, blockHash: FINAL },
+        { hex: freshPayout, blockHeight: 465, blockHash: FINAL },
         { hex: later, blockHeight: 461, blockHash: FINAL },
         { hex: missedBuy, blockHeight: 470, blockHash: FINAL },
         { hex: refund, blockHeight: 470, blockHash: FINAL },
@@ -452,9 +460,11 @@ describe("Flush", () => {
         [id(paid)]: outcome(paid, "filled", 450, [["out", "", 12_100, "coinbase"]]),
         [id(atV7)]: outcome(atV7, "filled", 455, [["out", "", 4_000, "coinbase"]]),
         [id(queued)]: outcome(queued, "filled", 460, [["out", "", 5_000, "coinbase"]]),
+        [id(stale)]: outcome(stale, "filled", 452, [["out", "", 6_000, "coinbase"]]),
+        [id(fresh)]: outcome(fresh, "filled", 465, [["out", "", 6_000, "coinbase"]]),
         [id(missedBuy)]: outcome(missedBuy, "missed", 470, [["refund", "", 100_000, "coinbase"]]),
         [id(routed)]: outcome(routed, "filled", 473, [["out", "", 9_000, "coinbase"]]),
-        [id(launchBuy)]: outcome(launchBuy, "filled", 474, [["out", BROSEVELT, 3_000, "output"], ["back", "", 2_000, "coinbase"]]),
+        [id(launchBuy)]: outcome(launchBuy, "filled", 474, [["out", BROSEVELT.toUpperCase(), 3_000, "output"], ["back", "", 2_000, "coinbase"]]),
         [id(broken)]: { txid: id(broken), kind: "swap", status: "filled", height: 472, swap: { payouts: [{ what: "out" }] } },
       };
       config.marketHeight = 477;
@@ -481,6 +491,8 @@ describe("Flush", () => {
       assert.equal(tradeOf(atV7).outcome.payout, "queued", "from exactly v7_height, only its own block's coinbase pays it");
       assert.deepEqual(entries.get(id(afterV7)).amounts, [{ asset: "", amount: "4000" }]);
       assert.equal(tradeOf(queued).outcome.payout, "queued", "after them, only its own block's coinbase pays it");
+      assert.deepEqual(stripTime(tradeOf(fresh).outcome.payout), payoutOf(freshPayout), "its own block's coinbase is its, whatever older trades wait for");
+      assert.equal(tradeOf(stale).outcome.payout, "queued");
       assert.deepEqual(entries.get(id(later)).amounts, [{ asset: "", amount: "5000" }], "the later coinbase of that amount stays its own entry");
 
       const m = tradeOf(missedBuy);
@@ -506,7 +518,10 @@ describe("Flush", () => {
       assert.deepEqual(entries.get(id(unrelated)).amounts, [{ asset: "", amount: "777" }], "a coinbase no trade explains stays its own entry");
 
       // Answers for trades in final blocks are kept for good, and read back instead of the index.
-      assert.deepEqual([...store.keys()].sort(), [paid, atV7, queued, missedBuy, routed, launchBuy, notAnOrder].map((tx) => `trade:${url}:${id(tx)}`).sort());
+      // A 404 is kept for the session only: an index being rebuilt may answer one for a real trade.
+      const kept = [paid, atV7, stale, queued, fresh, missedBuy, routed, launchBuy].map((tx) => `trade:${url}:${id(tx)}`);
+      assert.deepEqual([...store.keys()].sort(), [...kept, `trade-status:${url}`].sort());
+      assert.deepEqual(store.get(`trade-status:${url}`), { instantPayoutsFrom: 455 }, "v7_height, a chain constant, is kept too");
       const saved = config.marketTrades;
       config.marketTrades = {};
       try {
@@ -519,8 +534,11 @@ describe("Flush", () => {
         assert.ok(Array.isArray(store.get(`trade:${url}:${id(paid)}`).payouts), "kept again, in this wallet's shape");
         config.marketTrades = {};
 
-        // The market's status is down: kept answers still show, but an ECX payout can't be paired without it.
+        // The market's status is down: its kept v7_height still pairs kept answers.
         config.marketDown = true;
+        assert.deepEqual(stripTime((await read()).get(id(paid)).trade.outcome.payout), payoutOf(payout));
+        // Without that either, an ECX payout can't be paired.
+        store.delete(`trade-status:${url}`);
         const down = await read();
         const why = down.get(id(paid)).trade.outcome;
         assert.equal(why.state, "unknown");
