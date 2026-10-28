@@ -4,7 +4,7 @@ Flush (#58) carries tokens on outputs of value 0, and its explorer lists them li
 
 So Flush's module declares a `tokens` capability with two calls (`core/flush/src/tokens.rs`):
 
-- **`outputTokens(tx)`:** the raw transaction (hex) → its txid, as the module computes it, and every output its marker lists with the script it pays and its token, or as a result. A listed output counts for the wallet only if that script is one it watches. A marker listing an output that isn't of value 0, or whose script the node can't hold a token on (anything but P2PKH, P2SH, P2WPKH, P2WSH or P2TR: Flush Core's `Spendable`, else `bad-ba-token-output`), is refused, as the node refuses it. The marker is parsed exactly as the node reads it (`core/flush/src/bast.rs`, backbone-flush `release-slot99-v5`).
+- **`outputTokens(tx)`:** the raw transaction (hex) → its txid, as the module computes it, and every output its marker lists with the script it pays and its token, or as a result. A listed output counts for the wallet only if that script is one it watches. A marker listing an output that isn't of value 0, or whose script the node can't hold a token on (anything but P2PKH, P2SH, P2WPKH, P2WSH or P2TR: Flush Core's `Spendable`, else `bad-ba-token-output`), is refused, as the node refuses it. The marker is parsed exactly as the node reads it (`core/flush/src/bast.rs`, backbone-flush `flush-betanet` on betanet, `main` on mainnet).
 - **`assetRegistration(asset, tx)`:** an asset's ticker, name and decimals, only if `tx` registers that very id under a ticker whose SHA-256 is the id (`HashName`). A launch registers its token too.
 
 ## Balances

@@ -9,8 +9,9 @@
 //! The node re-encodes what it parsed and requires the same script byte for byte ("one way to write
 //! a marker", `state.cpp` `ParseMarker`), so this refuses every non-canonical form too: a non-minimal
 //! push, a non-canonical CompactSize, a bool other than 0/1, trailing bytes, and the kinds that have
-//! a shorter way to be written (33, 35, 36, 37). The format is that of the live node, backbone-flush
-//! `release-slot99-v5` (`46310ac`): `main` (`48e822b`) lacks kind 37.
+//! a shorter way to be written (33, 35, 36, 37, 38). The format is betanet's node, backbone-flush
+//! `flush-betanet` (`9cc49a8`, Flush 8.2.0); kind 38 is a launch with a fee split (upgrade v7).
+//! Mainnet's is `main`'s (`95214ad`), the same today.
 //!
 //! Field values are JSON in the reference decoder's shape (#58): ids and other 32-byte values in
 //! display order (byte-reversed, as the node's RPC shows them), scripts and blobs as hex.
@@ -73,7 +74,7 @@ pub struct Listed {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Marker {
     /// The marker's own kind byte: 0 for a transfer (no operation), 33/35 for a Register with a
-    /// logo or display name, 36/37 for a LaunchToken with parameters or the fee-flow fields.
+    /// logo or display name, 36/37/38 for a LaunchToken with parameters, the fee-flow fields or a fee split.
     pub kind: u8,
     /// The operation's name (`transfer` for kind 0).
     pub name: &'static str,
@@ -99,11 +100,11 @@ impl Marker {
     }
 
     /// A registration's facts, if this marker registers an asset (kinds 2, 33, 35) or launches a new
-    /// one (22, 36, 37), which registers it too.
+    /// one (22, 36, 37, 38), which registers it too.
     pub fn registration(&self) -> Option<Registration> {
         let reg = match self.kind {
             2 | 33 | 35 => &self.fields,
-            22 | 36 | 37 => self.fields.get("reg")?.as_object()?,
+            22 | 36 | 37 | 38 => self.fields.get("reg")?.as_object()?,
             _ => return None,
         };
         let text = |key: &str| reg.get(key).and_then(Value::as_str).map(str::to_owned);
@@ -124,7 +125,7 @@ pub struct Registration {
     pub asset: String,
     /// The ticker it names, if any (a registration may name only the id's hash).
     pub ticker: Option<String>,
-    /// The display name it sets, if any (kinds 35, 22, 36, 37).
+    /// The display name it sets, if any (kinds 35, 22, 36, 37, 38).
     pub display_name: Option<String>,
     /// Base units.
     pub supply: u64,
@@ -231,6 +232,7 @@ fn canonical(kind: u8, fields: &Map<String, Value>) -> Result<(), String> {
         37 if fields["destination"] == 0 && fields["burn_bps"] == 0 && fields["keep_control"] == false => {
             Err("a LaunchToken without fee-flow fields is written as kind 22 or 36".into())
         }
+        38 if fields["split"].as_array().is_some_and(Vec::is_empty) => Err("a LaunchToken without a fee split is written as kind 22, 36 or 37".into()),
         _ => Ok(()),
     }
 }
@@ -402,6 +404,14 @@ fn operation(r: &mut Reader, kind: u8, logo: &mut Option<Vec<u8>>) -> Result<(&'
             f.put("destination", destination).put("burn_bps", r.u16()?).put("keep_control", r.boolean()?);
             "launch_fee_flow"
         }
+        38 => {
+            launch(r, &mut f, &mut blob)?;
+            f.put("fee", r.v()?).put("keep_control", r.boolean()?);
+            // Each share: its kind (0 the creator, 1 a buyback and burn, 2 an address), the script it pays, its basis points.
+            let split = r.vec(|r| Ok(json!({ "kind": r.u8()?, "script": r.blob_hex()?, "bps": r.u16()? })))?;
+            f.put("split", split);
+            "launch_fee_split"
+        }
         _ => return Err(format!("unknown operation kind {kind}")),
     };
     Ok((name, f.0))
@@ -414,7 +424,7 @@ fn register(r: &mut Reader, f: &mut Fields) -> Result<(), String> {
     Ok(())
 }
 
-/// A LaunchToken's fields (kinds 22, 36, 37): its registration under `reg`, then the launch's own.
+/// A LaunchToken's fields (kinds 22, 36, 37, 38): its registration under `reg`, then the launch's own.
 fn launch(r: &mut Reader, f: &mut Fields, logo: &mut impl FnMut(&mut Reader) -> Result<usize, String>) -> Result<(), String> {
     let mut reg = Fields::default();
     register(r, &mut reg)?;

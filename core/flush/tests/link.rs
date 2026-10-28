@@ -1,5 +1,5 @@
 //! flush.markets' `flush:` links, read as Flush's own app reads them (backbone-flush
-//! `src/webui/links.cpp` at 46310ac): the trades parse, every other action is unsupported, and
+//! `src/webui/links.cpp` on `flush-betanet`, `9cc49a8`): the trades parse, every other action is unsupported, and
 //! anything the app would refuse is refused (docs/adr/0016).
 use ecx_flush::{parse_action, Action, RefusalCode};
 

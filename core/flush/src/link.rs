@@ -1,5 +1,5 @@
 //! flush.markets' `flush:` links (docs/adr/0016), read as strictly as Flush's own app reads them
-//! (backbone-flush `src/webui/links.cpp` at 46310ac): `flush:<verb>?v=1&network=<net>&exp=<time>&…`,
+//! (backbone-flush `src/webui/links.cpp` on `flush-betanet`, `9cc49a8`): `flush:<verb>?v=1&network=<net>&exp=<time>&…`,
 //! each parameter once and no other, values of unreserved characters and `%XX` only. A link is an
 //! Action, not a transaction: the wallet builds it. Only the trades (`swap`, `buy`, `sell`) are
 //! read whole; every other action of Flush is unsupported.

@@ -2,7 +2,7 @@
 
 **Superseded in part by ADR 0018** (2026-10-28): outcomes now come from `trades/{txid}`, payouts are paired in the trade's own block from `v7_height`, and trades through several pools and a launch buy's ECX back are included. The Activity layout and caching below stand.
 
-A Flush trade (kind 21, `swap_pools`) says what it pays in, never what comes out. Swaps clear at the end of their block, and what comes out is only in the node's state (backbone-flush `release-slot99-v5`, `bitassets/state.cpp`, researched on #60):
+A Flush trade (kind 21, `swap_pools`) says what it pays in, never what comes out. Swaps clear at the end of their block, and what comes out is only in the node's state (backbone-flush `flush-betanet`, `bitassets/state.cpp`, researched on #60):
 
 | | ECX by coinbase, to the order's `chn_to` | Token on the trade's result output |
 |---|---|---|

@@ -1,6 +1,6 @@
 //! `build_trade(order, starter)`: a trade a `flush:` link asks for (`swap`, `buy`, `sell`), built
 //! from the account's coins as Flush's own wallet builds it (docs/adr/0016; backbone-flush
-//! `src/wallet/rpc/bitassets.cpp` at 46310ac): one `swap_pools` marker (kind 21) through the pool.
+//! `src/wallet/rpc/bitassets.cpp` on `flush-betanet`, `9cc49a8`): one `swap_pools` marker (kind 21) through the pool.
 //!
 //! - Outputs: the change of a token paid in (if any), then one result output, both to the
 //!   given-out address the site knows; then the marker, carrying the ECX paid in; then ECX change.

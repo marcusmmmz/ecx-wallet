@@ -75,10 +75,12 @@ fn a_result_output_carries_no_token_the_marker_can_name() {
     assert_eq!((marker.outputs[0].n, &marker.outputs[0].token), (0, &None));
 }
 
-/// A kind-37 launch (backbone-flush `release-slot99-v5`): no live one exists, so it is built here
+/// A kind-37 launch (backbone-flush `flush-betanet`): no live one exists, so it is built here
 /// field by field. `fee_flow` is (destination, burn_bps, keep_control).
-fn launch_v5(fee_flow: (u8, u16, u8)) -> Vec<u8> {
-    let mut b = b"BAST\x00\x25".to_vec();
+/// A LaunchToken marker of `kind` registering TEST, its network's fee, then `tail`: the kind's own fields.
+fn launch(kind: u8, tail: &[u8]) -> Vec<u8> {
+    let mut b = b"BAST\x00".to_vec();
+    b.push(kind);
     let mut id = unhex(&asset_id("TEST"));
     id.reverse();
     b.extend(&id); // asset, internal order
@@ -97,13 +99,29 @@ fn launch_v5(fee_flow: (u8, u16, u8)) -> Vec<u8> {
     b.extend([0x00, 0x00, 0x00, 0x00]); // min_buy, max_buy, first_buy, first_min_out
     b.push(0); // chn_to: empty
     b.push(0); // fee: the network's
-    b.push(fee_flow.0);
-    b.extend(fee_flow.1.to_le_bytes());
-    b.push(fee_flow.2);
+    b.extend(tail);
     b.push(0); // no listed outputs
     let mut script = vec![0x6a, 0x4c, b.len() as u8];
     script.extend(b);
     script
+}
+
+fn launch_v5(fee_flow: (u8, u16, u8)) -> Vec<u8> {
+    let mut tail = vec![fee_flow.0];
+    tail.extend(fee_flow.1.to_le_bytes());
+    tail.push(fee_flow.2);
+    launch(37, &tail)
+}
+
+/// A launch with a fee split (kind 38): keep_control, then the split's shares as (kind, script, bps).
+fn launch_v7(keep_control: u8, split: &[(u8, &[u8], u16)]) -> Vec<u8> {
+    let mut tail = vec![keep_control, split.len() as u8];
+    for (kind, script, bps) in split {
+        tail.extend([*kind, script.len() as u8]);
+        tail.extend(*script);
+        tail.extend(bps.to_le_bytes());
+    }
+    launch(38, &tail)
 }
 
 #[test]
@@ -119,6 +137,24 @@ fn a_fee_flow_launch_registers_its_token() {
 fn a_fee_flow_launch_with_only_the_defaults_is_refused_since_it_is_written_as_an_older_kind() {
     assert!(parse(&launch_v5((0, 0, 0))).unwrap_err().contains("kind 22 or 36"));
     assert!(parse(&launch_v5((3, 0, 0))).unwrap_err().contains("fee destination"));
+}
+
+#[test]
+fn a_fee_split_launch_registers_its_token() {
+    let address = [0x00, 0x14, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22];
+    let marker = parse(&launch_v7(1, &[(0, &[], 6000), (1, &[], 1000), (2, &address, 3000)])).unwrap();
+    assert_eq!((marker.kind, marker.name), (38, "launch_fee_split"));
+    assert_eq!(marker.fields["keep_control"], true);
+    let split = marker.fields["split"].as_array().unwrap();
+    assert_eq!(split.len(), 3);
+    assert_eq!((&split[2]["kind"], &split[2]["script"], &split[2]["bps"]), (&2.into(), &format!("0014{}", "22".repeat(20)).into(), &3000.into()));
+    let reg = marker.registration().unwrap();
+    assert_eq!((reg.asset, reg.ticker.as_deref(), reg.display_name.as_deref(), reg.decimals), (asset_id("TEST"), Some("TEST"), Some("Test"), 6));
+}
+
+#[test]
+fn a_fee_split_launch_without_a_split_is_refused_since_it_is_written_as_an_older_kind() {
+    assert!(parse(&launch_v7(0, &[])).unwrap_err().contains("kind 22, 36 or 37"));
 }
 
 #[test]
