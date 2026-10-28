@@ -166,6 +166,11 @@ export const getUnit = () => send<Unit>({ kind: "settings.unit" });
 
 export const setUnit = (unit: Unit) => send<Unit>({ kind: "settings.setUnit", unit });
 
+/** Whether the toolbar button opens the wallet pinned to the side (see `$lib/view`) instead of in its popup. */
+export const getPinned = () => send<boolean>({ kind: "view.pinned" });
+
+export const setPinned = (pinned: boolean) => send<boolean>({ kind: "view.setPinned", pinned });
+
 /** eCash's own account: its receive address (needs the wallet unlocked). */
 export const l1Account = () => send<{ addresses: SlotAddress[] }>({ kind: "l1.account" });
 

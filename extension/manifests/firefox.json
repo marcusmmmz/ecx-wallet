@@ -9,7 +9,12 @@
   },
   "action": {
     "default_title": "ECX Wallet",
-    "default_popup": "index.html"
+    "default_popup": "index.html?view=popup"
+  },
+  "sidebar_action": {
+    "default_title": "ECX Wallet",
+    "default_panel": "index.html?view=panel",
+    "open_at_install": false
   },
   "permissions": ["storage", "alarms"],
   "content_scripts": [

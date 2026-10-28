@@ -19,6 +19,8 @@
     settings: "M4 6h9M17 6h3M15 4v4M4 12h3M11 12h9M9 10v4M4 18h11M19 18h1M17 16v4",
     qr: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 18h2v2h-2zM14 18h2v2h-2zM18 14h2v2h-2z",
     plus: "M12 5v14M5 12h14",
+    pin_side: "M4 4h16v16H4zM15 4v16",
+    unpin_side: "M14 4h6v6M20 4l-8 8M18 14v6H4V6h6",
     eye_off: "M3 3l18 18M10.6 6.1A9.8 9.8 0 0 1 12 6c5 0 8.5 4 9.5 6a12.7 12.7 0 0 1-2.9 3.6M6.4 7.4A12.6 12.6 0 0 0 2.5 12c1 2 4.5 6 9.5 6a9.5 9.5 0 0 0 4.3-1M9.9 9.9a3 3 0 0 0 4.2 4.2",
   } as const;
 

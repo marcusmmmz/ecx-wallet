@@ -365,6 +365,26 @@ const keys = { starter: (slot: number) => vault.starter(slot), l1AccountKey: () 
 const accounts = createAccounts({ ...keys, chainModule, l1Module });
 const settings = createSettings(keyValueStore(chrome.storage.local));
 
+// Where the toolbar button opens the wallet: its popup, or pinned to the side (Chromium's side
+// panel, Firefox's sidebar). Kept in `storage.local` and applied on every start: the browser
+// forgets `action.setPopup` when it restarts.
+const PINNED_KEY = "view.pinned";
+const POPUP = "index.html?view=popup";
+const sidebarAction = (globalThis as { browser?: { sidebarAction?: { toggle(): Promise<void> } } }).browser?.sidebarAction;
+
+const pinned = async () => (await chrome.storage.local.get(PINNED_KEY))[PINNED_KEY] === true;
+
+async function applyPinned(on: boolean) {
+  await chrome.action.setPopup({ popup: on ? "" : POPUP });
+  await chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: on });
+}
+
+pinned().then(applyPinned).catch(console.error);
+// With no popup, Chromium opens its side panel itself; Firefox calls this, still in the click.
+chrome.action.onClicked.addListener(() => {
+  sidebarAction?.toggle().catch(console.error);
+});
+
 /** Every chain's description, eCash first: what its Chain Entry says. */
 const describeChains = async () => [
   { id: "l1" as const, ...describeChain(await l1Module()) },
@@ -615,6 +635,16 @@ async function route(message: BackgroundMessage, sender: chrome.runtime.MessageS
       if (!fromWalletPage(sender)) throw new ProviderRpcError(ErrorCode.Unauthorized, "Unknown requester.");
       await settings.setUnit(String(message.unit ?? ""));
       return settings.unit();
+    case "view.pinned":
+      if (!fromWalletPage(sender)) throw new ProviderRpcError(ErrorCode.Unauthorized, "Unknown requester.");
+      return pinned();
+    case "view.setPinned": {
+      if (!fromWalletPage(sender)) throw new ProviderRpcError(ErrorCode.Unauthorized, "Unknown requester.");
+      const on = message.pinned === true;
+      await chrome.storage.local.set({ [PINNED_KEY]: on });
+      await applyPinned(on);
+      return on;
+    }
     case "l1.account":
       // eCash's own account: its receive address and what its server reports are asked separately.
       if (!fromWalletPage(sender)) throw new ProviderRpcError(ErrorCode.Unauthorized, "Unknown requester.");

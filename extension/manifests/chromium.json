@@ -3,16 +3,19 @@
   "name": "ECX Wallet",
   "version": "0.0.1",
   "description": "Wallet Base for eCash (ECX) drivechains.",
-  "minimum_chrome_version": "111",
+  "minimum_chrome_version": "116",
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
   "action": {
     "default_title": "ECX Wallet",
-    "default_popup": "index.html"
+    "default_popup": "index.html?view=popup"
   },
-  "permissions": ["storage", "alarms"],
+  "side_panel": {
+    "default_path": "index.html?view=panel"
+  },
+  "permissions": ["storage", "alarms", "sidePanel"],
   "content_scripts": [
     {
       "matches": ["http://*/*", "https://*/*"],

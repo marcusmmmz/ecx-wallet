@@ -12,6 +12,7 @@
   import TopBar from "$lib/TopBar.svelte";
   import { amountText, unit } from "$lib/unit.svelte";
   import { stalledText } from "$lib/stall";
+  import { canPin, currentView, pinToSide, unpin } from "$lib/view";
 
   let status = $state<VaultStatus | undefined>(undefined);
   let chains = $state<Chains | undefined>(undefined);
@@ -22,6 +23,8 @@
   /** Chains whose section in Assets is folded away. */
   let folded = $state<Record<string, boolean>>({});
   let actions = $state<Actions | undefined>(undefined);
+
+  const view = currentView();
 
   const vaultState = $derived(
     status === undefined ? undefined : !status.exists ? "onboarding" : status.unlocked ? "unlocked" : "locked",
@@ -113,6 +116,15 @@
         <span class="title">ECX Wallet{#if network}<span class="net-tag" data-network>{network}</span>{/if}</span>
         <LockCountdown locksAt={status?.locksAt} onlocked={() => vaultStatus().then((s) => (status = s))} />
       </span>
+      {#if view === "popup" && canPin()}
+        <button class="icon-button" aria-label="Pin to the side" title="Pin to the side" onclick={() => pinToSide().catch(console.error)} data-pin>
+          <Icon name="pin_side" />
+        </button>
+      {:else if view === "panel"}
+        <button class="icon-button" aria-label="Unpin: open in a popup" title="Unpin: open in a popup" onclick={unpin} data-unpin>
+          <Icon name="unpin_side" />
+        </button>
+      {/if}
       <button class="icon-button" disabled={busy} aria-label="Lock" title="Lock" onclick={() => act(lockVault)} data-lock>
         <Icon name="lock" />
       </button>

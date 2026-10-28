@@ -74,6 +74,9 @@ export type BackgroundMessage =
   // Display settings: wallet pages only.
   | { kind: "settings.unit" }
   | { kind: "settings.setUnit"; unit: string }
+  // Whether the toolbar button opens the wallet pinned to the side instead of in its popup: wallet pages only.
+  | { kind: "view.pinned" }
+  | { kind: "view.setPinned"; pinned: boolean }
   | { kind: "l1.account" }
   | { kind: "l1.reported" }
   // The last reports this session, to show while the above refresh them: wallet pages only.
