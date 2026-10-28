@@ -682,6 +682,61 @@ describe("Flush", () => {
     }
   });
 
+  test("a Deposit with no Flush tip from its broadcast takes one before it can be paid, and is never matched without one", async () => {
+    const l1Config = { identityBlock: l1.chainEntry().networks.betanet.identityBlock, tipHeight: 1001, txStatuses: {} };
+    const l1Stub = createEsploraStub(l1Config);
+    const l1Url = await l1Stub.listen();
+    try {
+      const memory = new Map();
+      const store = {
+        list: async () => [...memory.values()].map((d) => structuredClone(d)),
+        put: async (d) => void memory.set(d.txid, structuredClone(d)),
+        remove: async (txid) => void memory.delete(txid),
+      };
+      const { deps } = pullPathWith();
+      const at = (network, server) => ({ ...network, sidechainServer: { ...network.sidechainServer, url: server } });
+      const deposits = wallet.createDeposits({
+        ...deps,
+        openSigningApproval: () => assert.fail("no approval"),
+        esplora: (entry, network) => wallet.esploraClient(wallet.esploraConfig(entry, at(network, entry.slot === undefined ? l1Url : url)), (...args) => fetch(...args)),
+        store,
+        now: () => Date.now(),
+      });
+      // Flush's server didn't answer in time at either broadcast: neither has a `slotHeight`.
+      const deposit = (n, value) => ({ slot: 99, chainName: "Flush", txid: n.repeat(32), vout: 0, value: String(value), address: RECEIVE_0.address, asset: "", scriptPubkey: RECEIVE_0.scriptPubkey, createdAt: Number.parseInt(n, 16) });
+      const [fresh, late] = [deposit("c1", 50_000), deposit("c2", 60_000)];
+      await store.put(fresh);
+      await store.put(late);
+      // `late` is already confirmed twice when first looked at; `fresh` isn't in a block yet.
+      l1Config.txStatuses[late.txid] = { confirmed: true, blockHeight: 1000, blockHash: "e0".repeat(32) };
+      l1Config.txStatuses[fresh.txid] = { confirmed: false };
+      // Old payouts of both values, from before either Deposit (a Deposit no longer tracked).
+      const old = coinbase(90, [["", 0], [RECEIVE_0.scriptPubkey, 50_000], [RECEIVE_0.scriptPubkey, 60_000]]);
+      fund([{ hex: old, blockHeight: 90, blockHash: FINAL }]);
+
+      let list = await deposits.list(99);
+      const state = (d) => list.find((s) => s.txid === d.txid).state;
+      assert.equal(state(fresh), "confirming");
+      assert.equal(memory.get(fresh.txid).slotHeight, 500, "Flush can't pay it before its confirmations, so its tip now is a bound");
+      assert.equal(state(late), "awaitingCredit", "no bound: an old payout of its value isn't taken for its credit");
+      assert.equal(memory.get(late.txid).credit, undefined);
+
+      // `fresh` is confirmed and Flush pays it above the bound.
+      l1Config.txStatuses[fresh.txid] = { confirmed: true, blockHeight: 1000, blockHash: "e0".repeat(32) };
+      list = await deposits.list(99);
+      assert.equal(state(fresh), "awaitingCredit", "the old payout is below its bound");
+      const paid = coinbase(505, [["", 0], [RECEIVE_0.scriptPubkey, 50_000]]);
+      fund([
+        { hex: old, blockHeight: 90, blockHash: FINAL },
+        { hex: paid, blockHeight: 505, blockHash: FINAL },
+      ]);
+      list = await deposits.list(99);
+      assert.equal(state(fresh), "credited");
+    } finally {
+      await l1Stub.close();
+    }
+  });
+
   test("the explorer's errors read as its own words", async () => {
     const client = wallet.esploraClient(wallet.esploraConfig(module().chainEntry(), module().chainEntry().networks.betanet), (...args) => fetch(...args));
     // `{"error": …}`, not the JSON itself.

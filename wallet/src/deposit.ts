@@ -59,19 +59,19 @@ const outpoint = ({ txid, vout }: { txid: string; vout: number }) => `${txid}:${
 
 /**
  * Flush's credit for `deposit`: the earliest coinbase output after the first (vout ≥ 1) paying
- * its script exactly its value, in a block above the Slot's tip when it was made, that `claimed`
- * doesn't hold (another Deposit's). Nothing on Flush names the M5, so equal Deposits to the same
+ * its script exactly its value, in a block above `slotHeight` (a Flush height it can't have been
+ * paid at or below), that `claimed` doesn't hold (another Deposit's). Nothing on Flush names the M5, so equal Deposits to the same
  * address are told apart by order: Flush pays them in eCash order, and the wallet matches them
  * oldest first (#57).
  */
 export async function flushCredit(
   server: EsploraClient,
-  deposit: Pick<PendingDeposit, "address" | "scriptPubkey" | "value" | "slotHeight">,
+  deposit: Pick<PendingDeposit, "address" | "scriptPubkey" | "value"> & { slotHeight: number },
   claimed: Set<string>,
 ): Promise<{ txid: string; vout: number } | undefined> {
   const { txs } = await server.addressHistory(deposit.address);
   const paid = txs
-    .filter((tx) => tx.status.confirmed && isCoinbase(tx) && (deposit.slotHeight === undefined || tx.status.blockHeight! > deposit.slotHeight))
+    .filter((tx) => tx.status.confirmed && isCoinbase(tx) && tx.status.blockHeight! > deposit.slotHeight)
     .sort((a, b) => a.status.blockHeight! - b.status.blockHeight!);
   for (const tx of paid) {
     for (let vout = 1; vout < tx.vout.length; vout++) {
@@ -273,6 +273,11 @@ export function createDeposits(deps: DepositDeps) {
    * Flush's payout, matched oldest first so that equal Deposits take their payouts in eCash order.
    * A matched payout is recorded on its Deposit. A credited Deposit is forgotten once no other
    * pending Deposit of the same value to the same script could take its payout instead.
+   *
+   * A Deposit without `slotHeight` (Flush's server didn't answer at its broadcast) takes Flush's
+   * tip while it can't have been paid yet: not on eCash, or short of its confirmations. Until it
+   * has one, it isn't matched: any older payout of its value (another Deposit's, one no longer
+   * tracked) could pass for its credit.
    */
   async function flushStatuses(
     pending: PendingDeposit[],
@@ -289,12 +294,26 @@ export function createDeposits(deps: DepositDeps) {
         await (async (): Promise<DepositStatus> => {
           try {
             if (deposit.credit) return { ...deposit, state: "credited", creditServer: credits.url };
+            const bound = async () => {
+              if (deposit.slotHeight !== undefined) return;
+              const height = await credits.tipHeight().catch(() => undefined);
+              if (height === undefined) return;
+              deposit.slotHeight = height;
+              await deps.store.put(deposit);
+            };
             const status = await l1.txStatus(deposit.txid);
             if (status === undefined) return { ...deposit, state: "notFound", server: l1.url };
-            if (!status.confirmed) return { ...deposit, state: "confirming", confirmations: 0, depositConfirmations };
+            if (!status.confirmed) {
+              await bound();
+              return { ...deposit, state: "confirming", confirmations: 0, depositConfirmations };
+            }
             const confirmations = (await tip()) - status.blockHeight! + 1;
-            if (confirmations < depositConfirmations) return { ...deposit, state: "confirming", confirmations, depositConfirmations };
-            const credit = deposit.scriptPubkey === undefined ? undefined : await flushCredit(credits, deposit, claimed);
+            if (confirmations < depositConfirmations) {
+              await bound();
+              return { ...deposit, state: "confirming", confirmations, depositConfirmations };
+            }
+            const { slotHeight } = deposit;
+            const credit = deposit.scriptPubkey === undefined || slotHeight === undefined ? undefined : await flushCredit(credits, { ...deposit, slotHeight }, claimed);
             if (credit === undefined) return { ...deposit, state: "awaitingCredit", confirmations, depositConfirmations, paidBy: "chain", creditServer: credits.url };
             claimed.add(outpoint(credit));
             deposit.credit = credit;
