@@ -1,12 +1,13 @@
 <script lang="ts">
   import EcashLogo from "$lib/EcashLogo.svelte";
+  import FlushLogo from "$lib/FlushLogo.svelte";
 
   /**
    * A chain's or an asset's mark: eCash's own on a near-black disc for the main chain and every
-   * ECX; Elements+'s initials on its purple; an asset's checked logo (`image`, a `data:` URL) if it
+   * ECX; Flush's own, white on its near black; Elements+'s initials on its purple; an asset's checked logo (`image`, a `data:` URL) if it
    * has one; anything else its first letter, or "?" when unnamed.
    */
-  let { kind, label = "", image, size = 32 }: { kind: "ecash" | "chain" | "asset" | "unknown"; label?: string; image?: string; size?: number } = $props();
+  let { kind, label = "", image, size = 32 }: { kind: "ecash" | "flush" | "chain" | "asset" | "unknown"; label?: string; image?: string; size?: number } = $props();
 </script>
 
 <!-- A letter at a third of the disc reads at 32 px; below about 28 px it needs a floor of 10 px. -->
@@ -15,6 +16,8 @@
     <img src={image} alt="" width={size} height={size} />
   {:else if kind === "ecash"}
     <EcashLogo size={Math.round(size * 0.6)} />
+  {:else if kind === "flush"}
+    <FlushLogo size={Math.round(size * 0.6)} />
   {:else if kind === "unknown"}
     ?
   {:else}
@@ -41,6 +44,11 @@
   /* eCash's mark: its gold on near black, with clear space around it, in both themes. */
   .ecash {
     background: #0a0a0c;
+  }
+  /* Flush's mark: white on near black, as its own app's icon, in both themes. */
+  .flush {
+    background: #08090b;
+    color: #fff;
   }
   .chain {
     background: var(--sidechain);

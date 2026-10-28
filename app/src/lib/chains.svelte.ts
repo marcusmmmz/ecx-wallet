@@ -172,9 +172,11 @@ export function onTheWay(deposits: DepositStatus[]): string {
     .toString();
 }
 
-/** A chain's mark: eCash's for the main chain, else its initials ("Elements+" is "E+"). */
-export function chainMark(info: ChainInfo): { kind: "ecash" | "chain"; label?: string } {
+/** A chain's mark: eCash's for the main chain, Flush's own (baked in, never fetched), else its initials ("Elements+" is "E+"). */
+export function chainMark(info: ChainInfo): { kind: "ecash" | "flush" | "chain"; label?: string } {
   if (info.id === "l1") return { kind: "ecash" };
+  // By its Chain Entry's name: Flush is a different Slot on each network (99 on betanet, 46 on mainnet).
+  if (info.name === "Flush") return { kind: "flush" };
   const words = info.name.replace(/\+$/, "").split(/\s+/).filter(Boolean);
   return { kind: "chain", label: words.map((w) => w[0].toUpperCase()).slice(0, 2).join("") + (info.name.endsWith("+") ? "+" : "") };
 }
