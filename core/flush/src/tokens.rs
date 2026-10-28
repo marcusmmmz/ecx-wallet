@@ -53,6 +53,8 @@ pub struct SwapOrder {
 #[serde(rename_all = "camelCase")]
 pub struct OutputToken {
     pub vout: u32,
+    /// The script it pays, hex: whoever counts the token checks it is theirs.
+    pub script: String,
     /// The token it carries; absent for a result, which the transaction alone can't tell.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token: Option<TokenAmount>,
@@ -134,6 +136,7 @@ pub fn output_tokens(tx_hex: &str) -> Result<OutputTokens, Refusal> {
         .into_iter()
         .map(|listed| OutputToken {
             vout: listed.n,
+            script: crate::hex(tx.output[listed.n as usize].script_pubkey.as_bytes()),
             token: listed.token.map(|t| TokenAmount { kind: t.kind.name().into(), id: t.id, amount: t.amount.to_string() }),
         })
         .collect();

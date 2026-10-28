@@ -510,6 +510,16 @@ describe("Flush", () => {
     }
   });
 
+  test("a token output the server lists under the wallet's address but that pays another script counts for nothing", async () => {
+    const someoneElse = "0014" + "11".repeat(20);
+    const theirs = paying("f5", [[someoneElse, 0], [marker(0, [], [{ n: 0, asset: BROSEVELT, amount: 10 ** 9 }]), 0]]);
+    fund([{ hex: theirs, blockHeight: 300, blockHash: FINAL }]);
+    // The real transaction, so its txid checks out; only the listing lies about whose output it is.
+    config.utxos[RECEIVE_0.address] = [{ txid: parseTx(theirs).txid, vout: 0, value: 0, confirmed: true, blockHash: FINAL }];
+    const state = await pullPathWith({ tokens: async (tx) => flush.outputTokens(tx) }).pullPath.reportedState(99);
+    assert.deepEqual(state.balances.filter((b) => b.asset === BROSEVELT), []);
+  });
+
   test("an asset is named from its registration, checked against its ticker's hash", async () => {
     const memory = new Map();
     const store = { get: async (k) => memory.get(k), set: async (k, v) => void memory.set(k, v) };

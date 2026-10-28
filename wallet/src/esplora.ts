@@ -8,7 +8,7 @@
 // `esploraClient` is the API itself, endpoint by endpoint, each answer checked for shape (Deposit
 // uses it directly on eCash's server); `esploraServer` is the pull path's view of it.
 import { cacheKey, type SessionCache } from "./cache";
-import { NATIVE_COIN, type AssetAmount, type IdentityBlock, type OutputToken, type OutputTokens } from "./chain-module";
+import { NATIVE_COIN, type AssetAmount, type DerivedAddress, type IdentityBlock, type OutputToken, type OutputTokens } from "./chain-module";
 import { withTrades, type TradeStore } from "./flush-trades";
 import { serverFetch, SidechainServerError, type Fetch, type HistoryEntry, type Issuance, type SidechainServer, type TreasuryScript, type WatchData } from "./sidechain-server";
 import { isM5 } from "./treasury";
@@ -643,7 +643,7 @@ export function esploraServer(config: EsploraServerConfig, fetchFn: Fetch): Side
    * (Flush), a coin of value 0 is the asset token its creating transaction lists on it, if any;
    * `results` says whether the address holds one whose token only the server can tell.
    */
-  async function explicitOutputs(address: string, read: Map<string, Promise<OutputTokens | undefined>>): Promise<{ outputs: Held[]; results: boolean }> {
+  async function explicitOutputs({ address, scriptPubkey }: DerivedAddress, read: Map<string, Promise<OutputTokens | undefined>>): Promise<{ outputs: Held[]; results: boolean }> {
     const outputs: Held[] = [];
     let results = false;
     const utxos = await client.addressUtxos(address);
@@ -655,7 +655,8 @@ export function esploraServer(config: EsploraServerConfig, fetchFn: Fetch): Side
     for (const { txid, vout, value, asset, confirmed, preconfirmed = false } of utxos) {
       if (value === undefined) continue;
       if (value === 0 && config.tokens !== undefined) {
-        const listed: OutputToken | undefined = tokens.get(txid)?.outputs.find((o) => o.vout === vout);
+        // A server may list someone else's output under the address: only the transaction says whose it is.
+        const listed: OutputToken | undefined = tokens.get(txid)?.outputs.find((o) => o.vout === vout && o.script === scriptPubkey);
         if (listed !== undefined && listed.token === undefined) results = true;
         if (listed?.token?.kind === "asset") outputs.push({ asset: listed.token.id, amount: listed.token.amount, confirmed, preconfirmed });
         continue;
@@ -681,8 +682,8 @@ export function esploraServer(config: EsploraServerConfig, fetchFn: Fetch): Side
   const listed = (totals: Map<string, bigint>) => [...totals].map(([asset, amount]) => ({ asset, amount: amount.toString() }));
 
   /** Runs `query` on every watched address, QUERIES_AT_ONCE at a time; answers in address order. */
-  async function eachAddress<T>({ receive, change }: WatchData, query: (address: string) => Promise<T>): Promise<T[]> {
-    const addresses = [...receive, ...change].map((a) => a.address);
+  async function eachAddress<T>({ receive, change }: WatchData, query: (address: DerivedAddress) => Promise<T>): Promise<T[]> {
+    const addresses = [...receive, ...change];
     const answers: T[] = [];
     for (let i = 0; i < addresses.length; i += QUERIES_AT_ONCE) answers.push(...(await Promise.all(addresses.slice(i, i + QUERIES_AT_ONCE).map(query))));
     return answers;
@@ -704,13 +705,13 @@ export function esploraServer(config: EsploraServerConfig, fetchFn: Fetch): Side
     const net = new Map<string, bigint>();
     let hidden = false;
     let results = false;
-    const add = ({ value, asset }: EsploraOutput, sign: bigint, txid: string, vout: number) => {
+    const add = ({ value, asset, scriptpubkey }: EsploraOutput, sign: bigint, txid: string, vout: number) => {
       if (value === undefined) {
         hidden = true;
         return;
       }
       if (value === 0 && config.tokens !== undefined) {
-        const listed: OutputToken | undefined = markers.get(txid)?.outputs.find((o) => o.vout === vout);
+        const listed: OutputToken | undefined = markers.get(txid)?.outputs.find((o) => o.vout === vout && o.script === scriptpubkey);
         if (listed !== undefined && listed.token === undefined) results = true;
         if (listed?.token?.kind === "asset") net.set(listed.token.id, (net.get(listed.token.id) ?? 0n) + sign * BigInt(listed.token.amount));
         return;
@@ -768,8 +769,8 @@ export function esploraServer(config: EsploraServerConfig, fetchFn: Fetch): Side
       const unverified = new Map<string, bigint>();
       const preconfirmed = new Map<string, bigint>();
       const read = new Map<string, Promise<OutputTokens | undefined>>();
-      const byAddress = (address: string) =>
-        explicitOutputs(address, read).then(async (held) => ({ ...held, unverified: held.results ? await unverifiedTokens(address, held.outputs) : [] }));
+      const byAddress = (address: DerivedAddress) =>
+        explicitOutputs(address, read).then(async (held) => ({ ...held, unverified: held.results ? await unverifiedTokens(address.address, held.outputs) : [] }));
       const [held, stalledSince] = await Promise.all([eachAddress(watch, byAddress), stalled()]);
       for (const { asset, amount, confirmed: isConfirmed, preconfirmed: isPreconfirmed } of held.flatMap((h) => h.outputs)) {
         const totals = isConfirmed ? confirmed : unconfirmed;
@@ -791,7 +792,7 @@ export function esploraServer(config: EsploraServerConfig, fetchFn: Fetch): Side
      */
     async history(watch, treasuries = []) {
       await client.checkChain();
-      const lists = await eachAddress(watch, (address) => client.addressHistory(address));
+      const lists = await eachAddress(watch, ({ address }) => client.addressHistory(address));
       const txs = new Map<string, EsploraTx>();
       for (const tx of lists.flatMap((list) => list.txs)) txs.set(tx.txid, tx);
       const partial = lists.some((list) => !list.complete);

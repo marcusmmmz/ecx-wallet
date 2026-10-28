@@ -426,6 +426,8 @@ export interface TradeSide {
 /** A token a Flush output carries (docs/adr/0013). */
 export interface OutputToken {
   vout: number;
+  /** The script it pays, hex: whoever counts the token checks it is theirs. */
+  script: string;
   /** Absent for a result: what it carries is in the node's state, not in the transaction. */
   token?: { kind: TokenKind; id: string; amount: string };
 }
