@@ -17,6 +17,7 @@ import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promi
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
+import { sidechainServerOrigins } from "./chain-origins.mjs";
 import { checkNoEval } from "./check-no-eval.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -27,16 +28,6 @@ const staging = path.join(dist, ".staging");
 const TARGETS = ["chromium", "firefox"];
 const CHAIN_ENTRIES = process.env.ECX_CHAIN_ENTRIES?.split(",") ??
   ["l1", "elements", "flush"].map((module) => path.resolve(root, "..", "core", module, "chain-entry.json"));
-
-/** Every network's default Sidechain Server origin, across the bundled Chain Entries. */
-async function sidechainServerOrigins() {
-  const origins = new Set();
-  for (const file of CHAIN_ENTRIES) {
-    const entry = JSON.parse(await readFile(file, "utf8"));
-    for (const network of Object.values(entry.networks)) origins.add(new URL(network.sidechainServer.url).origin);
-  }
-  return [...origins].sort();
-}
 
 /** The hand-written manifest plus access to the Sidechain Servers. */
 async function manifestFor(target, servers) {
@@ -72,7 +63,7 @@ for (const file of (await readdir(coreDist)).filter((f) => f.endsWith(".wasm")))
 }
 await checkNoEval(staging);
 
-const servers = await sidechainServerOrigins();
+const servers = await sidechainServerOrigins(CHAIN_ENTRIES);
 for (const target of TARGETS) {
   const out = path.join(dist, target);
   await cp(staging, out, { recursive: true });

@@ -6,6 +6,7 @@
   "description": "Wallet UI: SvelteKit static app (adapter-static, SSR off, hash router), packaged into the extension.",
   "scripts": {
     "build": "vite build && node scripts/mv3-postbuild.mjs build",
+    "build:web": "vite build --mode web && node scripts/mv3-postbuild.mjs build-web && node scripts/web-postbuild.mjs",
     "dev": "vite dev",
     "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
   },

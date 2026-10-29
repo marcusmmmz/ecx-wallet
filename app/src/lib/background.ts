@@ -1,5 +1,7 @@
-// The app's only channel to the wallet: messages to the extension background, which holds every
+// The app's only channel to the wallet: messages to its background host, which holds every
 // secret and makes every decision. The app renders what it is given and reports the user's choice.
+
+import { request, connect, onMessage, type TransportPort } from "$platform";
 
 import type {
   ApprovalPrompt,
@@ -48,7 +50,7 @@ export type {
 type Response<T> = { ok: true; result: T } | { ok: false; error: { code: number; message: string } };
 
 async function send<T>(message: unknown): Promise<T> {
-  const response = (await chrome.runtime.sendMessage(message)) as Response<T>;
+  const response = (await request(message)) as Response<T>;
   if (!response.ok) throw new Error(response.error.message);
   return response.result;
 }
@@ -81,11 +83,11 @@ export const ACTIVITY_PORT = "vault.activity";
 
 /** Reports that someone is using this page: activity, moving the auto-lock deadline. Returns the stop. */
 export function activityReporter(): { used(): void; stop(): void } {
-  let port: chrome.runtime.Port | undefined;
+  let port: TransportPort | undefined;
   return {
     used() {
       if (port === undefined) {
-        const opened = chrome.runtime.connect({ name: ACTIVITY_PORT });
+        const opened = connect(ACTIVITY_PORT);
         opened.onDisconnect.addListener(() => (port = undefined));
         port = opened;
       }
@@ -105,8 +107,8 @@ const APPROVAL_HOST_PORT = "approval.host:";
  */
 export function hostApprovals(onshow: (id: string | null) => void): { host: string; stop(): void } {
   const host = crypto.randomUUID();
-  const port = chrome.runtime.connect({ name: `${APPROVAL_HOST_PORT}${host}` });
-  port.onMessage.addListener((message: { id?: string | null }) => onshow(message?.id ?? null));
+  const port = connect(`${APPROVAL_HOST_PORT}${host}`);
+  port.onMessage.addListener((message: unknown) => onshow((message as { id?: string | null })?.id ?? null));
   return {
     host,
     stop() {
@@ -122,8 +124,7 @@ export function onLockDeadline(onchange: (locksAt: number | null) => void): () =
     const m = message as { kind?: string; locksAt?: number | null };
     if (m?.kind === "vault.deadline") onchange(m.locksAt ?? null);
   };
-  chrome.runtime.onMessage.addListener(listener);
-  return () => chrome.runtime.onMessage.removeListener(listener);
+  return onMessage(listener);
 }
 
 /** Calls `onchange` with the chains the wallet just sent a transaction on (a Send, a trade, a Deposit); returns the unsubscribe. */
@@ -132,8 +133,7 @@ export function onChainsChanged(onchange: (ids: ChainId[]) => void): () => void 
     const m = message as { kind?: string; ids?: ChainId[] };
     if (m?.kind === "chains.changed" && Array.isArray(m.ids)) onchange(m.ids);
   };
-  chrome.runtime.onMessage.addListener(listener);
-  return () => chrome.runtime.onMessage.removeListener(listener);
+  return onMessage(listener);
 }
 
 /** Passwords shorter than this are refused (the background enforces it too). */
