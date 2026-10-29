@@ -70,9 +70,12 @@ async function announceGrant(origin: string, grant: Grant | undefined): Promise<
 
 // The listener is registered before any asynchronous surface creation can finish.
 const approvalClosed = new Map<number, () => void>();
+// A browser window's Provider handler goes with it.
 chrome.windows.onRemoved.addListener((id) => {
   approvalClosed.get(id)?.();
   approvalClosed.delete(id);
+  const approvalHost = panelHost(id);
+  if (approvalHost !== undefined) router.forgetApprovalHost(approvalHost);
 });
 
 const host: RouterHost<chrome.runtime.MessageSender> = {

@@ -9,6 +9,7 @@ import {
   esploraConfig,
   createL1Module,
   createProviderHandler,
+  providerPending,
   createPullPath,
   createSends,
   createSpendQueue,
@@ -425,10 +426,12 @@ export function createRouter<Sender>(host: RouterHost<Sender>) {
   /**
    * The Provider's handler for a site's requests from one place (`RouterHost.requester`'s
    * `approvalHost`): their approvals show on that wallet page (the side panel open in the site's
-   * browser window), else in a window of their own. One handler per host, so its requests share
-   * one unlock.
+   * browser window), else in a window of their own. What waits on the user per origin (one unlock
+   * window, one asset suggestion) is shared by every host's handler, so a site can't open one per
+   * browser window.
    */
   const providerHandlers = new Map<string, ReturnType<typeof createProviderHandler>>();
+  const pendingPerOrigin = providerPending();
   function providerHandler(approvalHost: string | undefined) {
     const key = approvalHost ?? "";
     let handler = providerHandlers.get(key);
@@ -450,6 +453,7 @@ export function createRouter<Sender>(host: RouterHost<Sender>) {
     send: (slot, order, from) => announcing([slot], sends.send(slot, order, from, approvalHost)),
     sendAction: (slot, action, from) => announcing([slot], sends.trade(slot, action, from, approvalHost)),
     askToNameAsset: (prompt) => askToNameAsset(prompt, approvalHost),
+    pending: pendingPerOrigin,
     async assetSuggestion(slot, origin, suggestion) {
       const module = await chainModule(slot)!;
       const { entry, network } = servedNetwork(module);
@@ -791,6 +795,10 @@ export function createRouter<Sender>(host: RouterHost<Sender>) {
     connectApprovalHost(name: string, port: ApprovalHost) {
       approvalHosts.set(name, port);
       port.onClose(() => approvalHosts.get(name) === port && approvalHosts.delete(name));
+    },
+    /** The place an `approvalHost` named is gone for good (its browser window closed): its Provider handler goes. */
+    forgetApprovalHost(name: string) {
+      providerHandlers.delete(name);
     },
   };
 

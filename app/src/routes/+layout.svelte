@@ -53,6 +53,16 @@
     return hostPanelApprovals((ids) => (waiting = ids));
   });
   const shown = $derived(waiting[0]);
+  // A site picks when its approval appears, so it could time one under a click meant for the
+  // screen: each takes no input until it has been in view a moment (`data-armed`).
+  const ARM_MS = 700;
+  let armed = $state(false);
+  $effect(() => {
+    armed = false;
+    if (shown === undefined) return;
+    const timer = setTimeout(() => (armed = true), ARM_MS);
+    return () => clearTimeout(timer);
+  });
   // app.css sizes the page by where it shows.
   $effect(() => {
     document.documentElement.dataset.view = currentView();
@@ -66,7 +76,7 @@
 </div>
 {#if shown !== undefined}
   <!-- A site's request, approved here in the panel rather than in a window of its own. -->
-  <div class="panel-approval" data-panel-approval={shown}>
+  <div class="panel-approval" data-panel-approval={shown} inert={!armed} data-armed={armed || undefined}>
     {#key shown}<Approval id={shown} hosted ondone={() => (waiting = waiting.filter((id) => id !== shown))} />{/key}
   </div>
 {/if}

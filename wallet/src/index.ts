@@ -2,6 +2,7 @@ export { ErrorCode, ProviderRpcError } from "./errors";
 export { GRANTABLE_METHODS, covers, scopeOf, widen, type Grant, type GrantScope, type GrantStore, type GrantableMethod, type Scope } from "./grants";
 export {
   createProviderHandler,
+  providerPending,
   type ApprovalPrompt,
   type AssetBalance,
   type AssetPrompt,
@@ -9,6 +10,7 @@ export {
   type ConnectPrompt,
   type TurnOnPrompt,
   type ProviderDeps,
+  type ProviderPending,
   type SigningApproval,
   type SignPrompt,
 } from "./provider";
