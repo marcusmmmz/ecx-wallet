@@ -47,6 +47,59 @@ export function launchWallet(name, { build = "e2e", ...options } = {}) {
   throw new Error(`Unknown browser ${name}`);
 }
 
+/** Plain browser pages, with the same binaries and launch settings as extension tests. */
+export function launchWebWallet(name) {
+  if (name === "brave") return launchBrave({ extensionPath: null });
+  if (name === "firefox") return launchFirefox({ extensionPath: null });
+  throw new Error(`Unknown browser ${name}`);
+}
+
+/** Serve the e2e web build with its generated HTTP headers, including CSP on Worker scripts. */
+export async function serveWebWallet() {
+  const dist = path.join(ROOT, "e2e", "dist", "web");
+  const headersFile = await readFile(path.join(dist, "_headers"), "utf8");
+  const lines = headersFile.trimEnd().split("\n");
+  if (lines.shift() !== "/*") throw new Error("Expected one global _headers rule");
+  const headers = Object.fromEntries(lines.map((line) => {
+    const match = /^  ([^:]+): (.+)$/.exec(line);
+    if (!match) throw new Error(`Unsupported _headers line: ${line}`);
+    return [match[1], match[2]];
+  }));
+  const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".wasm": "application/wasm", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".json": "application/json", ".woff2": "font/woff2" };
+  const server = createServer(async (request, response) => {
+    try {
+      const pathname = decodeURIComponent(new URL(request.url, "http://wallet").pathname);
+      // Browsers ask for a default favicon even though this app has none.
+      if (pathname === "/favicon.ico") {
+        response.writeHead(204, headers);
+        response.end();
+        return;
+      }
+      const file = path.resolve(dist, `.${pathname === "/" ? "/index.html" : pathname}`);
+      if (!file.startsWith(`${dist}${path.sep}`) || path.basename(file) === "_headers") {
+        response.writeHead(404, headers);
+        response.end();
+        return;
+      }
+      const bytes = await readFile(file);
+      response.writeHead(200, { ...headers, "Content-Type": mime[path.extname(file)] ?? "application/octet-stream" });
+      response.end(bytes);
+    } catch (error) {
+      response.writeHead(error.code === "ENOENT" ? 404 : 500, headers);
+      response.end();
+    }
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  return {
+    url: `http://127.0.0.1:${server.address().port}/`,
+    headers,
+    close: () => new Promise((resolve) => server.close(resolve)),
+  };
+}
+
 /**
  * Launches headless Brave with the built Chromium extension installed.
  * Returns a session; always `await session.close()`.
@@ -61,7 +114,7 @@ export async function launchBrave({ extensionPath = DIST_E2E.chromium, profile: 
     executablePath: process.env.BRAVE ?? "/usr/bin/brave",
     headless: process.env.HEADFUL ? false : true,
     pipe: true,
-    enableExtensions: true,
+    enableExtensions: extensionPath !== null,
     userDataDir: profile,
     targetFilter: (target) => target.type() !== "service_worker",
     args: [
@@ -74,6 +127,7 @@ export async function launchBrave({ extensionPath = DIST_E2E.chromium, profile: 
       "--host-resolver-rules=MAP *.localhost 127.0.0.1",
     ],
   });
+  if (extensionPath === null) return { browser, close: () => closeBrowser(browser, keepProfile ? undefined : profile) };
   let extensionId;
   try {
     // Developer mode turns on the extension error console, so runtime errors (CSP violations,
@@ -181,6 +235,7 @@ export async function launchFirefox({ extensionPath = DIST_E2E.firefox, profile:
       Object.entries(process.env).filter(([k, v]) => !/\/snap\//.test(v ?? "") && !k.startsWith("SNAP")),
     ),
   });
+  if (extensionPath === null) return { browser, close: () => closeBrowser(browser, keepProfile ? undefined : profile) };
   let chrome;
   try {
     chrome = await firefoxChrome(browser);

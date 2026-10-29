@@ -4,9 +4,10 @@ import { modules, chainEntries } from "./web-config.mjs";
 import { sidechainServerOrigins } from "../../extension/scripts/chain-origins.mjs";
 import { checkNoEval } from "../../extension/scripts/check-no-eval.mjs";
 
-const output = new URL("../build-web/", import.meta.url);
+const output = new URL(`${process.env.ECX_APP_WEB_DIST ?? "build-web"}/`, new URL("../", import.meta.url));
+const core = new URL(`${process.env.ECX_CORE_DIST ?? "../core/dist"}/`, new URL("../", import.meta.url));
 for (const name of ["vault", ...modules]) {
-  await cp(new URL(`../../core/dist/${name}.wasm`, import.meta.url), new URL(`${name}.wasm`, output));
+  await cp(new URL(`${name}.wasm`, core), new URL(`${name}.wasm`, output));
 }
 const origins = await sidechainServerOrigins(chainEntries);
 // Svelte writes style attributes; checked asset logos are data: images. Neither needs script access.

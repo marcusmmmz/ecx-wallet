@@ -3,8 +3,10 @@
 // does (mempool.space's electrs fork plus `/flush/blocks`, docs/adr/0012), as recorded on #56,
 // with the node reads tokens need (`getasset`, `holdings`, docs/adr/0013).
 //
-// Like the Elements explorer it stands in for, it sends no CORS headers: the extension reaches it
-// through its `host_permissions`, as it reaches the real one. Dependency-free node `http`.
+// Like the Elements explorer it stands in for, it sends no CORS headers by default: the extension
+// reaches it through its `host_permissions`, as it reaches the real one. `config.cors` adds them
+// for the web build's tests, whose pages can't (which is why Slot 24 is left out of the web
+// build). Dependency-free node `http`.
 import { createServer } from "node:http";
 import { addressScript, parseTx, scripthash } from "./bitcoin-tx.mjs";
 import { parseElementsTx } from "./elements-tx.mjs";
@@ -295,6 +297,17 @@ export function createEsploraStub(config) {
   }
 
   const server = createServer((request, response) => {
+    if (config.cors) {
+      response.setHeader("Access-Control-Allow-Origin", "*");
+      response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+      response.setHeader("Access-Control-Allow-Headers", "Content-Type");
+      response.setHeader("Access-Control-Allow-Private-Network", "true");
+      if (request.method === "OPTIONS") {
+        response.writeHead(204);
+        response.end();
+        return;
+      }
+    }
     const { pathname, searchParams } = new URL(request.url, "http://stub");
     let body = "";
     request.on("data", (chunk) => (body += chunk));
