@@ -146,3 +146,4 @@ export { createSettings, REREAD_SECONDS, UNITS, type Settings, type Unit } from 
 export { qrMatrix } from "./qr";
 export { createAssets, type Assets, type AssetSource, type AssetSuggestion, type NamedAsset, type StoredAsset } from "./assets";
 export { activityDays, activityKind, localDay, type ActivityItem, type ActivityKind } from "./activity";
+export { createMemoryStore, createIndexedDBStore } from "./storage";

@@ -14,6 +14,8 @@ export interface KeyValueStore {
   get<T>(key: string): Promise<T | undefined>;
   set(key: string, value: unknown): Promise<void>;
   remove(key: string): Promise<void>;
+  /** Stored keys, for enumerating Grants, pending transactions and session caches. */
+  keys(): Promise<string[]>;
 }
 
 export interface VaultDeps {

@@ -24,7 +24,7 @@ website → client discovery → injected Provider (inpage.ts, main world)
 - The background takes the requester's origin from the browser's `sender`, never from the request.
 - The approval window is the app page at `#/approve/<id>` (`app/src/lib/Approval.svelte`). It talks to the background only through `runtime.sendMessage`.
 - **The wallet's own Send and Deposit approve in place.** The toolbar popup closes whenever another window takes focus, so those screens don't open a window (the side panel stays open, and approves in place the same way): each connects a port (`approval.host:<host>`, `hostApprovals`) and passes `host` with its request, and the background posts the approval's id on that port. The screen then shows the same `Approval` component where its form was. Closing the popup disconnects the port, which rejects the request, as closing an approval window does. An app's request, and a `/v1` server's, still get a window.
-- Wallet pages (home, Send, Settings…) talk to the background the same way, one message kind per action (`vault.*`, `send.start`, `history.reported`…). The extension's router is in `extension/src/background.ts`.
+- Wallet pages (home, Send, Settings…) talk to the background the same way, one message kind per action (`vault.*`, `send.start`, `history.reported`…). The shared router is in `extension/src/router.ts`; `extension/src/background.ts` supplies its browser operations and wires the listeners.
 
 ## Vault
 

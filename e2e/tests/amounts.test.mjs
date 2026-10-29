@@ -130,7 +130,7 @@ describe("totalAcrossChains", () => {
 describe("the unit setting", () => {
   const memoryStore = () => {
     const data = new Map();
-    return { get: async (k) => data.get(k), set: async (k, v) => void data.set(k, v), remove: async (k) => void data.delete(k) };
+    return { get: async (k) => data.get(k), set: async (k, v) => void data.set(k, v), remove: async (k) => void data.delete(k), keys: async () => [...data.keys()] };
   };
 
   test("is ECX until the user picks sats, and remembers the pick", async () => {

@@ -9,7 +9,7 @@ const { createSettings, createProviderHandler } = await importWallet();
 
 const memoryStore = () => {
   const data = new Map();
-  return { get: async (k) => data.get(k), set: async (k, v) => void data.set(k, v), remove: async (k) => void data.delete(k) };
+  return { get: async (k) => data.get(k), set: async (k, v) => void data.set(k, v), remove: async (k) => void data.delete(k), keys: async () => [...data.keys()] };
 };
 
 describe("the chain setting", () => {
