@@ -22,7 +22,8 @@ use crate::bast::{self, TokenKind};
 use crate::link::MAX_ROUTE_POOLS;
 use crate::trade::{pool_kind, PoolReport};
 use crate::psbt::{operation, refuse, spent, validated, AssetAmount, OwnedInput, Refusal, RefusalCode};
-use crate::tokens::{token_flow, TokenFlow};
+use crate::result::ResultEvidence;
+use crate::tokens::{token_flow_with, TokenFlow};
 use crate::{address, AccountKeys};
 
 /// What `decode` makes of a request it doesn't refuse.
@@ -122,6 +123,8 @@ struct Evidence {
     pool: Option<PoolReport>,
     /// A route's pools, in its order, as `getpool` describes each.
     pools: Option<Vec<PoolReport>>,
+    /// The trade results it spends, as the market index names what each carries (docs/adr/0013).
+    results: Option<Vec<ResultEvidence>>,
 }
 
 /// Where an output's funds go.
@@ -186,7 +189,7 @@ pub fn decode_with_evidence(payload: &str, starter: &str, evidence: &str) -> Res
     let psbt = validated(payload)?;
     let keys = AccountKeys::new(starter).map_err(|e| refuse(RefusalCode::InvalidStarter, e))?;
     let kinds = classified(&psbt, &keys)?;
-    let flow = token_flow(&psbt)?;
+    let flow = token_flow_with(&psbt, evidence.results.as_deref().unwrap_or_default())?;
     let inputs_total: u64 = (0..psbt.inputs.len()).map(|i| spent(&psbt, i).value.to_sat()).sum();
     let outputs_total: u64 = psbt.unsigned_tx.output.iter().map(|o| o.value.to_sat()).sum();
     let fee = inputs_total

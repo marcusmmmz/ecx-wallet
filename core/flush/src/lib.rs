@@ -32,6 +32,7 @@ pub mod bast;
 mod decode;
 mod link;
 mod psbt;
+mod result;
 mod sign;
 mod tokens;
 mod trade;
@@ -42,6 +43,7 @@ pub use deposit::{deposit_destination, long_form, DepositDestination, MAX_DESTIN
 pub use decode::{decode, decode_with_evidence, ClearInput, ClearOutput, ClearTrade, ClearView, DangerousMode, Decoded, Destination, VerifiableFacts};
 pub use link::{parse_action, Action, CLOCK_SKEW, MAX_LIFETIME, MAX_LINK_BYTES, MAX_ROUTE_POOLS, MAX_SLIPPAGE_BPS};
 pub use psbt::{check, AssetAmount, OwnedInput, Refusal, RefusalCode};
+pub use result::ResultClaim;
 pub use sign::{finalize, sign, Finalized};
 pub use tokens::{asset_logo, asset_registration, output_tokens, CheckedLogo, CheckedRegistration, OutputToken, OutputTokens, SwapOrder, TokenAmount, MAX_DECIMALS, MAX_LOGO_BYTES};
 pub use trade::{build_trade, CheckedTrade, PoolReport, Side, TradeBuilt, TradeOrder, MAX_FLOOR_SHORTFALL_PERCENT};
