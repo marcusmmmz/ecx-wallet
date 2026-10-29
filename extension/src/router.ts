@@ -534,7 +534,7 @@ export function createRouter<Sender>(host: RouterHost<Sender>) {
     add: (digest) => host.session.set(`usedLink:${digest}`, true),
   };
 
-  const sends = createSends({ ...keys, chainModule, l1Module, pullPath, esplora, openSigningApproval, isUnlocked: signing.isUnlocked, held: heldStore, queue: spendQueue, usedLinks, cache: sessionCache, now: () => Date.now() });
+  const sends = createSends({ ...keys, chainModule, l1Module, pullPath, esplora, openSigningApproval, isUnlocked: signing.isUnlocked, held: heldStore, queue: spendQueue, usedLinks, cache: sessionCache, tradeStore, now: () => Date.now() });
 
   /** The page a wallet page's request names to show its approval (`APPROVAL_HOST_PORT`), if any. */
   const hostOf = (message: { host?: unknown }) => (typeof message.host === "string" && message.host !== "" ? message.host : undefined);

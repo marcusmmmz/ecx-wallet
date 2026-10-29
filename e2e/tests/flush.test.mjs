@@ -242,6 +242,40 @@ describe("Flush", () => {
     }
   });
 
+  test("a trade's result the market index names, fitting its order, can be sent: approved Clear, the index's word as evidence", async () => {
+    // A buy of FORK through its live launch pool: 10,000 sat in, at least 44,000 FORK out, on its
+    // result (output 0), which its marker lists with no token.
+    const internal = (id) => [...Buffer.from(id, "hex").reverse()];
+    const to = [...Buffer.from(RECEIVE_1.scriptPubkey, "hex")];
+    const order = marker(21, [...internal("00".repeat(32)), 1, ...internal(FORK_POOL), ...varint(10_000), ...varint(44_000), to.length, ...to], [{ n: 0 }]);
+    const bought = paying("c7", [[RECEIVE_0.scriptPubkey, 0], [order, 10_000], [RECEIVE_1.scriptPubkey, 89_600]]);
+    const txid = parseTx(bought).txid;
+    fund([{ hex: bought, blockHeight: 9_000, blockHash: FINAL }]);
+    const filled = (units) => ({
+      [txid]: { txid, kind: "swap", height: 9_000, status: "filled", swap: { payouts: [{ what: "out", asset_id: FORK, amount_units: String(units), via: "output", outpoint: `${txid}:0` }] } },
+    });
+    config.flushRpc = { getpool: ([id]) => (id === FORK_POOL ? TRADE.forkPool : undefined) };
+    try {
+      assert.deepEqual(await sendsWith().sends.spendable(99), [{ asset: "", amount: "89600" }], "unnamed, a result isn't spendable");
+
+      config.marketTrades = filled(44_482);
+      const { sends, prompts } = sendsWith();
+      assert.deepEqual(await sends.spendable(99), [{ asset: FORK, amount: "44482" }, { asset: "", amount: "89600" }]);
+      const before = stub.broadcasts().length;
+      await sends.send(99, { outputs: [{ asset: FORK, amount: "30000", to: { address: PAY_TO } }] });
+      assert.equal(stub.broadcasts().length, before + 1);
+      const { decoded } = prompts.at(-1).prompt;
+      assert.equal(decoded.kind, "clear");
+      assert.deepEqual(decoded.view.inputs.filter((i) => i.asset === FORK).map((i) => i.amount), ["44482"], "the result, as the index's word for it");
+
+      // Below the order's floor, the index's word breaks the order's: the result stays unspendable.
+      config.marketTrades = filled(43_999);
+      assert.deepEqual(await sendsWith().sends.spendable(99), [{ asset: "", amount: "89600" }]);
+    } finally {
+      config.marketTrades = config.flushRpc = undefined;
+    }
+  });
+
   test("a server that sends another transaction than the coin it listed sends nothing", async () => {
     const coin = paying("c3", [[RECEIVE_0.scriptPubkey, 100_000]]);
     fund([{ hex: coin, blockHeight: 400, blockHash: FINAL }]);
