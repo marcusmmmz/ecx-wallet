@@ -24,6 +24,7 @@ function memoryStore() {
     get: async (key) => structuredClone(values.get(key)),
     set: async (key, value) => void values.set(key, structuredClone(value)),
     remove: async (key) => void values.delete(key),
+    keys: async () => [...values.keys()],
   };
 }
 
