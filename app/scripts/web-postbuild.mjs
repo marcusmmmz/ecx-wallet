@@ -15,6 +15,11 @@ const csp = [
   `connect-src 'self' ${origins.join(" ")}`, "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data:", "object-src 'none'", "frame-ancestors 'none'", "base-uri 'none'",
 ].join("; ");
-await writeFile(new URL("_headers", output), `/*\n  Content-Security-Policy: ${csp}\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: no-referrer\n`);
+const headers = { "Content-Security-Policy": csp, "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer" };
+// The same headers for Netlify / Cloudflare Pages (`_headers`) and Vercel (`vercel.json`).
+await writeFile(new URL("_headers", output), `/*\n${Object.entries(headers).map(([name, value]) => `  ${name}: ${value}\n`).join("")}`);
+await writeFile(new URL("vercel.json", output), `${JSON.stringify({
+  headers: [{ source: "/(.*)", headers: Object.entries(headers).map(([key, value]) => ({ key, value })) }],
+}, null, 2)}\n`);
 await checkNoEval(fileURLToPath(output));
 console.log(`web: built ${fileURLToPath(output)}`);

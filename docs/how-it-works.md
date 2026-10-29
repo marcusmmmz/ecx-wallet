@@ -36,7 +36,7 @@ website → client discovery → injected Provider (inpage.ts, main world)
 - **Spending across tabs:** origin-wide Web Locks serialize Sends per Slot and Deposits across all Slots through approval and persistence of their records. Each tab keeps its own unlock state; closing a tab releases its lock. Leaving a hosted form cancels its request even while it waits for a lock.
 - **Requester:** always the wallet page, with no origin. No Provider is injected and dApp requests are refused as Unauthorized. Grants cannot attest a web caller here. Pin and side-panel controls are absent.
 - **Chains:** Slot 24 is excluded because `explorer.bitnames.info` sends no CORS headers (checked 2026-10-29). `app/scripts/web-config.mjs` selects the registry, WASM and Chain Entries together, without changing the Chain Entry format.
-- **Headers:** `_headers` contains the HTTP CSP, `nosniff` and `no-referrer`. Its `connect-src` uses the same Chain Entry origin derivation as extension host permissions, with Slot 24 left out. The web bootstrap is external, as in the extension. Serve over HTTPS and configure the host to send those headers.
+- **Headers:** `_headers` (Netlify / Cloudflare Pages) and `vercel.json` (Vercel) carry the same HTTP CSP, `nosniff` and `no-referrer`. Its `connect-src` uses the same Chain Entry origin derivation as extension host permissions, with Slot 24 left out. The web bootstrap is external, as in the extension. Serve over HTTPS and configure the host to send those headers.
 
 ## Vault
 
