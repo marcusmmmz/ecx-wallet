@@ -190,6 +190,19 @@ for (const browserName of BROWSERS) describe(`${browserName}: web`, () => {
 
     await route(page, "#/chains");
     await page.waitForSelector("[data-chains][data-screen-ready]");
+    const leaving = page.evaluate((to) => window.walletRequest({ kind: "send.start", slot: 99, outputs: [{ asset: "", amount: "10000", to: { address: to } }] }), PAY_TO);
+    await page.waitForFunction(() => /^#\/approve\/[^/]+$/.test(location.hash), { timeout: 20_000 });
+    await approvalIn(page, { timeout: 20_000 });
+    const beforeLeaving = stub.broadcasts().length;
+    await route(page, "#/approve/not-pending");
+    await page.waitForSelector("[data-approval-missing]");
+    assert.equal(await page.$("[data-approve]"), null, "changing approval ids must discard the previous prompt");
+    const cancelled = await leaving;
+    assert.equal(cancelled.ok, false);
+    assert.equal(cancelled.error.code, 4001);
+    assert.equal(stub.broadcasts().length, beforeLeaving);
+    await route(page, "#/chains");
+    await page.waitForSelector("[data-chains][data-screen-ready]");
     for (const approved of [false, true]) {
       const before = stub.broadcasts().length;
       const sending = page.evaluate((to) => window.walletRequest({ kind: "send.start", slot: 99, outputs: [{ asset: "", amount: "10000", to: { address: to } }] }), PAY_TO);
