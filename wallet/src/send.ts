@@ -190,7 +190,7 @@ export function createSends(deps: SendDeps) {
       if (chain === "l1") throw new Error("The main chain's server always speaks Esplora.");
       const slot = chain;
       if (from === undefined) return deps.pullPath.send(slot, checked);
-      const approval = deps.openSigningApproval({ origin: from.origin, chain: target.chain });
+      const approval = deps.openSigningApproval({ origin: from.origin, chain: target.chain, ...(host === undefined ? {} : { host }) });
       try {
         if (!(await deps.isUnlocked()) && !(await approval.unlock())) throw rejected();
         return await deps.pullPath.send(slot, checked, { requester: from.origin, approval });
@@ -367,7 +367,7 @@ export function createSends(deps: SendDeps) {
   }
 
   /** One trade an app's link asks for (`sendAction`, docs/adr/0016), once the Slot's previous Send is done. */
-  async function tradeNow(slot: number, link: string, from: { origin: string }): Promise<SendResult> {
+  async function tradeNow(slot: number, link: string, from: { origin: string }, host: string | undefined): Promise<SendResult> {
     const target = await routing.slot(slot);
     const server = esplora(target);
     if (server === undefined || !target.module.declare().capabilities.includes("trades")) {
@@ -379,7 +379,7 @@ export function createSends(deps: SendDeps) {
     await server.checkChain();
     const facts = await tradeFacts(server, action);
 
-    const approval = deps.openSigningApproval({ origin: from.origin, chain: target.chain });
+    const approval = deps.openSigningApproval({ origin: from.origin, chain: target.chain, ...(host === undefined ? {} : { host }) });
     let built: BuiltTrade;
     let tipHeight: number;
     let finalized: { tx: string; txid: string };
@@ -463,9 +463,10 @@ export function createSends(deps: SendDeps) {
      * Trades as `link` (a `flush:` link) asks, for the app `from` (`sendAction`): checked, built from
      * the account's coins, approved Clear, broadcast with its marker's ECX allowed, its coins held and
      * the link kept as run. Throws on refusal or rejection. In the Slot's queue with its Sends.
+     * `host` as for `send`.
      */
-    trade(slot: number, link: string, from: { origin: string }): Promise<SendResult> {
-      return queue(slot, () => tradeNow(slot, link, from));
+    trade(slot: number, link: string, from: { origin: string }, host?: string): Promise<SendResult> {
+      return queue(slot, () => tradeNow(slot, link, from, host));
     },
 
     /** The chain's last Send refused after approval this session, if not closed since. */

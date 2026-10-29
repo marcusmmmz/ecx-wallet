@@ -20,6 +20,8 @@ export const serveOpener = (_onAppOrigin: (origin: string) => void): boolean => 
 export const canFrameApps = false;
 export const serveFrame = (_frame: HTMLIFrameElement, _on: { origin: (origin: string | undefined) => void; loaded: () => void }): (() => void) => () => {};
 export const hostApprovals = (_show: (id: string | undefined) => void): (() => void) => () => {};
+/** The browser window this page shows in, which the side panel hosts its sites' approvals for. */
+export const panelWindowId = (): Promise<number | undefined> => chrome.windows.getCurrent().then((w) => w.id);
 export const closeOverlayApproval = (_id: string): void => {};
 
 export type View = "popup" | "panel" | "page";

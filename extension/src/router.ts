@@ -58,10 +58,13 @@ export interface ApprovalSurface {
   close(): Promise<void>;
 }
 
-/** A wallet page showing approvals in place, with no reply needed on disconnect. */
+/**
+ * A wallet page showing approvals in place, with no reply needed on disconnect. `onClose` returns
+ * the listener's removal: the side panel stays connected across many approvals.
+ */
 export interface ApprovalHost {
   send(message: ApprovalHostMessage): void;
-  onClose(listener: () => void): void;
+  onClose(listener: () => void): () => void;
 }
 
 /** Platform operations. Requester identity must come from the transport, never the message. */
@@ -69,7 +72,11 @@ export interface RouterHost<Sender> {
   persistent: KeyValueStore;
   session: KeyValueStore;
   fetchWasm(file: string): Promise<ArrayBuffer>;
-  requester(sender: Sender): { walletPage: boolean; origin?: string };
+  /**
+   * `approvalHost`: for a site's request, the wallet page that shows its approvals (the side panel
+   * open in the site's browser window), as the transport reports where the site is.
+   */
+  requester(sender: Sender): { walletPage: boolean; origin?: string; approvalHost?: string };
   scheduleAutoLock(deadline: number | null): Promise<void>;
   openApproval(id: string, onClosed: () => void): Promise<ApprovalSurface | undefined>;
   announceDeadline(deadline: number | null): Promise<void>;
@@ -206,6 +213,8 @@ export function createRouter<Sender>(host: RouterHost<Sender>) {
     surface?: ApprovalSurface;
     /** The wallet page showing it in place of a window, once open there (`APPROVAL_HOST_PORT`). */
     private hostPort?: ApprovalHost;
+    /** Removes this approval's listener for that page closing. */
+    private unlistenHost?: () => void;
 
     /** `host`: a wallet page that shows this approval itself, if it is still open. */
     constructor(private readonly host?: string) {}
@@ -260,7 +269,8 @@ export function createRouter<Sender>(host: RouterHost<Sender>) {
       this.current.resolve(null);
       if (this.hostPort !== undefined) {
         try {
-          this.hostPort.send({ id: null } satisfies ApprovalHostMessage);
+          this.unlistenHost?.();
+          this.hostPort.send({ id: null, closed: this.id } satisfies ApprovalHostMessage);
         } catch {
           // The page is gone.
         }
@@ -280,7 +290,7 @@ export function createRouter<Sender>(host: RouterHost<Sender>) {
       const port = this.host === undefined ? undefined : approvalHosts.get(this.host);
       if (port !== undefined) {
         this.hostPort = port;
-        port.onClose(() => this.close());
+        this.unlistenHost = port.onClose(() => this.close());
         port.send({ id: this.id } satisfies ApprovalHostMessage);
         return;
       }
@@ -299,14 +309,18 @@ export function createRouter<Sender>(host: RouterHost<Sender>) {
 
   const approvals = new Map<string, ApprovalWindow>();
 
-  /** Wallet pages that show their own request's approval, by the `host` they connected as. */
+  /**
+   * Wallet pages that show approvals themselves, by the `host` they connected as: a page's own
+   * request's (a random id), or, for the side panel open in a browser window, the approvals of the
+   * sites in that window (`panel:<windowId>`, see `RouterHost.requester`).
+   */
   const approvalHosts = new Map<string, ApprovalHost>();
 
   /** How long a page told there's nothing left to approve has to close itself before it's closed. */
   const CLOSE_GRACE_MS = 1_000;
 
-  async function askToConnect(prompt: ConnectPrompt): Promise<ConnectAnswer> {
-    const approval = new ApprovalWindow();
+  async function askToConnect(prompt: ConnectPrompt, host?: string): Promise<ConnectAnswer> {
+    const approval = new ApprovalWindow(host);
     try {
       const answer = await approval.ask({ kind: "connect", ...prompt });
       return { approved: answer?.approved === true, blindSigning: answer?.approved === true && answer.blindSigning === true };
@@ -315,8 +329,8 @@ export function createRouter<Sender>(host: RouterHost<Sender>) {
     }
   }
 
-  async function askToNameAsset(prompt: AssetPrompt): Promise<boolean> {
-    const approval = new ApprovalWindow();
+  async function askToNameAsset(prompt: AssetPrompt, host?: string): Promise<boolean> {
+    const approval = new ApprovalWindow(host);
     try {
       return (await approval.ask({ kind: "suggestAsset", ...prompt }))?.approved === true;
     } finally {
@@ -324,8 +338,8 @@ export function createRouter<Sender>(host: RouterHost<Sender>) {
     }
   }
 
-  async function askToTurnOn(prompt: TurnOnPrompt): Promise<boolean> {
-    const approval = new ApprovalWindow();
+  async function askToTurnOn(prompt: TurnOnPrompt, host?: string): Promise<boolean> {
+    const approval = new ApprovalWindow(host);
     try {
       return (await approval.ask({ kind: "turnOn", ...prompt }))?.approved === true;
     } finally {
@@ -408,16 +422,34 @@ export function createRouter<Sender>(host: RouterHost<Sender>) {
     return run.finally(() => host.announceChains(ids).catch(() => {}));
   }
 
-  const handleProviderRequest = createProviderHandler({
+  /**
+   * The Provider's handler for a site's requests from one place (`RouterHost.requester`'s
+   * `approvalHost`): their approvals show on that wallet page (the side panel open in the site's
+   * browser window), else in a window of their own. One handler per host, so its requests share
+   * one unlock.
+   */
+  const providerHandlers = new Map<string, ReturnType<typeof createProviderHandler>>();
+  function providerHandler(approvalHost: string | undefined) {
+    const key = approvalHost ?? "";
+    let handler = providerHandlers.get(key);
+    if (handler === undefined) {
+      handler = createProviderHandler(providerDeps(approvalHost));
+      providerHandlers.set(key, handler);
+    }
+    return handler;
+  }
+
+  const providerDeps = (approvalHost: string | undefined): Parameters<typeof createProviderHandler>[0] => ({
     ...signing,
+    openSigningApproval: (context) => openSigningApproval({ ...context, ...(approvalHost === undefined ? {} : { host: approvalHost }) }),
     grants,
-    askToConnect,
-    askToTurnOn,
+    askToConnect: (prompt) => askToConnect(prompt, approvalHost),
+    askToTurnOn: (prompt) => askToTurnOn(prompt, approvalHost),
     chains: chainsOn,
     receiveAddresses: (slot) => accounts.receiveAddresses(slot),
-    send: (slot, order, from) => announcing([slot], sends.send(slot, order, from)),
-    sendAction: (slot, action, from) => announcing([slot], sends.trade(slot, action, from)),
-    askToNameAsset,
+    send: (slot, order, from) => announcing([slot], sends.send(slot, order, from, approvalHost)),
+    sendAction: (slot, action, from) => announcing([slot], sends.trade(slot, action, from, approvalHost)),
+    askToNameAsset: (prompt) => askToNameAsset(prompt, approvalHost),
     async assetSuggestion(slot, origin, suggestion) {
       const module = await chainModule(slot)!;
       const { entry, network } = servedNetwork(module);
@@ -516,9 +548,10 @@ export function createRouter<Sender>(host: RouterHost<Sender>) {
   async function route(message: BackgroundMessage, sender: Sender): Promise<unknown> {
     switch (message?.kind) {
       case "provider.request": {
-        const origin = host.requester(sender).origin;
+        const { origin, approvalHost } = host.requester(sender);
         if (origin === undefined) throw new ProviderRpcError(ErrorCode.Unauthorized, "Unknown requester.");
-        return handleProviderRequest(origin, message.method, message.params);
+        // Where its approvals show is the transport's word (the site's browser window), never the request's.
+        return providerHandler(approvalHost)(origin, message.method, message.params);
       }
       case "approval.get":
         if (!host.requester(sender).walletPage) return null;
@@ -757,7 +790,7 @@ export function createRouter<Sender>(host: RouterHost<Sender>) {
     activity: () => vault.touch(),
     connectApprovalHost(name: string, port: ApprovalHost) {
       approvalHosts.set(name, port);
-      port.onClose(() => approvalHosts.delete(name));
+      port.onClose(() => approvalHosts.get(name) === port && approvalHosts.delete(name));
     },
   };
 

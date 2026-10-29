@@ -3,7 +3,8 @@
   import { approvalRouteChanged, serveOpener } from "$platform";
   import { PROVIDER_WINDOW } from "../../../client/src/web-wallet";
   import { reportActivity } from "$lib/activity";
-  import { onLockDeadline, vaultStatus } from "$lib/background";
+  import Approval from "$lib/Approval.svelte";
+  import { hostPanelApprovals, onLockDeadline, vaultStatus } from "$lib/background";
   import BottomBar from "$lib/BottomBar.svelte";
   import { page } from "$app/state";
   import { nav, pathOf } from "$lib/nav.svelte";
@@ -45,6 +46,13 @@
     const timer = setTimeout(askVault, Math.max(0, locksAt - Date.now()) + 500);
     return () => clearTimeout(timer);
   });
+  // Pinned to the side, the panel shows its window's sites' approvals over the screen, oldest first.
+  let waiting = $state<string[]>([]);
+  $effect(() => {
+    if (currentView() !== "panel") return;
+    return hostPanelApprovals((ids) => (waiting = ids));
+  });
+  const shown = $derived(waiting[0]);
   // app.css sizes the page by where it shows.
   $effect(() => {
     document.documentElement.dataset.view = currentView();
@@ -56,6 +64,12 @@
   <div class="scroll">{@render children()}</div>
   {#if nav.unlocked && !barless}<BottomBar />{/if}
 </div>
+{#if shown !== undefined}
+  <!-- A site's request, approved here in the panel rather than in a window of its own. -->
+  <div class="panel-approval" data-panel-approval={shown}>
+    {#key shown}<Approval id={shown} hosted ondone={() => (waiting = waiting.filter((id) => id !== shown))} />{/key}
+  </div>
+{/if}
 
 <style>
   .frame {
@@ -66,6 +80,14 @@
   /* The toolbar popup is as tall as the browser lets it be (600px). */
   :global(html[data-view="popup"]) .frame {
     height: 600px;
+  }
+  .panel-approval {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    overflow-y: auto;
+    background: var(--bg);
+    animation: fade-in 0.2s ease both;
   }
   .scroll {
     flex: 1;

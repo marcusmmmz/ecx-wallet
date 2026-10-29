@@ -2,8 +2,9 @@
 // Blockstream's electrs, limited to the endpoints mempool's electrs fork also serves. Esplora knows
 // nothing of watches: the wallet asks for each watched address's outputs and adds them up itself.
 // Flush's explorer (Server API `flush`, docs/adr/0012) is mempool's fork plus `/flush/blocks`: a
-// block there counts as confirmed only once an eCash anchor covers it. Its tokens ride on outputs
-// of value 0, which only the creating transaction's marker explains (docs/adr/0013).
+// block there is confirmed once a block of stake is on top of it (`FLUSH_CONFIRMATIONS`), and
+// `/flush/blocks` only says when it's final. Its tokens ride on outputs of value 0, which only the
+// creating transaction's marker explains (docs/adr/0013).
 //
 // `esploraClient` is the API itself, endpoint by endpoint, each answer checked for shape (Deposit
 // uses it directly on eCash's server); `esploraServer` is the pull path's view of it.

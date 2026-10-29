@@ -1,7 +1,7 @@
 // The app's only channel to the wallet: messages to its background host, which holds every
 // secret and makes every decision. The app renders what it is given and reports the user's choice.
 
-import { request, connect, onMessage, type TransportPort } from "$platform";
+import { request, connect, onMessage, panelWindowId, type TransportPort } from "$platform";
 
 import type {
   ApprovalPrompt,
@@ -115,6 +115,31 @@ export function hostApprovals(onshow: (id: string | null) => void): { host: stri
       port.disconnect();
       onshow(null);
     },
+  };
+}
+
+/**
+ * From the side panel: shows the approvals of the sites in its browser window here, rather than in
+ * windows of their own. `onchange` gets the approvals waiting, oldest first; a closed one leaves
+ * the list. Closing the panel rejects them, as closing their window would. Returns the stop.
+ */
+export function hostPanelApprovals(onchange: (ids: string[]) => void): () => void {
+  let ids: string[] = [];
+  let port: TransportPort | undefined;
+  let stopped = false;
+  panelWindowId().then((windowId) => {
+    if (stopped || windowId === undefined) return;
+    port = connect(`${APPROVAL_HOST_PORT}panel:${windowId}`);
+    port.onMessage.addListener((raw: unknown) => {
+      const message = raw as { id?: string | null; closed?: string } | undefined;
+      if (typeof message?.id === "string" && !ids.includes(message.id)) ids = [...ids, message.id];
+      if (typeof message?.closed === "string") ids = ids.filter((id) => id !== message.closed);
+      onchange(ids);
+    });
+  }, () => {});
+  return () => {
+    stopped = true;
+    port?.disconnect();
   };
 }
 
