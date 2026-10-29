@@ -4,5 +4,8 @@
   import Approval from "$lib/Approval.svelte";
 </script>
 
-<!-- The approval window: one request's approval, which closes the window once answered. -->
-<Approval id={page.params.id ?? ""} ondone={closeApproval} />
+<!-- Each request gets fresh prompt state, even when a web approval replaces this route. -->
+{#key page.params.id}
+  {@const id = page.params.id ?? ""}
+  <Approval {id} ondone={() => { if (page.params.id === id) closeApproval(); }} />
+{/key}
