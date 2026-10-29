@@ -33,7 +33,7 @@ pnpm typecheck
 
 ## Web wallet
 
-`pnpm build:web` writes a static site to `app/build-web` (or `pnpm --filter @ecx/app build:web` after building core). Serve it over HTTPS. Its `_headers` file supplies the CSP and security headers in Netlify / Cloudflare Pages format; other hosts must send those headers themselves.
+`pnpm build:web` writes a static site to `app/build-web` (or `pnpm --filter @ecx/app build:web` after building core). Serve it over HTTPS. It supplies the CSP and security headers twice: `_headers` for Netlify / Cloudflare Pages, and `vercel.json` for Vercel (`vercel deploy app/build-web`). Other hosts must send those headers themselves.
 
 The web wallet supports eCash and Flush, with keys held in a dedicated Worker and encrypted data in IndexedDB. Reloading locks it: the session lives only in memory. Auto-lock uses a timer and checks the deadline when the tab becomes visible, as well as on every use. Approvals stay in the page. There is no Provider or dApp connection, and no browser side panel. Slot 24 is unavailable because its explorer sends no CORS headers (checked 2026-10-29).
 
