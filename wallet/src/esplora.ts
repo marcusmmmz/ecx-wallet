@@ -294,7 +294,15 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
   /** A call's response; any 2xx is an answer (mempool's instances send 203). */
   async function response(path: string, init?: RequestInit): Promise<{ status: number; ok: boolean; body: string }> {
     const answer = await serverFetch(fetchFn, url, path, init);
-    return { status: answer.status, ok: answer.ok, body: await answer.text().catch(() => "") };
+    let body: string;
+    try {
+      body = await answer.text();
+    } catch {
+      // Cut off on the way: a connection problem, not a malformed answer.
+      if (answer.ok) throw new SidechainServerError(url, `Couldn't read the Sidechain Server's answer at ${url}: it was cut off.`);
+      body = "";
+    }
+    return { status: answer.status, ok: answer.ok, body };
   }
 
   /** The server's reason, as plain text (Blockstream), `{"error": …}` (mempool's fork), or an HTML page's status alone. */
@@ -317,12 +325,13 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
     return answer.body;
   }
 
-  /** `body` as JSON; `what` names it in the error if it isn't. */
+  /** `body` as JSON; `what` names it in the error if it isn't, with how the body starts. */
   function parsed(body: string, what: string): unknown {
     try {
       return JSON.parse(body);
     } catch {
-      throw malformed(what);
+      const start = body.trim().slice(0, 60).replace(/\s+/g, " ");
+      throw new SidechainServerError(url, `The Sidechain Server at ${url} sent a malformed ${what} (not JSON: ${start === "" ? "empty" : `"${start}${body.trim().length > 60 ? "…" : ""}"`}).`);
     }
   }
 
@@ -348,7 +357,7 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
 
   /** A list of transactions with their statuses as the server reports them. */
   function transactionList(body: unknown): EsploraTx[] {
-    if (!Array.isArray(body)) throw malformed("list of transactions");
+    if (!Array.isArray(body)) throw malformed(`list of transactions (not a list: ${JSON.stringify(body)?.slice(0, 60)})`);
     return body.map(transaction);
   }
 
