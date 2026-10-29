@@ -2,11 +2,11 @@
 // not in a window of their own. Brave only: Firefox's sidebar can't be opened from a test.
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
-import { launchWallet, openTestApp, openWalletPage, serveTestApp, setUpWallet } from "../harness.mjs";
+import { BROWSERS, launchWallet, openTestApp, openWalletPage, serveTestApp, setUpWallet } from "../harness.mjs";
 
 const CONNECT = { slots: [24], methods: ["getAddresses"] };
 
-describe("brave", () => {
+describe("brave", { skip: !BROWSERS.includes("brave") }, () => {
   let session;
   let app;
   let wallet;
