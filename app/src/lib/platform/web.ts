@@ -98,7 +98,7 @@ function closeSurface(back: boolean): void {
   post({ type: "approvalClosed", id: previous.id });
   // A request may finish before its route has opened. Wait for it before returning.
   if (back) previous.opening?.then(() => {
-    if (location.hash === `#/approve/${previous.id}`) return goto(previous.back, { replaceState: true });
+    if (!approval && location.hash === `#/approve/${previous.id}`) return goto(previous.back, { replaceState: true });
   }).catch(console.error);
 }
 

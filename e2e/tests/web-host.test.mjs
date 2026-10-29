@@ -123,6 +123,22 @@ test("web transport matches replies by id, relays ports and announcements, and r
     finishOpening();
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(globalThis.location.hash, "#/settings", "closing before navigation finishes still returns to the previous route");
+    // A completed request's return must not interrupt a newer approval still opening.
+    let finishOld;
+    let finishNew;
+    globalThis.webHostTestGoto = (hash) => new Promise((resolve) => {
+      const finish = () => { globalThis.location.hash = hash; resolve(); };
+      if (hash === "#/approve/old") finishOld = finish;
+      else finishNew = finish;
+    });
+    emit({ type: "openApproval", id: "old" });
+    emit({ type: "closeApproval", id: "old" });
+    emit({ type: "openApproval", id: "new" });
+    finishOld();
+    await new Promise((resolve) => setImmediate(resolve));
+    finishNew();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(globalThis.location.hash, "#/approve/new");
     globalThis.document.visibilityState = "visible";
     visibility();
     assert.deepEqual(sent.at(-1), { type: "checkAutoLock" });
@@ -131,5 +147,83 @@ test("web transport matches replies by id, relays ports and announcements, and r
   } finally {
     Object.assign(globalThis, saved);
     delete globalThis.webHostTestGoto;
+  }
+});
+
+test("web Workers serialize Sends and Deposits across pages and release the lock on failure", async () => {
+  const savedSelf = globalThis.self;
+  const savedNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  const receivers = [];
+  const responses = [];
+  const routed = [];
+  const waiting = [];
+  const locks = [];
+  const queues = new Map();
+  globalThis.self = {
+    addEventListener: (_name, listener) => receivers.push(listener),
+    postMessage: (message) => responses.push(message),
+  };
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { locks: {
+    request(name, options, run) {
+      locks.push(name);
+      const result = (queues.get(name) ?? Promise.resolve()).then(() => {
+        options.signal.throwIfAborted();
+        return run();
+      });
+      queues.set(name, result.catch(() => {}));
+      return result;
+    },
+  } } });
+  globalThis.webWorkerTestRouter = (page) => ({
+    connectApprovalHost() {},
+    route(message) {
+      routed.push([page, message.kind]);
+      if (message.kind === "vault.status") return Promise.resolve("locked");
+      return new Promise((resolve, reject) => waiting.push({ resolve, reject }));
+    },
+    toErrorResponse: (error) => ({ ok: false, error: { code: 4001, message: error.message } }),
+  });
+  try {
+    for (const page of [1, 2]) await load({
+      entryPoints: [`${root}app/src/lib/platform/worker.ts`],
+      plugins: [{ name: "router", setup(build) {
+        build.onResolve({ filter: /extension\/src\/router$/ }, () => ({ path: "router", namespace: "test" }));
+        build.onLoad({ filter: /.*/, namespace: "test" }, () => ({
+          contents: `export const createRouter = () => globalThis.webWorkerTestRouter(${page});`,
+        }));
+      } }],
+    });
+    const send = (page, id, kind, extra = {}) => receivers[page - 1]({ data: { type: "request", id, message: { kind, slot: 99, ...extra } } });
+    const tick = () => new Promise((resolve) => setImmediate(resolve));
+    send(1, 1, "send.start");
+    send(2, 2, "send.start", { slot: "099" });
+    send(2, 3, "vault.status");
+    await tick();
+    assert.deepEqual(locks, ["ecx-wallet:spend:99", "ecx-wallet:spend:99"]);
+    assert.deepEqual(routed, [[2, "vault.status"], [1, "send.start"]]);
+    assert.equal(responses[0].id, 3, "reads do not wait for another tab's approval");
+    waiting[0].reject(new Error("User rejected."));
+    await tick();
+    assert.deepEqual(routed.at(-1), [2, "send.start"]);
+    assert.equal(responses.find((r) => r.id === 1).response.ok, false);
+    waiting[1].resolve({ txid: "sent" });
+    await tick();
+    assert.deepEqual(responses.find((r) => r.id === 2).response, { ok: true, result: { txid: "sent" } });
+    send(1, 4, "deposit.start", { slot: 24 });
+    receivers[1]({ data: { type: "connect", id: 10, name: "approval.host:leaving" } });
+    send(2, 5, "deposit.start", { host: "leaving" });
+    await tick();
+    assert.deepEqual(locks.slice(-2), ["ecx-wallet:spend:l1", "ecx-wallet:spend:l1"], "Deposits to different Slots share L1 coins");
+    assert.deepEqual(routed.slice(-1), [[1, "deposit.start"]]);
+    receivers[1]({ data: { type: "disconnect", id: 10 } });
+    waiting[2].resolve({ txid: "deposited" });
+    await tick();
+    assert.deepEqual(routed.slice(-1), [[1, "deposit.start"]], "a form closed while queued never reaches the router");
+    assert.equal(responses.find((r) => r.id === 5).response.error.code, 4001);
+  } finally {
+    globalThis.self = savedSelf;
+    if (savedNavigator) Object.defineProperty(globalThis, "navigator", savedNavigator);
+    else delete globalThis.navigator;
+    delete globalThis.webWorkerTestRouter;
   }
 });
