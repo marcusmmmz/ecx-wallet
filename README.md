@@ -24,11 +24,18 @@ Needs node 22, pnpm, rustup (the toolchain is pinned in `core/rust-toolchain.tom
 ```sh
 pnpm test          # Rust tests, then build everything and run the e2e suite in headless Brave and Firefox
 pnpm build         # build only: core/dist/*.wasm, then extension/dist/{chromium,firefox}
+pnpm build:web     # core WASM, then the standalone web wallet in app/build-web
 pnpm typecheck
 ```
 
 - One browser only: `E2E_BROWSERS=brave pnpm test`. Watch the browser: `HEADFUL=1`.
 - How the tests work and how to write one: [docs/testing.md](docs/testing.md).
+
+## Web wallet
+
+`pnpm build:web` writes a static site to `app/build-web` (or `pnpm --filter @ecx/app build:web` after building core). Serve it over HTTPS. Its `_headers` file supplies the CSP and security headers in Netlify / Cloudflare Pages format; other hosts must send those headers themselves.
+
+The web wallet supports eCash and Flush, with keys held in a dedicated Worker and encrypted data in IndexedDB. Reloading locks it: the session lives only in memory. Auto-lock uses a timer and checks the deadline when the tab becomes visible, as well as on every use. Approvals stay in the page. There is no Provider or dApp connection, and no browser side panel. Slot 24 is unavailable because its explorer sends no CORS headers (checked 2026-10-29).
 
 ## Release
 

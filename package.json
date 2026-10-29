@@ -6,6 +6,7 @@
   "engines": { "node": ">=22" },
   "scripts": {
     "build": "pnpm --filter @ecx/core build && pnpm --filter @ecx/app build && pnpm --filter @ecx/extension build",
+    "build:web": "pnpm --filter @ecx/core build && pnpm --filter @ecx/app build:web",
     "build:e2e": "node e2e/scripts/build.mjs",
     "test": "pnpm --filter @ecx/core test && pnpm build && pnpm build:e2e && pnpm --filter @ecx/e2e test",
     "test:quick": "node e2e/scripts/quick.mjs",

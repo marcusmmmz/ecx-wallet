@@ -1,5 +1,6 @@
 <script lang="ts">
   import "../app.css";
+  import { approvalRouteChanged } from "$platform";
   import { reportActivity } from "$lib/activity";
   import { onLockDeadline, vaultStatus } from "$lib/background";
   import BottomBar from "$lib/BottomBar.svelte";
@@ -12,6 +13,7 @@
   $effect(reportActivity);
   // The bottom bar: on every screen of an unlocked wallet, but not in an approval window or while setting one up.
   const path = $derived(pathOf(page.url.hash));
+  $effect(() => approvalRouteChanged(path));
   const barless = $derived(/^\/(approve|create|import)(\/|$)/.test(path));
   // Until the first answer the bar's place isn't known (`data-bar-known`, which the e2e tests wait for).
   let barKnown = $state(false);

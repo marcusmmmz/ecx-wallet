@@ -3,6 +3,7 @@
 One section per feature: what the user sees, then how the wallet does it, with the names to search the code for. Terms are defined in [GLOSSARY.md](../GLOSSARY.md); the reasons behind each design are in [docs/adr/](adr/).
 
 - [The request path](#the-request-path)
+- [Web build](#web-build)
 - [Vault](#vault)
 - [Accounts and keys](#accounts-and-keys)
 - [Sidechain Servers](#sidechain-servers)
@@ -25,6 +26,16 @@ website → client discovery → injected Provider (inpage.ts, main world)
 - The approval window is the app page at `#/approve/<id>` (`app/src/lib/Approval.svelte`). It talks to the background only through `runtime.sendMessage`.
 - **The wallet's own Send and Deposit approve in place.** The toolbar popup closes whenever another window takes focus, so those screens don't open a window (the side panel stays open, and approves in place the same way): each connects a port (`approval.host:<host>`, `hostApprovals`) and passes `host` with its request, and the background posts the approval's id on that port. The screen then shows the same `Approval` component where its form was. Closing the popup disconnects the port, which rejects the request, as closing an approval window does. An app's request, and a `/v1` server's, still get a window.
 - Wallet pages (home, Send, Settings…) talk to the background the same way, one message kind per action (`vault.*`, `send.start`, `history.reported`…). The shared router is in `extension/src/router.ts`; `extension/src/background.ts` supplies its browser operations and wires the listeners.
+
+## Web build
+
+`pnpm build:web` builds core and the app into `app/build-web`; `pnpm --filter @ecx/app build:web` reuses the built core. Vite selects `$platform`: extension runtime messages and browser surfaces, or a dedicated module Worker (`app/src/lib/platform/worker.ts`). Both use the same router and wallet message shapes. The web app relays deadline and chain announcements, activity and approval-host ports over that Worker channel.
+
+- **Storage:** encrypted vault and other persistent data in IndexedDB; unlock state and session cache only in Worker memory. Reloading locks the wallet. Auto-lock uses a timer, checks again when the page becomes visible (background timers may be throttled), and still enforces the deadline on every use.
+- **Approvals:** Send and Deposit still approve in place through their host port. An approval surface opens `#/approve/<id>` in the same page and returns to the previous route when done; leaving it cancels the request.
+- **Requester:** always the wallet page, with no origin. No Provider is injected and dApp requests are refused as Unauthorized. Grants cannot attest a web caller here. Pin and side-panel controls are absent.
+- **Chains:** Slot 24 is excluded because `explorer.bitnames.info` sends no CORS headers (checked 2026-10-29). `app/scripts/web-config.mjs` selects the registry, WASM and Chain Entries together, without changing the Chain Entry format.
+- **Headers:** `_headers` contains the HTTP CSP, `nosniff` and `no-referrer`. Its `connect-src` uses the same Chain Entry origin derivation as extension host permissions, with Slot 24 left out. The web bootstrap is external, as in the extension. Serve over HTTPS and configure the host to send those headers.
 
 ## Vault
 

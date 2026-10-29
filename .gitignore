@@ -3,3 +3,4 @@ dist/
 build/
 .svelte-kit/
 .profile-*/
+build-web/

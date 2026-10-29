@@ -12,11 +12,12 @@ import {
   type NetworkEntry,
   type Starter,
 } from "./chain-module";
+import { CHAIN_MODULE_FILES } from "./module-files";
 import type { NamedAsset } from "./assets";
 import { speaksEsplora } from "./server-api";
 
 /** Slots with a bundled Chain Module, and the .wasm each ships as. */
-export const CHAIN_MODULE_FILES: Readonly<Record<number, string>> = { 24: "elements.wasm", 99: "flush.wasm" };
+export { CHAIN_MODULE_FILES } from "./module-files";
 
 export const SUPPORTED_SLOTS: readonly number[] = Object.keys(CHAIN_MODULE_FILES).map(Number);
 
