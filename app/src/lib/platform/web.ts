@@ -250,3 +250,5 @@ export const currentView = (): View => "page";
 export const canPin = () => false;
 export const pinToSide = async () => {};
 export const unpin = () => {};
+/** No side panel here: an app's approvals show over the Apps view or in the Provider window. */
+export const panelWindowId = async (): Promise<number | undefined> => undefined;

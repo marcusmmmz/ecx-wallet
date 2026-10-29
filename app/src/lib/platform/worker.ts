@@ -111,7 +111,10 @@ self.addEventListener("message", (event: MessageEvent<ToWorker>) => {
       ports.set(m.id, port);
       if (m.name.startsWith(APPROVAL_HOST_PORT)) router.connectApprovalHost(m.name.slice(APPROVAL_HOST_PORT.length), {
         send: (message) => post({ type: "portMessage", id: m.id, message }),
-        onClose: (listener) => port.closed.push(listener),
+        onClose: (listener) => {
+          port.closed.push(listener);
+          return () => (port.closed = port.closed.filter((l) => l !== listener));
+        },
       });
       break;
     }

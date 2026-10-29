@@ -27,6 +27,15 @@ function fromWalletPage(sender: chrome.runtime.MessageSender): boolean {
   return sender.id === chrome.runtime.id && (sender.url?.startsWith(chrome.runtime.getURL("")) ?? false);
 }
 
+/** True for the wallet's side panel (Chromium) or sidebar (Firefox): its page, in its panel view. */
+function isPanel(sender: chrome.runtime.MessageSender): boolean {
+  if (!fromWalletPage(sender) || sender.tab !== undefined || sender.url === undefined) return false;
+  return new URL(sender.url).searchParams.get("view") === "panel";
+}
+
+/** The host a side panel registers as for the browser window it's open in (`APPROVAL_HOST_PORT`). */
+const panelHost = (windowId: number | undefined) => (windowId === undefined || windowId < 0 ? undefined : `panel:${windowId}`);
+
 // Where the toolbar button opens the wallet: its popup, or pinned to the side (Chromium's side
 // panel, Firefox's sidebar). Kept in `storage.local` and applied on every start: the browser
 // forgets `action.setPopup` when it restarts.
@@ -70,7 +79,12 @@ const host: RouterHost<chrome.runtime.MessageSender> = {
   persistent: keyValueStore(chrome.storage.local),
   session: keyValueStore(chrome.storage.session),
   fetchWasm: (file) => fetch(chrome.runtime.getURL(file)).then((response) => response.arrayBuffer()),
-  requester: (sender) => ({ walletPage: fromWalletPage(sender), origin: requesterOrigin(sender) }),
+  // A site's approvals go to the side panel in its tab's window: the browser's word, never the request's.
+  requester: (sender) => {
+    const origin = requesterOrigin(sender);
+    const approvalHost = origin === undefined ? undefined : panelHost(sender.tab?.windowId);
+    return { walletPage: fromWalletPage(sender), origin, ...(approvalHost === undefined ? {} : { approvalHost }) };
+  },
   async scheduleAutoLock(deadline) {
     if (deadline === null) await chrome.alarms.clear(AUTO_LOCK_ALARM);
     else await chrome.alarms.create(AUTO_LOCK_ALARM, { when: deadline });
@@ -99,9 +113,15 @@ chrome.runtime.onConnect.addListener((port) => {
   if (port.sender === undefined || !fromWalletPage(port.sender)) return;
   if (port.name === ACTIVITY_PORT) port.onMessage.addListener(() => router.activity().catch(console.error));
   if (port.name.startsWith(APPROVAL_HOST_PORT)) {
-    router.connectApprovalHost(port.name.slice(APPROVAL_HOST_PORT.length), {
+    const name = port.name.slice(APPROVAL_HOST_PORT.length);
+    // A window's sites' approvals go only to the wallet's side panel itself.
+    if (name.startsWith("panel:") && !isPanel(port.sender)) return port.disconnect();
+    router.connectApprovalHost(name, {
       send: (message) => port.postMessage(message),
-      onClose: (listener) => port.onDisconnect.addListener(listener),
+      onClose: (listener) => {
+        port.onDisconnect.addListener(listener);
+        return () => port.onDisconnect.removeListener(listener);
+      },
     });
   }
 });
