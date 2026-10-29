@@ -334,7 +334,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
       }));
       await closeSettled(page);
       assert.deepEqual(shown.entries, [received.txid]);
-      assert.match(shown.error, /^Couldn't refresh Main chain activity: The Sidechain Server at .+ sent a malformed list of transactions\. Retry$/);
+      assert.match(shown.error, /^Couldn't refresh Main chain activity: The Sidechain Server at .+ sent a malformed list of transactions \(not a list: \{"not":"a list"\}\)\. Retry$/);
     } finally {
       L1.delayMs = 0;
       delete L1.addressTxs;

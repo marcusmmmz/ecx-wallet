@@ -25,12 +25,14 @@ import {
   type NetworkEntry,
   type OutputTokens,
   type ReportedCoin,
+  type ResultClaim,
   type Starter,
   type TransferOutput,
   type WholeTxCoin,
 } from "./chain-module";
 import { ErrorCode, ProviderRpcError } from "./errors";
-import { feeRate, QUERIES_AT_ONCE, type EsploraClient } from "./esplora";
+import { feeRate, QUERIES_AT_ONCE, type EsploraClient, type EsploraTxStatus } from "./esplora";
+import { resultTokens, type HeldResult, type TradeStore } from "./flush-trades";
 import { checkedOrder, isTransferAskedFor, WATCHED_CHANGE_ADDRESSES, WATCHED_RECEIVE_ADDRESSES, type PullPath, type SendResult } from "./pull-path";
 import { rejected, type ApprovalContext, type SignPrompt, type SigningApproval } from "./signing";
 import { speaksEsplora } from "./server-api";
@@ -71,6 +73,8 @@ export interface SendDeps extends Keys, ChainModules {
   usedLinks: UsedLinks;
   /** Where the Slot's last Send refused after approval is kept for the session. */
   cache?: SessionCache;
+  /** Where the market index's answers for trades in final blocks are kept for good (docs/adr/0017). */
+  tradeStore?: TradeStore;
   /** Milliseconds since the epoch. */
   now(): number;
 }
@@ -139,7 +143,7 @@ export function createSends(deps: SendDeps) {
             (await server.addressUtxos(address)).flatMap((u) =>
               u.value === undefined || (u.value === 0 && !(readsTokens && u.confirmed))
                 ? []
-                : [{ txid: u.txid, vout: u.vout, asset: u.asset ?? NATIVE_COIN, value: String(u.value), chain, index, confirmed: u.confirmed }],
+                : [{ txid: u.txid, vout: u.vout, asset: u.asset ?? NATIVE_COIN, value: String(u.value), chain, index, confirmed: u.confirmed, status: u.status }],
             ),
           ),
         )),
@@ -154,7 +158,7 @@ export function createSends(deps: SendDeps) {
     const held = await heldOutpoints(slot, server);
     const coins = utxos
       .filter((u) => (u.confirmed || trusted.has(u.txid)) && !held.has(`${u.txid}:${u.vout}`))
-      .map(({ confirmed: _, ...coin }) => coin);
+      .map(({ confirmed: _, status: __, ...coin }) => coin);
     return { coins, account };
   }
 
@@ -162,7 +166,7 @@ export function createSends(deps: SendDeps) {
    * `utxos` with each value-0 one as the asset token its transaction lists on it, by the module;
    * one that carries no asset token (a control coin, a result, nothing) is left out.
    */
-  async function withTokens<T extends { txid: string; vout: number; asset: string; value: string }>(
+  async function withTokens<T extends { txid: string; vout: number; asset: string; value: string; status?: EsploraTxStatus; result?: ResultClaim }>(
     target: KeyedChain<Starter>,
     server: EsploraClient,
     utxos: T[],
@@ -179,11 +183,54 @@ export function createSends(deps: SendDeps) {
         listed.set(batch[j], tokens);
       });
     }
+    const named = await withResults(server, utxos, listed);
     return utxos.flatMap((u) => {
       if (u.value !== "0") return [u];
-      const token = listed.get(u.txid)!.outputs.find((o) => o.vout === u.vout)?.token;
-      return token?.kind === "asset" ? [{ ...u, asset: token.id, value: token.amount }] : [];
+      const output = listed.get(u.txid)!.outputs.find((o) => o.vout === u.vout);
+      const token = output?.token;
+      if (token?.kind === "asset") return [{ ...u, asset: token.id, value: token.amount }];
+      const result = named.get(`${u.txid}:${u.vout}`);
+      return result === undefined ? [] : [{ ...u, asset: result.asset, value: result.amount, result }];
     });
+  }
+
+  /**
+   * What each confirmed trade result among `utxos` carries, as the market index names it, with its
+   * order's pools as the explorer describes each (docs/adr/0013): the module checks both against the
+   * order before it spends one. A result the index can't name yet is left out.
+   */
+  async function withResults(server: EsploraClient, utxos: { txid: string; vout: number; value: string; status?: EsploraTxStatus }[], listed: Map<string, OutputTokens>) {
+    const named = new Map<string, ResultClaim>();
+    const held: HeldResult[] = utxos.flatMap(({ txid, vout, value, status }) => {
+      const tokens = listed.get(txid);
+      const isResult = tokens?.outputs.some((o) => o.vout === vout && o.token === undefined);
+      return value === "0" && isResult && tokens?.swap !== undefined && status?.confirmed ? [{ txid, vout, order: tokens.swap, status }] : [];
+    });
+    if (held.length === 0) return named;
+    const said = await resultTokens(held, server, { session: deps.cache, store: deps.tradeStore });
+    const pools = new Map<string, Promise<unknown>>();
+    const described = (id: string) => {
+      let pool = pools.get(id);
+      if (pool === undefined) pools.set(id, (pool = server.flushRpc("getpool", [id])));
+      return pool;
+    };
+    await Promise.all(
+      held.map(async (r, i) => {
+        const token = said[i];
+        if (token === undefined) return;
+        try {
+          named.set(`${r.txid}:${r.vout}`, { asset: token.asset, amount: token.amount, pools: await Promise.all(r.order.pools.map(described)) });
+        } catch {
+          // Without its pools' descriptions the module can't check it: left out, as unnamed.
+        }
+      }),
+    );
+    return named;
+  }
+
+  /** The Decoder's evidence for the results `built` spends, which only the market index names (docs/adr/0013). */
+  function resultEvidence(coins: ReportedCoin[], spent: { txid: string; vout: number }[]) {
+    return coins.flatMap((c) => (c.result !== undefined && spent.some((s) => s.txid === c.txid && s.vout === c.vout) ? [{ txid: c.txid, vout: c.vout, ...c.result }] : []));
   }
 
   /** `coins` as whole transactions, for a `psbt` module. Each is fetched once; the module checks what it holds. */
@@ -194,7 +241,7 @@ export function createSends(deps: SendDeps) {
       const batch = txids.slice(i, i + QUERIES_AT_ONCE);
       (await Promise.all(batch.map((txid) => server.txHex(txid)))).forEach((tx, j) => hex.set(batch[j], tx));
     }
-    return coins.map(({ txid, vout, chain, index }) => ({ tx: hex.get(txid)!, vout, chain, index }));
+    return coins.map(({ txid, vout, chain, index, result }) => ({ tx: hex.get(txid)!, vout, chain, index, ...(result === undefined ? {} : { result }) }));
   }
 
   /** The first change address nothing has paid yet; the last one once all are used. */
@@ -222,7 +269,7 @@ export function createSends(deps: SendDeps) {
     // An app may ask while the wallet is locked: the window unlocks first, then shows the transfer.
     if (server === undefined) {
       if (from === undefined) return deps.pullPath.send(slot, checked);
-      const approval = deps.openSigningApproval({ origin: from.origin, chain: target.chain });
+      const approval = deps.openSigningApproval({ origin: from.origin, chain: target.chain, ...(host === undefined ? {} : { host }) });
       try {
         if (!(await deps.isUnlocked()) && !(await approval.unlock())) throw rejected();
         return await deps.pullPath.send(slot, checked, { requester: from.origin, approval });
@@ -265,7 +312,8 @@ export function createSends(deps: SendDeps) {
         }
         await refusing(async () => target.module.check(built.pset));
 
-        const decoded = await refusing(async () => target.module.decode(built.pset, await target.key()));
+        const results = resultEvidence(coins, built.spent);
+        const decoded = await refusing(async () => target.module.decode(built.pset, await target.key(), results.length === 0 ? undefined : { results }));
         if (decoded.kind !== "clear") throw new Error(`The wallet can't fully explain the transfer it built: ${decoded.reason}`);
         // Anything else is a wallet bug: refused, never shown.
         if (!isTransferAskedFor(decoded.view, checked)) throw new Error("The built transfer isn't the one asked for.");
@@ -399,7 +447,7 @@ export function createSends(deps: SendDeps) {
   }
 
   /** One trade an app's link asks for (`sendAction`, docs/adr/0016), once the Slot's previous Send is done. */
-  async function tradeNow(slot: number, link: string, from: { origin: string }): Promise<SendResult> {
+  async function tradeNow(slot: number, link: string, from: { origin: string }, host: string | undefined): Promise<SendResult> {
     const target = await routing.slot(slot);
     const server = esplora(target);
     if (server === undefined || !target.module.declare().capabilities.includes("trades")) {
@@ -411,7 +459,7 @@ export function createSends(deps: SendDeps) {
     await server.checkChain();
     const facts = await tradeFacts(server, action);
 
-    const approval = deps.openSigningApproval({ origin: from.origin, chain: target.chain });
+    const approval = deps.openSigningApproval({ origin: from.origin, chain: target.chain, ...(host === undefined ? {} : { host }) });
     let built: BuiltTrade;
     let tipHeight: number;
     let finalized: { tx: string; txid: string };
@@ -438,7 +486,8 @@ export function createSends(deps: SendDeps) {
         throw new SidechainServerError(server.url, `The Sidechain Server at ${server.url} sent a transaction that isn't one it listed. Nothing was sent.`);
       }
       await refusing(async () => target.module.check(built.pset));
-      const decoded = await refusing(async () => target.module.decode(built.pset, key, { pools: facts.pools }));
+      const results = resultEvidence(coins, built.spent);
+      const decoded = await refusing(async () => target.module.decode(built.pset, key, { pools: facts.pools, ...(results.length === 0 ? {} : { results }) }));
       if (decoded.kind !== "clear") throw new Error(`The wallet can't fully explain the trade it built: ${decoded.reason}`);
       if (!isTradeBuilt(decoded.view, built.trade)) throw new Error("The built trade isn't the one asked for.");
       const prompt: SignPrompt = { origin: from.origin, chain: target.chain, requestId: `trade-${slot}`, decoded, trade: built.trade };
@@ -500,9 +549,10 @@ export function createSends(deps: SendDeps) {
      * Trades as `link` (a `flush:` link) asks, for the app `from` (`sendAction`): checked, built from
      * the account's coins, approved Clear, broadcast with its marker's ECX allowed, its coins held and
      * the link kept as run. Throws on refusal or rejection. In the Slot's queue with its Sends.
+     * `host` as for `send`.
      */
-    trade(slot: number, link: string, from: { origin: string }): Promise<SendResult> {
-      return queued(slot, () => tradeNow(slot, link, from));
+    trade(slot: number, link: string, from: { origin: string }, host?: string): Promise<SendResult> {
+      return queued(slot, () => tradeNow(slot, link, from, host));
     },
 
     /** The Slot's last Send refused after approval this session, if not closed since. */

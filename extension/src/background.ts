@@ -14,6 +14,7 @@ import {
   esploraConfig,
   createL1Module,
   createProviderHandler,
+  providerPending,
   createPullPath,
   createSends,
   createSettings,
@@ -268,7 +269,8 @@ class ApprovalWindow {
     this.current.resolve(null);
     if (this.hostPort !== undefined) {
       try {
-        this.hostPort.postMessage({ id: null } satisfies ApprovalHostMessage);
+        this.hostPort.onDisconnect.removeListener(this.hostClosed);
+        this.hostPort.postMessage({ id: null, closed: this.id } satisfies ApprovalHostMessage);
       } catch {
         // The page is gone.
       }
@@ -282,13 +284,16 @@ class ApprovalWindow {
     else remove();
   }
 
+  /** The hosting page closed: as closing the window, a rejection. */
+  private readonly hostClosed = () => this.close();
+
   private open(): void {
     this.opened = true;
     approvals.set(this.id, this);
     const port = this.host === undefined ? undefined : approvalHosts.get(this.host);
     if (port !== undefined) {
       this.hostPort = port;
-      port.onDisconnect.addListener(() => this.close());
+      port.onDisconnect.addListener(this.hostClosed);
       port.postMessage({ id: this.id } satisfies ApprovalHostMessage);
       return;
     }
@@ -309,14 +314,21 @@ function deferred<T>() {
 
 const approvals = new Map<string, ApprovalWindow>();
 
-/** Wallet pages that show their own request's approval, by the `host` they connected as. */
+/**
+ * Wallet pages that show approvals themselves, by the `host` they connected as: a page's own
+ * request's (a random id), or, for the side panel open in a browser window, the approvals of the
+ * sites in that window (`panelHost`).
+ */
 const approvalHosts = new Map<string, chrome.runtime.Port>();
+
+/** The host a side panel registers as for the browser window it's open in (`APPROVAL_HOST_PORT`). */
+const panelHost = (windowId: number | undefined) => (windowId === undefined || windowId < 0 ? undefined : `panel:${windowId}`);
 
 /** How long a page told there's nothing left to approve has to close itself before it's closed. */
 const CLOSE_GRACE_MS = 1_000;
 
-async function askToConnect(prompt: ConnectPrompt): Promise<ConnectAnswer> {
-  const approval = new ApprovalWindow();
+async function askToConnect(prompt: ConnectPrompt, host?: string): Promise<ConnectAnswer> {
+  const approval = new ApprovalWindow(host);
   try {
     const answer = await approval.ask({ kind: "connect", ...prompt });
     return { approved: answer?.approved === true, blindSigning: answer?.approved === true && answer.blindSigning === true };
@@ -325,8 +337,8 @@ async function askToConnect(prompt: ConnectPrompt): Promise<ConnectAnswer> {
   }
 }
 
-async function askToNameAsset(prompt: AssetPrompt): Promise<boolean> {
-  const approval = new ApprovalWindow();
+async function askToNameAsset(prompt: AssetPrompt, host?: string): Promise<boolean> {
+  const approval = new ApprovalWindow(host);
   try {
     return (await approval.ask({ kind: "suggestAsset", ...prompt }))?.approved === true;
   } finally {
@@ -334,8 +346,8 @@ async function askToNameAsset(prompt: AssetPrompt): Promise<boolean> {
   }
 }
 
-async function askToTurnOn(prompt: TurnOnPrompt): Promise<boolean> {
-  const approval = new ApprovalWindow();
+async function askToTurnOn(prompt: TurnOnPrompt, host?: string): Promise<boolean> {
+  const approval = new ApprovalWindow(host);
   try {
     return (await approval.ask({ kind: "turnOn", ...prompt }))?.approved === true;
   } finally {
@@ -352,8 +364,9 @@ function openSigningApproval(context: ApprovalContext): SigningApproval {
   };
 }
 
-// Closing the approval window counts as rejecting.
+// Closing the approval window counts as rejecting. A browser window's Provider handler goes with it.
 chrome.windows.onRemoved.addListener((windowId) => {
+  providerHandlers.delete(panelHost(windowId)!);
   for (const approval of approvals.values()) if (approval.windowId === windowId) approval.close();
 });
 
@@ -440,16 +453,36 @@ function announcing<T>(ids: ("l1" | number)[], run: Promise<T>): Promise<T> {
   return run.finally(() => chrome.runtime.sendMessage({ kind: "chains.changed", ids }).catch(() => {}));
 }
 
-const handleProviderRequest = createProviderHandler({
+/**
+ * The Provider's handler for a site's requests from one browser window: their approvals show in
+ * the wallet's side panel (or Firefox's sidebar) when it's open in that window (`panelHost`),
+ * else in a window of their own. What waits on the user per origin (one unlock window, one asset
+ * suggestion) is shared by every window's handler, so a site can't open one per window.
+ */
+const providerHandlers = new Map<string, ReturnType<typeof createProviderHandler>>();
+const pendingPerOrigin = providerPending();
+function providerHandler(host: string | undefined) {
+  const key = host ?? "";
+  let handler = providerHandlers.get(key);
+  if (handler === undefined) {
+    handler = createProviderHandler(providerDeps(host));
+    providerHandlers.set(key, handler);
+  }
+  return handler;
+}
+
+const providerDeps = (host: string | undefined): Parameters<typeof createProviderHandler>[0] => ({
   ...signing,
+  openSigningApproval: (context) => openSigningApproval({ ...context, ...(host === undefined ? {} : { host }) }),
   grants,
-  askToConnect,
-  askToTurnOn,
+  askToConnect: (prompt) => askToConnect(prompt, host),
+  askToTurnOn: (prompt) => askToTurnOn(prompt, host),
   chains: chainsOn,
   receiveAddresses: (slot) => accounts.receiveAddresses(slot),
-  send: (slot, order, from) => announcing([slot], sends.send(slot, order, from)),
-  sendAction: (slot, action, from) => announcing([slot], sends.trade(slot, action, from)),
-  askToNameAsset,
+  send: (slot, order, from) => announcing([slot], sends.send(slot, order, from, host)),
+  sendAction: (slot, action, from) => announcing([slot], sends.trade(slot, action, from, host)),
+  askToNameAsset: (prompt) => askToNameAsset(prompt, host),
+  pending: pendingPerOrigin,
   async assetSuggestion(slot, origin, suggestion) {
     const module = await chainModule(slot)!;
     const { entry, network } = servedNetwork(module);
@@ -519,7 +552,7 @@ const usedLinks: UsedLinks = {
   add: (digest) => chrome.storage.session.set({ [`usedLink:${digest}`]: true }),
 };
 
-const sends = createSends({ ...keys, chainModule, l1Module, pullPath, esplora, openSigningApproval, isUnlocked: signing.isUnlocked, held: heldStore, usedLinks, cache: sessionCache, now: () => Date.now() });
+const sends = createSends({ ...keys, chainModule, l1Module, pullPath, esplora, openSigningApproval, isUnlocked: signing.isUnlocked, held: heldStore, usedLinks, cache: sessionCache, tradeStore, now: () => Date.now() });
 
 /** The requester's web origin as the browser reports it for a content-script message. */
 function requesterOrigin(sender: chrome.runtime.MessageSender): string | undefined {
@@ -531,6 +564,12 @@ function requesterOrigin(sender: chrome.runtime.MessageSender): string | undefin
 /** True for messages from the wallet's own pages (e.g. the approval window), never from web pages. */
 function fromWalletPage(sender: chrome.runtime.MessageSender): boolean {
   return sender.id === chrome.runtime.id && (sender.url?.startsWith(chrome.runtime.getURL("")) ?? false);
+}
+
+/** True for the wallet's side panel (Chromium) or sidebar (Firefox): its page, in its panel view. */
+function isPanel(sender: chrome.runtime.MessageSender): boolean {
+  if (!fromWalletPage(sender) || sender.tab !== undefined || sender.url === undefined) return false;
+  return new URL(sender.url).searchParams.get("view") === "panel";
 }
 
 /** The page a wallet page's request names to show its approval (`APPROVAL_HOST_PORT`), if any. */
@@ -548,7 +587,8 @@ async function route(message: BackgroundMessage, sender: chrome.runtime.MessageS
     case "provider.request": {
       const origin = requesterOrigin(sender);
       if (origin === undefined) throw new ProviderRpcError(ErrorCode.Unauthorized, "Unknown requester.");
-      return handleProviderRequest(origin, message.method, message.params);
+      // Where its approvals show is the browser's word (the tab's window), never the request's.
+      return providerHandler(panelHost(sender.tab?.windowId))(origin, message.method, message.params);
     }
     case "approval.get":
       if (!fromWalletPage(sender)) return null;
@@ -783,8 +823,10 @@ chrome.runtime.onConnect.addListener((port) => {
   if (port.name === ACTIVITY_PORT) port.onMessage.addListener(() => vault.touch().catch(console.error));
   if (port.name.startsWith(APPROVAL_HOST_PORT)) {
     const host = port.name.slice(APPROVAL_HOST_PORT.length);
+    // A window's sites' approvals go only to the wallet's side panel itself.
+    if (host.startsWith("panel:") && !isPanel(port.sender)) return port.disconnect();
     approvalHosts.set(host, port);
-    port.onDisconnect.addListener(() => approvalHosts.delete(host));
+    port.onDisconnect.addListener(() => approvalHosts.get(host) === port && approvalHosts.delete(host));
   }
 });
 

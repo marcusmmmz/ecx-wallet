@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::bast::{self, TokenKind};
 use crate::psbt::{refuse, Refusal, RefusalCode};
+use crate::result::{result_token, ResultClaim};
 use crate::{script_of, tokens, AccountKeys};
 
 /// Every input's `nSequence`: replaceable, as Bitcoin Core's wallet sets it.
@@ -45,7 +46,7 @@ const DUST_RELAY_FEE: u64 = 3000;
 pub(crate) const MIN_FEE_RATE: u64 = 1000;
 
 /// What to send, and what to build it from.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TransferOrder {
     /// The account's coins to choose from (the wallet's rule: confirmed or trusted, none held back).
@@ -58,7 +59,7 @@ pub struct TransferOrder {
 }
 
 /// One of the account's outputs: the transaction holding it, and which address it pays.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Coin {
     /// The whole transaction, hex.
@@ -67,6 +68,9 @@ pub struct Coin {
     /// 0 receive, 1 change.
     pub chain: u32,
     pub index: u32,
+    /// A trade's result output: what the market index says it carries, checked against its order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<ResultClaim>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -234,7 +238,12 @@ pub(crate) fn read_coins(coins: &[Coin], keys: &AccountKeys, wanted: &BTreeSet<S
             if wanted.is_empty() {
                 continue;
             }
-            let carried = tokens::listed_on(&tx, coin.vout)?.and_then(|l| l.token);
+            let carried = match (tokens::listed_on(&tx, coin.vout)?, &coin.result) {
+                (Some(bast::Listed { token: None, .. }), Some(claim)) => {
+                    Some(result_token(&tx, coin.vout, claim)?.map_err(|why| malformed(format!("Coin {i} is a trade's result, but not as claimed: {why}.")))?)
+                }
+                (listed, _) => listed.and_then(|l| l.token),
+            };
             if let Some(bast::Token { kind: TokenKind::Asset, id, amount }) = carried {
                 if wanted.contains(&id) {
                     token_coins.entry(id).or_default().push((Spendable { outpoint, tx, txout, chain: coin.chain, index: coin.index }, amount));

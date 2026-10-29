@@ -494,6 +494,19 @@ export interface ReportedCoin {
   value: string;
   chain: 0 | 1;
   index: number;
+  /** A Flush trade's result output: what the market index says it carries, which the module checks against its order. */
+  result?: ResultClaim;
+}
+
+/**
+ * What a trade's result output carries, as the market index names it (docs/adr/0013), with the
+ * order's pools as `getpool` describes each, in its order: the module checks it fits the order.
+ */
+export interface ResultClaim {
+  asset: string;
+  /** Base units, decimal. */
+  amount: string;
+  pools: unknown[];
 }
 
 /**
@@ -505,6 +518,7 @@ export interface WholeTxCoin {
   vout: number;
   chain: 0 | 1;
   index: number;
+  result?: ResultClaim;
 }
 
 /** What to send, and what to build it from (a Chain Module's `TransferOrder`). */

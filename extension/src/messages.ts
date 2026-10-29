@@ -117,11 +117,14 @@ export const ACTIVITY_PORT = "vault.activity";
  * A wallet page that shows its own request's approval (the Send or Deposit screen, in the toolbar
  * popup, which closes if a window takes focus) connects as `approval.host:<host>` and passes the
  * same `host` with the request. The background posts `ApprovalHostMessage`s on it instead of
- * opening a window; the page disconnecting counts as closing that window.
+ * opening a window; the page disconnecting counts as closing that window. The side panel connects
+ * as `approval.host:panel:<windowId>` and shows the approvals of the sites in its browser window;
+ * the background derives that host from the requesting tab, never from the request.
  */
 export const APPROVAL_HOST_PORT = "approval.host:";
 
-/** An approval for the hosting page to show (`id`), or none left to show (`id` null). */
+/** An approval for the hosting page to show (`id`), or none left to show (`id` null: `closed` is the one that closed). */
 export interface ApprovalHostMessage {
   id: string | null;
+  closed?: string;
 }

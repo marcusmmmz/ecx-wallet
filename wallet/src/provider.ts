@@ -77,7 +77,17 @@ export interface ProviderDeps extends SigningDeps {
   askToNameAsset(prompt: AssetPrompt): Promise<boolean>;
   /** Stores a name the user approved. */
   saveAsset(chain: string, asset: StoredAsset): Promise<StoredAsset>;
+  /** What's waiting on the user per origin, for handlers that must share it (one per browser window); else the handler's own. */
+  pending?: ProviderPending;
 }
+
+/** Per origin, what a handler keeps waiting on the user: one unlock window, one asset suggestion. */
+export interface ProviderPending {
+  unlocking: Map<string, Promise<boolean>>;
+  suggesting: Set<string>;
+}
+
+export const providerPending = (): ProviderPending => ({ unlocking: new Map(), suggesting: new Set() });
 
 /**
  * The wallet's side of the Provider: every request from a Sidechain App ends up here, with the
@@ -123,7 +133,7 @@ export function createProviderHandler(deps: ProviderDeps) {
   }
 
   /** Unlock windows open now, one per origin: further requests from it wait on the same one. */
-  const unlocking = new Map<string, Promise<boolean>>();
+  const { unlocking, suggesting } = deps.pending ?? providerPending();
 
   /** Asks the user to unlock for `origin`'s request on `slot`, if locked; rejected if they close the window. */
   async function unlocked(origin: string, slot: number): Promise<void> {
@@ -244,8 +254,7 @@ export function createProviderHandler(deps: ProviderDeps) {
     }
   }
 
-  /** Origins with an asset suggestion waiting for the user: one window at a time each. */
-  const suggesting = new Set<string>();
+  // `suggesting`: origins with an asset suggestion waiting for the user, one window at a time each.
 
   /**
    * An app suggests naming an asset (docs/adr/0010): by its contract, checked against the chain, or

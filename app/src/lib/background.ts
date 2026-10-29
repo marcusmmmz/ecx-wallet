@@ -116,6 +116,30 @@ export function hostApprovals(onshow: (id: string | null) => void): { host: stri
   };
 }
 
+/**
+ * From the side panel: shows the approvals of the sites in its browser window here, rather than in
+ * windows of their own. `onchange` gets the approvals waiting, oldest first; a closed one leaves
+ * the list. Closing the panel rejects them, as closing their window would. Returns the stop.
+ */
+export function hostPanelApprovals(onchange: (ids: string[]) => void): () => void {
+  let ids: string[] = [];
+  let port: chrome.runtime.Port | undefined;
+  let stopped = false;
+  chrome.windows.getCurrent().then((w) => {
+    if (stopped || w.id === undefined) return;
+    port = chrome.runtime.connect({ name: `${APPROVAL_HOST_PORT}panel:${w.id}` });
+    port.onMessage.addListener((message: { id?: string | null; closed?: string }) => {
+      if (typeof message?.id === "string" && !ids.includes(message.id)) ids = [...ids, message.id];
+      if (typeof message?.closed === "string") ids = ids.filter((id) => id !== message.closed);
+      onchange(ids);
+    });
+  }, () => {});
+  return () => {
+    stopped = true;
+    port?.disconnect();
+  };
+}
+
 /** Calls `onchange` with each new auto-lock deadline the background announces (null once locked); returns the unsubscribe. */
 export function onLockDeadline(onchange: (locksAt: number | null) => void): () => void {
   const listener = (message: unknown) => {

@@ -173,13 +173,15 @@ export async function launchFirefox({ extensionPath = DIST_E2E.firefox, profile:
       "extensions.webextensions.keepStorageOnUninstall": true,
       "extensions.webextensions.keepUuidOnUninstall": true,
     },
-    // Needed to script moz-extension:// pages such as the approval window, and the chrome context.
+    // Needed to script moz-extension:// pages such as the approval window, and the chrome context:
+    // the flag up to Firefox 158, the variable from 159.
     args: ["-remote-allow-system-access"],
     // A snap-launched parent (e.g. VS Code) leaks GTK/GIO paths that crash Firefox's content
     // processes (spike/elements-wasm RESULTS.md); drop them.
-    env: Object.fromEntries(
-      Object.entries(process.env).filter(([k, v]) => !/\/snap\//.test(v ?? "") && !k.startsWith("SNAP")),
-    ),
+    env: {
+      ...Object.fromEntries(Object.entries(process.env).filter(([k, v]) => !/\/snap\//.test(v ?? "") && !k.startsWith("SNAP"))),
+      MOZ_REMOTE_ALLOW_SYSTEM_ACCESS: "1",
+    },
   });
   let chrome;
   try {

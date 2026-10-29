@@ -16,6 +16,7 @@ use serde::Serialize;
 
 use crate::bast::{self, Marker};
 use crate::psbt::{refuse, Refusal, RefusalCode};
+use crate::result::{result_token, ResultEvidence};
 
 /// The highest `decimals` a registration may have (`MAX_DECIMALS`, backbone-flush `state.h`).
 pub const MAX_DECIMALS: u8 = 12;
@@ -201,14 +202,29 @@ impl TokenFlow {
 /// token output without a marker (`bad-ba-tokens-lost`), and a transfer (kind 0) whose marker holds
 /// value (`bad-ba-marker-value`), lists a result (`bad-ba-results`) or doesn't carry on exactly the
 /// tokens its inputs bring (`bad-ba-tokens-lost`, `bad-ba-tokens-unbacked`). A transfer that spends a
-/// result can't be checked here: the Decoder shows it Blind.
+/// result can't be checked here: the Decoder shows it Blind, unless `token_flow_with` is told what
+/// the result carries.
 pub(crate) fn token_flow(psbt: &bitcoin::psbt::Psbt) -> Result<TokenFlow, Refusal> {
+    token_flow_with(psbt, &[])
+}
+
+/// `token_flow`, with what the market index says of the trade results it spends (`results`, the
+/// request's evidence), each checked against its order (`result_token`) before it counts.
+pub(crate) fn token_flow_with(psbt: &bitcoin::psbt::Psbt, results: &[ResultEvidence]) -> Result<TokenFlow, Refusal> {
     let tx = &psbt.unsigned_tx;
     let marker = marker(tx)?;
     let mut inputs = vec![];
     for (i, txin) in tx.input.iter().enumerate() {
         let previous = psbt.inputs[i].non_witness_utxo.as_ref().expect("validated");
-        inputs.push(listed_on(previous, txin.previous_output.vout)?);
+        let outpoint = txin.previous_output;
+        let mut listed = listed_on(previous, outpoint.vout)?;
+        let said = results.iter().find(|r| r.vout == outpoint.vout && r.txid.eq_ignore_ascii_case(&outpoint.txid.to_string()));
+        if let (Some(l @ bast::Listed { token: None, .. }), Some(said)) = (listed.as_mut(), said) {
+            let token = result_token(previous, outpoint.vout, &said.claim())?
+                .map_err(|why| refuse(RefusalCode::InvalidEvidence, format!("Input {i} is a trade's result, but the evidence doesn't fit it: {why}.")))?;
+            l.token = Some(token);
+        }
+        inputs.push(listed);
     }
     let flow = TokenFlow { marker, inputs };
     let Some((index, marker)) = &flow.marker else {

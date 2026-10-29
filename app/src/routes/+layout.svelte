@@ -1,7 +1,8 @@
 <script lang="ts">
   import "../app.css";
   import { reportActivity } from "$lib/activity";
-  import { onLockDeadline, vaultStatus } from "$lib/background";
+  import Approval from "$lib/Approval.svelte";
+  import { hostPanelApprovals, onLockDeadline, vaultStatus } from "$lib/background";
   import BottomBar from "$lib/BottomBar.svelte";
   import { page } from "$app/state";
   import { nav, pathOf } from "$lib/nav.svelte";
@@ -38,6 +39,23 @@
     const timer = setTimeout(askVault, Math.max(0, locksAt - Date.now()) + 500);
     return () => clearTimeout(timer);
   });
+  // Pinned to the side, the panel shows its window's sites' approvals over the screen, oldest first.
+  let waiting = $state<string[]>([]);
+  $effect(() => {
+    if (currentView() !== "panel") return;
+    return hostPanelApprovals((ids) => (waiting = ids));
+  });
+  const shown = $derived(waiting[0]);
+  // A site picks when its approval appears, so it could time one under a click meant for the
+  // screen: each takes no input until it has been in view a moment (`data-armed`).
+  const ARM_MS = 700;
+  let armed = $state(false);
+  $effect(() => {
+    armed = false;
+    if (shown === undefined) return;
+    const timer = setTimeout(() => (armed = true), ARM_MS);
+    return () => clearTimeout(timer);
+  });
   // app.css sizes the page by where it shows.
   $effect(() => {
     document.documentElement.dataset.view = currentView();
@@ -49,6 +67,12 @@
   <div class="scroll">{@render children()}</div>
   {#if nav.unlocked && !barless}<BottomBar />{/if}
 </div>
+{#if shown !== undefined}
+  <!-- A site's request, approved here in the panel rather than in a window of its own. -->
+  <div class="panel-approval" data-panel-approval={shown} inert={!armed} data-armed={armed || undefined}>
+    {#key shown}<Approval id={shown} hosted ondone={() => (waiting = waiting.filter((id) => id !== shown))} />{/key}
+  </div>
+{/if}
 
 <style>
   .frame {
@@ -59,6 +83,14 @@
   /* The toolbar popup is as tall as the browser lets it be (600px). */
   :global(html[data-view="popup"]) .frame {
     height: 600px;
+  }
+  .panel-approval {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    overflow-y: auto;
+    background: var(--bg);
+    animation: fade-in 0.2s ease both;
   }
   .scroll {
     flex: 1;
