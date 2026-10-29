@@ -5,7 +5,9 @@ import { fileURLToPath } from "node:url";
 // Keep exclusions here, outside the Chain Entry file format, for both code and shipped assets.
 const EXCLUDED_MODULES = ["elements"];
 export const modules = ["l1", "elements", "flush"].filter((name) => !EXCLUDED_MODULES.includes(name));
-export const chainEntries = modules.map((name) => fileURLToPath(new URL(`../../core/${name}/chain-entry.json`, import.meta.url)));
+export const chainEntries = modules.map((name) =>
+  process.env.ECX_CHAIN_ENTRIES?.split(",").find((file) => file.endsWith(`/${name}-chain-entry.json`))
+    ?? fileURLToPath(new URL(`../../core/${name}/chain-entry.json`, import.meta.url)));
 export const moduleFiles = Object.fromEntries((await Promise.all(chainEntries.map(async (file, i) => {
   const entry = JSON.parse(await readFile(file, "utf8"));
   return entry.slot === undefined ? [] : [[entry.slot, `${modules[i]}.wasm`]];

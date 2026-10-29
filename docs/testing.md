@@ -4,6 +4,7 @@
 
 - [Two kinds of test](#two-kinds-of-test)
 - [The e2e build](#the-e2e-build)
+- [The web e2e build](#the-web-e2e-build)
 - [Try the e2e build by hand](#try-the-e2e-build-by-hand)
 - [Writing e2e tests](#writing-e2e-tests)
 - [Firefox](#firefox)
@@ -12,7 +13,7 @@
 ## Two kinds of test
 
 - **Rust tests ("Seam 2")**, in `core/*/tests/`: each module's keys, decoding, signing and building, against known vectors. `pnpm --filter @ecx/core test`.
-- **e2e tests ("Seam 1")**, in `e2e/tests/`: the built extension in real browsers, plus node tests of whatever needs no browser (the wallet's TypeScript and the shipped `.wasm` against stub servers). `pnpm --filter @ecx/e2e test` after `pnpm build && pnpm build:e2e`.
+- **e2e tests ("Seam 1")**, in `e2e/tests/`: the built extension and web app in real browsers, plus node tests of whatever needs no browser (the wallet's TypeScript and the shipped `.wasm` against stub servers). `pnpm --filter @ecx/e2e test` after `pnpm build && pnpm build:e2e && pnpm build:e2e:web`.
 
 Useful switches:
 
@@ -36,6 +37,21 @@ The shipped build reads public explorers, which tests can't control. So `e2e/scr
 - Chain Entries are compiled into their modules (`core/<module>/build.rs` reads `$ECX_L1_CHAIN_ENTRY` / `$ECX_ELEMENTS_CHAIN_ENTRY` / `$ECX_FLUSH_CHAIN_ENTRY`), so `l1.wasm`, `elements.wasm` and `flush.wasm` are rebuilt, in their own cargo target dir (`core/target/e2e`). The output is in `e2e/dist/extension/{chromium,firefox}`.
 - `build-output.test` checks that the two builds differ only there: every other file is byte-identical, the manifest differs only in the servers' origins, and each module's `declare()` and `chainEntry()` differ only in betanet's server.
 - Browser tests run on the e2e build (`launchWallet`'s default), so none reaches a public explorer. Only `extension-loads.test` loads the shipped build (`{ build: "shipped" }`), and it opens only onboarding pages.
+
+### The web e2e build
+
+`pnpm build:e2e:web` runs after `pnpm build:e2e` and reuses its stub-backed core modules. It builds the web app into `e2e/dist/web`, leaving `app/build-web` for the shipped web build. `ECX_CORE_DIST`, `ECX_CHAIN_ENTRIES` and `ECX_APP_WEB_DIST` select the WASM, the Chain Entries used to derive CSP origins, and the output directory. Slot 24 stays excluded; the web build contains L1 and Flush. The Esplora stubs send no CORS headers, like the real Elements explorer, unless a test passes `cors: true` in their config; the web tests do, since their pages can't use `host_permissions`. Web tests navigate the way in-app links do: assigning `location.hash` would bypass SvelteKit's router and reload the page, ending the Worker and its unlocked session.
+
+`web-wallet.test.mjs` is included by the suite's `tests/*.test.mjs` glob, and `pnpm test` builds its web output before running the suite. To run just web coverage:
+
+```sh
+pnpm build && pnpm build:e2e && pnpm build:e2e:web
+node --test --test-concurrency=1 --test-timeout=120000 e2e/tests/web-*.test.mjs
+```
+
+The tests create a vault, lock/unlock it, and reload to check that IndexedDB retains the vault while the Worker's memory-only unlock state is lost. They check the Chains and Send lists exclude Slot 24 and home has no pin control. Send uses Flush (Slot 99), as in `flush-wallet.test.mjs`: L1's standalone Send is not implemented. The Send form approves in place. To also exercise `#/approve/{id}`, the test observes the page's real Worker and sends an unhosted `send.start` through its existing transport, using negative request ids to avoid collisions. Approving broadcasts a transaction; rejecting returns error 4001 without a broadcast; both return to the previous Chains route in the same page. This transport driver adds no production API and is not a web Provider.
+
+Each normal flow checks the navigation response's CSP header and collects page errors, console errors and `securitypolicyviolation` events. A separate test deliberately inserts an inline script and checks CSP blocks it, so enforcement is not inferred just from the header. Worker requests to the stubs must also pass the CSP sent on the Worker script. Browser execution is required to verify these checks; syntax and builds alone do not verify navigation timing, console forwarding or browser CSP support.
 
 ## Try the e2e build by hand
 
@@ -61,6 +77,11 @@ The shipped build reads public explorers, which tests can't control. So `e2e/scr
 - `openPage(path)`: a wallet page, e.g. `index.html#/import`. Wait for an element on it before use, since Firefox never reports `moz-extension` loads as finished;
 - `extensionErrors()`: `{ manifestErrors, installWarnings, runtimeErrors }`;
 - `stopBackground()`: stops the service worker or event page.
+
+**Web pages:**
+
+- `serveWebWallet()`: serves `e2e/dist/web` on a free loopback port, applying the generated `_headers` global rule to every response, including JavaScript and WASM. It rejects unsupported header-file syntax. Returns `{ url, headers, close }`.
+- `launchWebWallet(name)`: launches the same Brave or Firefox with no extension installed. Returns `{ browser, close }`. Keep web flows in the same page: every new page or reload creates a new Worker with a locked session.
 
 **Stub servers:**
 

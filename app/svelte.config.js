@@ -1,6 +1,6 @@
 import adapter from "@sveltejs/adapter-static";
 
-const output = process.env.ECX_APP_WEB === "1" ? "build-web" : "build";
+const output = process.env.ECX_APP_WEB === "1" ? (process.env.ECX_APP_WEB_DIST ?? "build-web") : "build";
 
 /** @type {import('@sveltejs/kit').Config} */
 export default {
