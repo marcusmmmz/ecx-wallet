@@ -8,16 +8,19 @@
 // src/ bundled with esbuild. Fails if any shipped script contains `eval(` or `new Function(`.
 //
 // The manifests are hand-written except for the Sidechain Servers the wallet may reach: those come
-// from the Chain Entries (`core/{l1,elements,flush}/chain-entry.json`), added as `host_permissions` and as the
-// CSP's `connect-src`, so the wallet can talk to nothing else.
+// from the Chain Entries (`core/{l1,elements,flush}/chain-entry.json`) on the build's network
+// ($ECX_NETWORK, core/scripts/chains.mjs), added as `host_permissions` and as the CSP's
+// `connect-src`, so the wallet can talk to nothing else. The background's Chain Modules are those
+// whose Chain Entry names that network (wallet/src/module-files.ts, replaced at bundle time).
 //
-// The e2e build (e2e/scripts/build.mjs) points $ECX_CORE_DIST, $ECX_CHAIN_ENTRIES (comma-separated)
-// and $ECX_EXTENSION_DIST at its own core build, Chain Entries and output dir.
+// The e2e build (e2e/scripts/build.mjs) sets $ECX_NETWORK and points $ECX_CORE_DIST,
+// $ECX_CHAIN_ENTRIES (comma-separated) and $ECX_EXTENSION_DIST at its own core build, Chain
+// Entries and output dir.
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
-import { sidechainServerOrigins } from "./chain-origins.mjs";
+import { bundledChains, moduleFilesSource, sidechainServerOrigins } from "../../core/scripts/chains.mjs";
 import { checkNoEval } from "./check-no-eval.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -26,8 +29,7 @@ const coreDist = process.env.ECX_CORE_DIST ?? path.resolve(root, "..", "core", "
 const dist = process.env.ECX_EXTENSION_DIST ?? path.join(root, "dist");
 const staging = path.join(dist, ".staging");
 const TARGETS = ["chromium", "firefox"];
-const CHAIN_ENTRIES = process.env.ECX_CHAIN_ENTRIES?.split(",") ??
-  ["l1", "elements", "flush"].map((module) => path.resolve(root, "..", "core", module, "chain-entry.json"));
+const chains = await bundledChains();
 
 /** The hand-written manifest plus access to the Sidechain Servers. */
 async function manifestFor(target, servers) {
@@ -47,7 +49,14 @@ await stat(path.join(coreDist, "vault.wasm")).catch(() => {
 await rm(dist, { recursive: true, force: true });
 await mkdir(staging, { recursive: true });
 
-const common = { bundle: true, target: ["chrome111", "firefox128"], legalComments: "none", logLevel: "warning" };
+/** The wallet's Chain Modules: this build's, not the source's default. */
+const moduleFiles = {
+  name: "module-files",
+  setup(build) {
+    build.onLoad({ filter: /wallet\/src\/module-files\.ts$/ }, () => ({ contents: moduleFilesSource(chains), loader: "ts" }));
+  },
+};
+const common = { bundle: true, target: ["chrome111", "firefox128"], legalComments: "none", logLevel: "warning", plugins: [moduleFiles] };
 // Background: an ES module (service worker on Chromium, background script on Firefox).
 // Listeners must be registered synchronously at top level; no top-level await.
 await esbuild.build({ ...common, entryPoints: [path.join(root, "src", "background.ts")], format: "esm", outfile: path.join(staging, "background.js") });
@@ -63,7 +72,7 @@ for (const file of (await readdir(coreDist)).filter((f) => f.endsWith(".wasm")))
 }
 await checkNoEval(staging);
 
-const servers = await sidechainServerOrigins(CHAIN_ENTRIES);
+const servers = sidechainServerOrigins(chains);
 for (const target of TARGETS) {
   const out = path.join(dist, target);
   await cp(staging, out, { recursive: true });

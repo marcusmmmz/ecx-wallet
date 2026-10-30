@@ -13,7 +13,7 @@
 use bitcoin::hashes::{sha256, Hash};
 use serde::Serialize;
 
-use crate::{chain_entry, derive_account, network};
+use crate::{derive_account, network};
 
 /// Backbone's `MAX_DEPOSIT_DESTINATION_SIZE`: its RPC's cap, consensus once `limits_activation_height` is set.
 pub const MAX_DESTINATION_BYTES: usize = 100;
@@ -48,7 +48,7 @@ pub fn deposit_destination(starter: &str) -> Result<DepositDestination, String> 
     if network().activation.is_none() {
         return Err("Flush's Chain Entry pins no activation block: this wallet makes no Deposit to it (docs/adr/0004).".into());
     }
-    let slot = chain_entry().slot.ok_or("Flush's Chain Entry names no slot")?;
+    let slot = network().slot.ok_or("Flush's Chain Entry names no slot on this network")?;
     let entry = derive_account(starter, 1, 0)?.receive.remove(0);
     let destination = long_form(slot, &entry.address);
     if destination.len() > MAX_DESTINATION_BYTES {

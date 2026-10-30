@@ -107,19 +107,19 @@ export function canSend(capabilities: string[], network: NetworkEntry): boolean 
   return api === "ecx-v0" || (speaksEsplora(api) && capabilities.includes("buildTransfer"));
 }
 
-/** Throws unless the entry puts the chain at the root: no Slot and no parent. */
-export function assertRoot(entry: ChainEntry, network: NetworkEntry): void {
-  if (entry.slot !== undefined || network.parent !== undefined) {
+/** Throws unless the network puts the chain at the root: no Slot and no parent. */
+export function assertRoot(network: NetworkEntry): void {
+  if (network.slot !== undefined || network.parent !== undefined) {
     throw new Error(`${network.chain} isn't the root chain, so it can't get the L1 Account Key.`);
   }
 }
 
 /**
- * Throws unless the entry puts the chain at `slot` directly under the root `root`. A chain nested
+ * Throws unless the network puts the chain at `slot` directly under the root `root`. A chain nested
  * deeper has no key derivation yet: Starters are keyed by the Slot alone (docs/adr/0003).
  */
-export function assertChildOfRoot(entry: ChainEntry, network: NetworkEntry, slot: number, root: string): void {
-  if (entry.slot !== slot || network.parent === undefined) {
+export function assertChildOfRoot(network: NetworkEntry, slot: number, root: string): void {
+  if (network.slot !== slot || network.parent === undefined) {
     throw new Error(`${network.chain}'s Chain Entry doesn't describe a chain at Slot ${slot}.`);
   }
   if (network.parent !== root) {
@@ -167,7 +167,7 @@ export function createKeyRouting(deps: Keys & ChainModules) {
     async l1(): Promise<KeyedChain<L1AccountKey, L1Module>> {
       const module = await deps.l1Module();
       const { entry, network, chain } = servedNetwork(module);
-      assertRoot(entry, network);
+      assertRoot(network);
       return { module, entry, network, chain, key: () => deps.l1AccountKey() };
     },
 
@@ -176,7 +176,7 @@ export function createKeyRouting(deps: Keys & ChainModules) {
       const { module } = await slotChainModule(deps.chainModule, slot);
       const { entry, network, chain } = servedNetwork(module);
       const root = servedNetwork(await deps.l1Module()).chain;
-      assertChildOfRoot(entry, network, slot, root);
+      assertChildOfRoot(network, slot, root);
       return { module, entry, network, chain, key: () => deps.starter(slot) };
     },
   };

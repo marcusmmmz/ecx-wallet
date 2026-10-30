@@ -31,8 +31,8 @@ pub use deposit::{build_deposit, treasury_script, txid, Built, Coin, DepositOrde
 pub use psbt::{check, AssetAmount, OwnedInput, Refusal, RefusalCode};
 pub use sign::{finalize, sign, Finalized};
 
-/// The network this build serves (betanet only, until mainnet: #32).
-pub const NETWORK: &str = "betanet";
+/// The network this build serves, its key in the Chain Entry: `$ECX_NETWORK` at build time (build.rs).
+pub const NETWORK: &str = env!("ECX_NETWORK");
 
 /// The account path the L1 Account Key sits at: BIP84, coin type 0 (ECX shares Bitcoin's keys), account 0.
 pub const ACCOUNT_PATH: &str = "84h/0h/0h";

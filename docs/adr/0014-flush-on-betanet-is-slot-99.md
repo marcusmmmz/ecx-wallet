@@ -1,5 +1,7 @@
 # Flush on betanet is Slot 99, and Slot 46 is mainnet's
 
+Amended by ADR 0019: the Slot is now per network, and Flush's Chain Entry has a mainnet network, Slot 46.
+
 Flush's own Slot is 46 (#55). On betanet, Slot 46 has not been proposed and there are no plans to propose it: Flush gets Slot 46 on mainnet. Betanet's Flush is the chain in Slot 99, the Slot voted in for the "Photon" sidechain, which Flush's node runs as a temporary chain (`getblockchaininfo` warns: "it will be dropped when Flush gets its own slot (46). Do not keep value here."). Flush's explorer serves that chain at `explorer.blockfab.org/betanet/flush/api`, and the explorer will keep serving Flush there.
 
 So Flush's Chain Entry is Slot 99 (`core/flush/chain-entry.json`):

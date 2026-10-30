@@ -19,6 +19,24 @@
         "replayLockTime": 499999999,
         "opDrivechain": "nop8"
       }
+    },
+    "mainnet": {
+      "chain": "ecash:mainnet",
+      "identityBlock": { "height": 973728, "hash": "0000000000000001441a6a4ae49d679d4a30581db3e3eaeeb2fba5da6dc146ed" },
+      "sidechainServer": { "api": "esplora", "url": "https://explorer.ecash.ninja/api" },
+      "officialApps": [],
+      "assets": [
+        { "id": "", "ticker": "ECX", "name": "eCash", "decimals": 8, "ecx": true }
+      ],
+      "params": {
+        "addressParams": {
+          "p2pkhPrefix": 0,
+          "p2shPrefix": 5,
+          "bechHrp": "bc"
+        },
+        "replayLockTime": 499999998,
+        "opDrivechain": "nop8"
+      }
     }
   }
 }

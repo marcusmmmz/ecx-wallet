@@ -115,7 +115,7 @@ fn betanet_reads_its_state_from_the_elements_explorers_esplora() {
 #[test]
 fn betanet_is_a_child_of_ecash_betanet_identified_by_its_genesis() {
     let network = &chain_entry().networks["betanet"];
-    assert_eq!(chain_entry().slot, Some(24));
+    assert_eq!(ecx_elements::network().slot, Some(24));
     assert_eq!(network.parent.as_deref(), Some("ecash:betanet"));
     // Elements isn't a fork: the identity block is its own genesis.
     assert_eq!((network.identity_block.height, network.identity_block.hash.as_str()), (0, network.params.genesis_hash.as_str()));

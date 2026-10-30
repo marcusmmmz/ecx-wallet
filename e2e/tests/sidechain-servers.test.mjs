@@ -13,7 +13,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { createEsploraStub } from "@ecx/stub-server/esplora";
 import { parseElementsTx } from "@ecx/stub-server/elements-tx";
-import { DIST, ROOT, importWallet, serveSidechainServer } from "../harness.mjs";
+import { DIST_E2E, ROOT, importWallet, serveSidechainServer } from "../harness.mjs";
 
 const PSETS = JSON.parse(await readFile(path.join(ROOT, "e2e", "fixtures", "elements-psets.json"), "utf8"));
 const SLOT_24_STARTER = "buyer citizen congress doll secret merry denial law live wait pass drive";
@@ -29,8 +29,8 @@ const FOREIGN_ADDRESS = "elements1qepkhlwlq2qjggg89d5quqx8z59vz9mr2h6j4pc";
 const out = (amount, address = FOREIGN_ADDRESS, asset = POLICY_ASSET) => ({ asset, amount, to: { address } });
 
 const wallet = await importWallet();
-const elements = await wallet.loadChainModule(await readFile(path.join(DIST.chromium, "elements.wasm")));
-const l1 = await wallet.loadChainModule(await readFile(path.join(DIST.chromium, "l1.wasm")));
+const elements = await wallet.loadChainModule(await readFile(path.join(DIST_E2E.chromium, "elements.wasm")));
+const l1 = await wallet.loadChainModule(await readFile(path.join(DIST_E2E.chromium, "l1.wasm")));
 
 const APP = "https://dex.example";
 

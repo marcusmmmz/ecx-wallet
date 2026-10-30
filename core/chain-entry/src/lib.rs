@@ -2,8 +2,8 @@
 //! sidechain, that ships compiled into that chain's module. The envelope is the same for every
 //! chain; `params` is the module's own and only it reads them.
 //!
-//! The root (eCash) has neither `slot` nor `parent`; every other chain has both: its BIP300 Slot is
-//! its number under its parent.
+//! On each network the root (eCash) has neither `slot` nor `parent`; every other chain has both: its
+//! BIP300 Slot is its number under its parent there, which can differ by network (docs/adr/0019).
 //!
 //! The entry also says how the wallet shows the chain: its name, a line on what it's for, and on
 //! each network the assets it names, one of which may be the chain's ECX (docs/adr/0005).
@@ -14,9 +14,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ChainEntry<P> {
-    /// The chain's Slot under its parent; absent for the root.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub slot: Option<u32>,
     /// The name the wallet shows for the chain ("Main chain", "Elements+").
     pub name: String,
     /// One line on what the chain is for, shown where the wallet lists its chains.
@@ -29,6 +26,9 @@ pub struct ChainEntry<P> {
 pub struct NetworkEntry<P> {
     /// CAIP-2 chain id: `ecash:<network>` for the root, `ecash:<network>-s<slot>` under it.
     pub chain: String,
+    /// The chain's Slot under its parent on this network; absent for the root.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<u32>,
     /// The parent chain's `chain`; absent for the root.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
@@ -106,12 +106,17 @@ pub enum ServerApi {
 }
 
 impl<P> ChainEntry<P> {
-    /// The rules one entry can check alone: `slot` and every network's `parent` are both present or
+    /// The rules one entry can check alone: each network's `slot` and `parent` are both present or
     /// both absent. That every `parent` exists is checked across entries, by the wallet's tests.
     pub fn check(&self) -> Result<(), String> {
         for (name, network) in &self.networks {
-            if self.slot.is_some() != network.parent.is_some() {
+            if network.slot.is_some() != network.parent.is_some() {
                 return Err(format!("{}'s {name}: a chain has both a slot and a parent, or neither", self.name));
+            }
+            if let Some(slot) = network.slot {
+                if !network.chain.ends_with(&format!("-s{slot}")) {
+                    return Err(format!("{}'s {name}: chain {} isn't Slot {slot}'s", self.name, network.chain));
+                }
             }
             if !is_block_hash(&network.identity_block.hash) {
                 return Err(format!("{}'s {name}: the identity block hash isn't 32 bytes of hex", self.name));
@@ -179,7 +184,8 @@ mod tests {
 
     fn entry(slot: Option<u32>, parent: Option<&str>) -> ChainEntry<()> {
         let network = NetworkEntry {
-            chain: "ecash:betanet".into(),
+            chain: slot.map_or("ecash:betanet".into(), |slot| format!("ecash:betanet-s{slot}")),
+            slot,
             parent: parent.map(Into::into),
             identity_block: IdentityBlock { height: 0, hash: "00".repeat(32) },
             activation: None,
@@ -189,7 +195,7 @@ mod tests {
             assets: vec![],
             params: (),
         };
-        ChainEntry { slot, name: "Test".into(), description: "A test chain".into(), networks: [("betanet".into(), network)].into() }
+        ChainEntry { name: "Test".into(), description: "A test chain".into(), networks: [("betanet".into(), network)].into() }
     }
 
     fn asset(id: &str, ecx: bool) -> AssetEntry {
@@ -236,6 +242,14 @@ mod tests {
         assert!(entry(Some(24), Some("ecash:betanet")).check().is_ok());
         assert!(entry(Some(24), None).check().is_err());
         assert!(entry(None, Some("ecash:betanet")).check().is_err());
+    }
+
+    #[test]
+    fn a_chain_id_ends_in_its_networks_slot() {
+        let mut child = entry(Some(46), Some("ecash:betanet"));
+        assert!(child.check().is_ok());
+        child.networks.get_mut("betanet").unwrap().chain = "ecash:betanet-s99".into();
+        assert!(child.check().is_err());
     }
 
     #[test]

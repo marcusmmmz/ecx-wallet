@@ -22,6 +22,11 @@
 //!   only the HRP, `bflx` on betanet.
 //! - **Server:** Flush's explorer, `explorer.blockfab.org/betanet/flush/api`.
 //!
+//! On mainnet Flush is Slot 46 (`ChainType::ECASH` on `flush-betanet`, `ed15158`, read 2026-10-30):
+//! HRP `flx`, the identity its explorer's genesis (`19b25cff…`), the server
+//! `explorer.blockfab.org/flush/api`. No `activation`: no M2 run for Slot 46 reached the enforcer's
+//! threshold, so the wallet makes no Deposit to it yet (docs/adr/0019).
+//!
 //! `build.rs` picks the file: `chain-entry.json`, or `$ECX_FLUSH_CHAIN_ENTRY` for the e2e build,
 //! whose Chain Entry differs only in its Sidechain Servers.
 use std::sync::OnceLock;

@@ -47,8 +47,8 @@ pub use tokens::{asset_logo, asset_registration, output_tokens, CheckedLogo, Che
 pub use trade::{build_trade, CheckedTrade, PoolReport, Side, TradeBuilt, TradeOrder, MAX_FLOOR_SHORTFALL_PERCENT};
 pub use transfer::{build_transfer, Built, Coin, Payment, PaymentTo, Spent, TransferOrder};
 
-/// The network this build serves (betanet only, until mainnet: #32).
-pub const NETWORK: &str = "betanet";
+/// The network this build serves, its key in the Chain Entry: `$ECX_NETWORK` at build time (build.rs).
+pub const NETWORK: &str = env!("ECX_NETWORK");
 
 /// The account path under the Starter: BIP84, coin type 1, account 0. Flush Core's own wallet uses
 /// coin type 1 on every network but mainnet (`src/wallet/walletutil.cpp`), as LWK does for Slot 24.

@@ -1,6 +1,6 @@
-// The e2e build: the shipped extension with one change, each Chain Entry's betanet Sidechain
-// Server, which points at a stub Esplora server on loopback (`E2E_SERVERS`). Everything else comes
-// from the same sources, so build-output.test can check the two builds differ only there.
+// The e2e build: the extension for betanet (`E2E_NETWORK`; the shipped build is mainnet's), with
+// each Chain Entry's betanet Sidechain Server pointed at a stub Esplora server on loopback
+// (`E2E_SERVERS`). Everything else comes from the same sources.
 //
 //   e2e/dist/<module>-chain-entry.json   the shipped Chain Entry with the stub as betanet's server
 //   e2e/dist/core/                        core modules; l1.wasm, elements.wasm and flush.wasm embed those
@@ -11,6 +11,9 @@ import { execFileSync } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+/** The network the e2e build and its tests serve: betanet, which every fixture is of. */
+export const E2E_NETWORK = "betanet";
 
 /** Slot 24's betanet Sidechain Server in the e2e build: harness.mjs serves the Esplora stub here. */
 export const E2E_SIDECHAIN_SERVER = { api: "esplora", url: "http://127.0.0.1:24024" };
@@ -35,7 +38,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const entries = [];
   for (const [module, { env, server }] of Object.entries(E2E_SERVERS)) {
     const entry = JSON.parse(await readFile(path.join(root, "core", module, "chain-entry.json"), "utf8"));
-    entry.networks.betanet.sidechainServer = server;
+    entry.networks[E2E_NETWORK].sidechainServer = server;
     const file = path.join(out, `${module}-chain-entry.json`);
     await writeFile(file, `${JSON.stringify(entry, null, 2)}\n`);
     coreEnv[env] = file;
@@ -43,7 +46,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   }
 
   const run = (dir, env) =>
-    execFileSync("node", ["scripts/build.mjs"], { cwd: path.join(root, dir), stdio: "inherit", env: { ...process.env, ...env } });
+    execFileSync("node", ["scripts/build.mjs"], { cwd: path.join(root, dir), stdio: "inherit", env: { ...process.env, ECX_NETWORK: E2E_NETWORK, ...env } });
   const coreDist = path.join(out, "core");
   // Its own cargo target dir, so the shipped and e2e builds don't keep rebuilding each other.
   run("core", { ...coreEnv, ECX_CORE_DIST: coreDist, CARGO_TARGET_DIR: path.join(root, "core", "target", "e2e") });

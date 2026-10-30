@@ -1,10 +1,10 @@
 {
-  "slot": 99,
   "name": "Flush",
   "description": "Tokens, trading and staking",
   "networks": {
     "betanet": {
       "chain": "ecash:betanet-s99",
+      "slot": 99,
       "parent": "ecash:betanet",
       "identityBlock": { "height": 0, "hash": "04dfb01bef61e44d679132f9e830719c64241f7052880418a350ff6d3c90b561" },
       "activation": { "height": 968998, "hash": "00000000000000012009a14359125c30ad531aa58fdcc76eee7d14c522acd5ae" },
@@ -19,6 +19,25 @@
           "p2pkhPrefix": 0,
           "p2shPrefix": 5,
           "bechHrp": "bflx"
+        }
+      }
+    },
+    "mainnet": {
+      "chain": "ecash:mainnet-s46",
+      "slot": 46,
+      "parent": "ecash:mainnet",
+      "identityBlock": { "height": 0, "hash": "19b25cff92c2beec1032a50d1eff87b01e1d67e658e25ca099fe599213843662" },
+      "depositConfirmations": 2,
+      "sidechainServer": { "api": "flush", "url": "https://explorer.blockfab.org/flush/api" },
+      "officialApps": [],
+      "assets": [
+        { "id": "", "ticker": "ECX", "name": "eCash on Flush", "decimals": 8, "ecx": true }
+      ],
+      "params": {
+        "addressParams": {
+          "p2pkhPrefix": 0,
+          "p2shPrefix": 5,
+          "bechHrp": "flx"
         }
       }
     }

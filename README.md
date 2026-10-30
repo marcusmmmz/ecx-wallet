@@ -2,7 +2,7 @@
 
 A browser wallet for eCash (ECX) and its drivechains (sidechains). One extension holds your keys for eCash, the main chain, and for each sidechain you turn on. It shows your balances and history, sends, deposits coins from eCash into a sidechain, and signs for sidechain websites after you approve.
 
-**Status:** pre-release, on eCash's **betanet** only. It supports two sidechains: Slot 24, Elements+ (an Elements chain, explicit amounts only), and Slot 99, Flush (ECX and its tokens, provisional; betanet's Flush, ADR 0014). Mainnet support is [#32](https://github.com/marcusmmmz/ecx-wallet/issues/32).
+**Status:** pre-release. The shipped build is for eCash **mainnet**, with one sidechain: Slot 46, Flush (ECX and its tokens; no Deposits to it until its Slot's activation is pinned, ADR 0019). A **betanet** build (`ECX_NETWORK=betanet pnpm build`) adds Slot 24, Elements+ (an Elements chain, explicit amounts only), and has Flush as Slot 99 (ADR 0014). The e2e suite runs on betanet.
 
 Design work happens in GitHub issues; the [wayfinder map](https://github.com/marcusmmmz/ecx-wallet/issues/1) indexes every decision. The words used here (Slot, Starter, Chain Module, Grant, Clear Signing…) are defined in [GLOSSARY.md](GLOSSARY.md).
 
@@ -15,7 +15,7 @@ pnpm build
 
 Then in Brave (or any Chromium): `brave://extensions` → Developer mode → **Load unpacked** → `extension/dist/chromium`. On Firefox, load `extension/dist/firefox/manifest.json` from `about:debugging` → This Firefox → Load Temporary Add-on.
 
-That build talks to the public betanet explorers. To try it against local stub servers with a funded test wallet, see [Try the e2e build by hand](docs/testing.md#try-the-e2e-build-by-hand).
+That build talks to the public mainnet explorers; `ECX_NETWORK=betanet pnpm build` builds for betanet's instead. To try it against local stub servers with a funded test wallet, see [Try the e2e build by hand](docs/testing.md#try-the-e2e-build-by-hand).
 
 ## Build and test
 

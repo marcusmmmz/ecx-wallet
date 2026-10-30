@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
-import { DIST, importWallet } from "../harness.mjs";
+import { DIST_E2E, importWallet } from "../harness.mjs";
 
 const { createAssets, loadChainModule } = await importWallet();
 
@@ -121,7 +121,7 @@ describe("the asset store", () => {
 });
 
 describe("adding an asset by its contract", async () => {
-  const elements = await loadChainModule(await readFile(path.join(DIST.chromium, "elements.wasm")));
+  const elements = await loadChainModule(await readFile(path.join(DIST_E2E.chromium, "elements.wasm")));
 
   test("stores it once elements.wasm derives the asset id from the server's outpoint and the contract", async () => {
     const assets = assetsWith();

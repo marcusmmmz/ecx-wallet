@@ -1,11 +1,12 @@
 // What ships: both browser builds, checked as files (no browser needed), and the e2e build,
-// checked to differ from them only in the Chain Entries' Sidechain Servers.
+// checked to differ from them only in the network they serve (mainnet ships, the e2e build is
+// betanet's: core/scripts/chains.mjs) and the Chain Entries' Sidechain Servers.
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
 import { DIST, DIST_E2E, importWallet } from "../harness.mjs";
-import { E2E_SERVERS } from "../scripts/build.mjs";
+import { E2E_NETWORK, E2E_SERVERS } from "../scripts/build.mjs";
 
 const EXPECTED_SCRIPT_SRC = ["'self'", "'wasm-unsafe-eval'"];
 
@@ -63,20 +64,24 @@ function splitManifest(manifest) {
 }
 
 for (const target of Object.keys(DIST)) {
-  test(`${target}: the shipped build reaches eCash's, Slot 24's and Flush's betanet servers, and nothing else`, async () => {
+  test(`${target}: the shipped build reaches eCash's and Flush's mainnet servers, and nothing else`, async () => {
     const { hostPermissions, connectSrc } = splitManifest(JSON.parse(await readFile(path.join(DIST[target], "manifest.json"), "utf8")));
-    const servers = ["https://esplora.beta.ecash.ninja", "https://explorer.bitnames.info", "https://explorer.blockfab.org"];
+    const servers = ["https://explorer.blockfab.org", "https://explorer.ecash.ninja"];
     assert.deepEqual(hostPermissions, servers.map((s) => `${s}/*`));
     assert.equal(connectSrc, `connect-src 'self' ${servers.join(" ")}`);
   });
 
-  test(`${target}: the e2e build differs from the shipped build only in the Sidechain Servers`, async () => {
+  test(`${target}: the e2e build differs from the shipped build only in its network and Sidechain Servers`, async () => {
     const modules = Object.values(E2E_SERVERS);
     const shipped = await files(DIST[target]);
-    assert.deepEqual(await files(DIST_E2E[target]), shipped);
+    // Elements+ has no mainnet network, so only the betanet build carries it.
+    assert.deepEqual(await files(DIST_E2E[target]), [...shipped, "elements.wasm"].sort());
+    // The background names each build's Chain Modules (wallet/src/module-files.ts).
+    const moduleFiles = (js) => js.replace(/CHAIN_MODULE_FILES = \{[^}]*\}/, "CHAIN_MODULE_FILES = {}");
     for (const f of shipped.filter((f) => f !== "manifest.json" && !modules.some((m) => m.wasm === f))) {
       const [a, b] = await Promise.all([readFile(path.join(DIST[target], f)), readFile(path.join(DIST_E2E[target], f))]);
-      assert.ok(a.equals(b), `${f} differs between the shipped and e2e builds`);
+      const same = a.equals(b) || (f === "background.js" && moduleFiles(a.toString()) === moduleFiles(b.toString()));
+      assert.ok(same, `${f} differs between the shipped and e2e builds`);
     }
 
     // The manifest: only the servers' origins.
@@ -88,16 +93,18 @@ for (const target of Object.keys(DIST)) {
     assert.deepEqual(e2e.hostPermissions, origins.map((o) => `${o}/*`));
     assert.equal(e2e.connectSrc, `connect-src 'self' ${origins.join(" ")}`);
 
-    // Each module: the same module, embedding a Chain Entry that differs only in betanet's server.
+    // Each module both ship: each serving its build's network, embedding a Chain Entry that
+    // differs only in betanet's server.
     const { loadChainModule } = await importWallet();
-    for (const { wasm, server } of modules) {
+    for (const { wasm, server } of modules.filter((m) => shipped.includes(m.wasm))) {
       const [shippedModule, e2eModule] = await Promise.all(
         [DIST, DIST_E2E].map(async (d) => loadChainModule(await readFile(path.join(d[target], wasm)))),
       );
-      assert.deepEqual(e2eModule.declare(), shippedModule.declare(), wasm);
       const entry = e2eModule.chainEntry();
-      assert.deepEqual(entry.networks.betanet.sidechainServer, server, wasm);
-      entry.networks.betanet.sidechainServer = shippedModule.chainEntry().networks.betanet.sidechainServer;
+      assert.equal(shippedModule.declare().binding.chain, entry.networks.mainnet.chain, wasm);
+      assert.equal(e2eModule.declare().binding.chain, entry.networks[E2E_NETWORK].chain, wasm);
+      assert.deepEqual(entry.networks[E2E_NETWORK].sidechainServer, server, wasm);
+      entry.networks[E2E_NETWORK].sidechainServer = shippedModule.chainEntry().networks[E2E_NETWORK].sidechainServer;
       assert.deepEqual(entry, shippedModule.chainEntry(), wasm);
     }
   });

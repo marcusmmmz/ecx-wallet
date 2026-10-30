@@ -18,8 +18,12 @@ pub const MAX_ROUTE_POOLS: usize = 4;
 /// The most a link's `slippage_bps` may be (`MAX_SLIPPAGE_BPS`). It is shown only: the floor binds.
 pub const MAX_SLIPPAGE_BPS: u16 = 5000;
 
-/// The link's name of the network this build serves ([`crate::NETWORK`], betanet).
-const LINK_NETWORK: &str = "ecashbeta";
+/// The link's name of the network this build serves ([`crate::NETWORK`]), as wallet/src/flush-links.ts maps it.
+const LINK_NETWORK: &str = match crate::NETWORK.as_bytes() {
+    b"mainnet" => "ecash",
+    b"betanet" => "ecashbeta",
+    _ => panic!("Flush links name no such network"),
+};
 const NETWORKS: [&str; 4] = ["ecash", "ecashbeta", "ecashtest", "regtest"];
 const COIN: &str = "ECX";
 

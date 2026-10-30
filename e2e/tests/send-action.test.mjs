@@ -6,10 +6,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
-import { DIST, importWallet } from "../harness.mjs";
+import { DIST_E2E, importWallet } from "../harness.mjs";
 
 const wallet = await importWallet();
-const flush = await wallet.loadChainModule(await readFile(path.join(DIST.chromium, "flush.wasm")));
+const flush = await wallet.loadChainModule(await readFile(path.join(DIST_E2E.chromium, "flush.wasm")));
 
 const ORIGIN = "https://flush.markets";
 const LINK = "flush:buy?v=1&network=ecashbeta&exp=1800000600&launch=FORK&asset=6bb2…&ecx=0.0001&min_tokens=0.044";

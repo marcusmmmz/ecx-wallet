@@ -1,10 +1,10 @@
 {
-  "slot": 24,
   "name": "Elements+",
   "description": "Assets and confidential transfers",
   "networks": {
     "betanet": {
       "chain": "ecash:betanet-s24",
+      "slot": 24,
       "parent": "ecash:betanet",
       "identityBlock": { "height": 0, "hash": "a7754ce0debc40baddbd8c47e79d19209685f22c63edaaf8b69cf54116374d7f" },
       "activation": { "height": 970715, "hash": "000000000000000094c4b58e192ea0105c5e82c3eaf168ab53090254bc9a3c3c" },
