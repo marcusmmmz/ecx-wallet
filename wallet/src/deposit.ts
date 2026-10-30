@@ -14,7 +14,7 @@ import { createKeyRouting, type ChainModules, type Keys } from "./accounts";
 import { cacheKey, type SessionCache } from "./cache";
 import { ChainModuleRefusal, type ChainEntry, type ClearView, type DepositCredit, type L1AccountKey, type L1Module, type NetworkEntry } from "./chain-module";
 import { ErrorCode, ProviderRpcError } from "./errors";
-import { feeRate, isCoinbase, LISTED_CONFIRMED_TXS, QUERIES_AT_ONCE, type EsploraClient, type EsploraTx } from "./esplora";
+import { feeRate, FULL_PAGE_TXS, isCoinbase, QUERIES_AT_ONCE, type EsploraClient, type EsploraTx } from "./esplora";
 import { WATCHED_CHANGE_ADDRESSES, WATCHED_RECEIVE_ADDRESSES } from "./pull-path";
 import { rejected, type ApprovalContext, type SignPrompt, type SigningApproval } from "./signing";
 import { speaksEsplora } from "./server-api";
@@ -48,7 +48,7 @@ export async function isCredited(server: EsploraClient, deposit: Pick<PendingDep
     if (page.some(claims)) return true;
     const confirmed = page.filter((tx) => tx.status.confirmed);
     const oldest = confirmed.at(-1);
-    if (oldest === undefined || confirmed.length < LISTED_CONFIRMED_TXS) return false;
+    if (oldest === undefined || confirmed.length < FULL_PAGE_TXS) return false;
     if (below !== undefined && oldest.status.blockHeight! < below) return false;
     page = await server.addressTxsBefore(deposit.address, oldest.txid);
   }
