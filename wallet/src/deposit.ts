@@ -336,7 +336,14 @@ export function createDeposits(deps: DepositDeps) {
         deposit.txid,
         await (async (): Promise<DepositStatus> => {
           try {
-            if (deposit.credit) return { ...deposit, state: "credited", creditServer: credits.url };
+            if (deposit.credit) {
+              // A payout in a soft block can be replaced (ADR 0012): once its coinbase is gone, the
+              // Deposit is matched again, and its stale outpoint no longer holds another's payout (#71).
+              if ((await credits.txStatus(deposit.credit.txid))?.confirmed) return { ...deposit, state: "credited", creditServer: credits.url };
+              claimed.delete(outpoint(deposit.credit));
+              delete deposit.credit;
+              await deps.store.put(deposit);
+            }
             const bound = async () => {
               if (deposit.slotHeight !== undefined) return;
               const height = await credits.tipHeight().catch(() => undefined);
