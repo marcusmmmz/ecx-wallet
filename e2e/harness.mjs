@@ -228,12 +228,14 @@ export async function launchFirefox({ extensionPath = DIST_E2E.firefox, profile:
       "extensions.webextensions.keepUuidOnUninstall": true,
     },
     // Needed to script moz-extension:// pages such as the approval window, and the chrome context.
+    // Firefox 159 also wants $MOZ_REMOTE_ALLOW_SYSTEM_ACCESS for the chrome context.
     args: ["-remote-allow-system-access"],
     // A snap-launched parent (e.g. VS Code) leaks GTK/GIO paths that crash Firefox's content
     // processes (spike/elements-wasm RESULTS.md); drop them.
-    env: Object.fromEntries(
-      Object.entries(process.env).filter(([k, v]) => !/\/snap\//.test(v ?? "") && !k.startsWith("SNAP")),
-    ),
+    env: {
+      ...Object.fromEntries(Object.entries(process.env).filter(([k, v]) => !/\/snap\//.test(v ?? "") && !k.startsWith("SNAP"))),
+      MOZ_REMOTE_ALLOW_SYSTEM_ACCESS: "1",
+    },
   });
   if (extensionPath === null) return { browser, close: () => closeBrowser(browser, keepProfile ? undefined : profile) };
   let chrome;
