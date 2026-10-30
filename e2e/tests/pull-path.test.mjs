@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 import { parseElementsTx } from "@ecx/stub-server/elements-tx";
-import { activitySettled, answerIn, approvalIn, BROWSERS, homeSettled, launchWallet, openTestApp, openWalletPage, relock, serveEsplora, serveL1Esplora, serveTestApp, setUpWallet, WALLET_PASSWORD } from "../harness.mjs";
+import { activitySettled, answerIn, approvalIn, BROWSERS, homeSettled, launchWallet, openTestApp, openWalletPage, relock, serveEsplora, serveL1Esplora, serveTestApp, setUpWallet, WALLET_PASSWORD, waitForFunction } from "../harness.mjs";
 
 const GENESIS = "a7754ce0debc40baddbd8c47e79d19209685f22c63edaaf8b69cf54116374d7f";
 const RECEIVE_0 = "elements1qew44aehkjstjm56ng2rjrz57vwxh5g9su6dlpm";
@@ -286,7 +286,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
       assert.equal(home.unavailable, "Main chain unavailable, not counted");
       L1_ESPLORA.identityBlock = L1_FORK_BLOCK;
       await page.click('[data-account="l1"] [data-retry]');
-      await page.waitForFunction(() => document.querySelector("[data-unavailable]") === null, { timeout: 20_000 });
+      await waitForFunction(page, () => document.querySelector("[data-unavailable]") === null, { timeout: 20_000 });
       assert.equal((await readTotal(page)).total, "0.002815 ECX", "Retry asks the server again");
       await page.close();
     } finally {
@@ -433,7 +433,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
       assert.match(refused, /^Your Send of 0.0001 ECX failed: .*min relay fee not met.* Nothing was sent\./);
       assert.equal(await home.$eval("[data-send-retry]", (e) => e.getAttribute("href")), "#/send/24");
       await home.click("[data-send-refused-close]");
-      await home.waitForFunction(() => document.querySelector("[data-send-refused]") === null, { timeout: 5_000 });
+      await waitForFunction(home, () => document.querySelector("[data-send-refused]") === null, { timeout: 5_000 });
       await home.close();
     } finally {
       ESPLORA.refuseBroadcast = undefined;

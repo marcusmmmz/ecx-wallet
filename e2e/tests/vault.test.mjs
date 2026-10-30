@@ -5,7 +5,7 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, test } from "node:test";
-import { BROWSERS, homeSettled, launchWallet, openWalletPage } from "../harness.mjs";
+import { BROWSERS, homeSettled, launchWallet, openWalletPage, waitForFunction } from "../harness.mjs";
 
 const PHRASE = "legal winner thank year wave sausage worth useful legal winner thank yellow";
 const PASSPHRASE = "ecx-e2e-passphrase-Q7";
@@ -197,7 +197,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
       assert.equal(await countdown(), "Locks in 15 min");
       await page.evaluate(() => chrome.runtime.sendMessage({ kind: "vault.setAutoLock", minutes: 3 }));
       await page.click('[data-tab="activity"]'); // a use: the deadline moves to 3 minutes from now
-      await page.waitForFunction(() => document.querySelector("[data-lock-countdown]").textContent.trim() === "Locks in 3 min", { timeout: 10_000 });
+      await waitForFunction(page, () => document.querySelector("[data-lock-countdown]").textContent.trim() === "Locks in 3 min", { timeout: 10_000 });
       await page.close();
     }));
 
@@ -209,7 +209,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
       // Locked from elsewhere (another window's Settings): this screen hears it, without navigating.
       const other = await openWalletPage(session, "#/settings");
       await other.evaluate(() => chrome.runtime.sendMessage({ kind: "vault.lock" }));
-      await page.waitForFunction(() => document.querySelector("nav.bottom-bar") === null, { timeout: 10_000 });
+      await waitForFunction(page, () => document.querySelector("nav.bottom-bar") === null, { timeout: 10_000 });
       await other.close();
       await page.close();
     }));
@@ -224,11 +224,12 @@ for (const browserName of BROWSERS) describe(browserName, () => {
       assert.ok((await deadlineLeft(page)) < 180_000, "an open page alone keeps nothing unlocked");
 
       await page.click('[data-tab="activity"]');
-      await page.waitForFunction(
+      await waitForFunction(
+        page,
         async () => (await chrome.storage.session.get("vault:unlockedUntil"))["vault:unlockedUntil"] - Date.now() > 14 * 60_000,
         { timeout: 10_000 },
       );
-      await page.waitForFunction(() => document.querySelector("[data-lock-countdown]").textContent.trim() === "Locks in 15 min", { timeout: 10_000 });
+      await waitForFunction(page, () => document.querySelector("[data-lock-countdown]").textContent.trim() === "Locks in 15 min", { timeout: 10_000 });
       // Opening Activity reads its history, whose keys count as use: let it finish first.
       await page.waitForSelector("[data-activity]:not([data-refreshing])", { timeout: 20_000 });
 

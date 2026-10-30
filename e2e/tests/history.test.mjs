@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, test } from "node:test";
 import { addressScript, encodeTx, parseTx } from "@ecx/stub-server/bitcoin-tx";
-import { BROWSERS, homeSettled, importWallet, launchWallet, openWalletPage, serveEsplora, serveL1Esplora, setUpWallet } from "../harness.mjs";
+import { BROWSERS, homeSettled, importWallet, launchWallet, openWalletPage, serveEsplora, serveL1Esplora, setUpWallet, waitForFunction } from "../harness.mjs";
 
 const { HISTORY_PAGES } = await importWallet();
 
@@ -368,7 +368,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
       const chips = await page.$$eval("[data-chip]", (c) => c.map((e) => e.textContent.trim()));
       assert.deepEqual(chips, ["All", "Main chain", "Elements+"]);
       await page.click('[data-chip="24"]');
-      await page.waitForFunction(() => document.querySelectorAll("[data-history-entry]").length === 1);
+      await waitForFunction(page, () => document.querySelectorAll("[data-history-entry]").length === 1);
       assert.equal(await page.$eval("[data-history-entry]", (e) => e.getAttribute("data-history-chain")), "24");
       await homeSettled(page);
       await page.close();
