@@ -27,6 +27,7 @@ import {
   serveL1Esplora,
   serveTestApp,
   setUpWallet,
+  waitForFunction,
 } from "../harness.mjs";
 import { BROSEVELT, flushSale, LIVE_TXS, REGISTRATION } from "../flush-sale.mjs";
 
@@ -282,7 +283,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
     FLUSH.utxos[RECEIVE_0.address] = [...utxos, sale.change];
     try {
       const home = await openHome(session);
-      await home.waitForFunction((asset) => document.querySelector(`[data-account="99"] li[data-asset="${asset}"] .name strong`)?.textContent.trim() === "BROSEVELT", { timeout: 20_000 }, BROSEVELT);
+      await waitForFunction(home, (asset) => document.querySelector(`[data-account="99"] li[data-asset="${asset}"] .name strong`)?.textContent.trim() === "BROSEVELT", { timeout: 20_000 }, BROSEVELT);
       await home.close();
       const page = await openWalletPage(session, "#/chain/99/activity");
       const row = `[data-history-entry="${sale.txid}"]`;

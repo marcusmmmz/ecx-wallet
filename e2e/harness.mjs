@@ -367,7 +367,7 @@ async function withExtensionsPage(browser, fn) {
   const page = await browser.newPage();
   try {
     await page.goto("chrome://extensions");
-    await page.waitForFunction(() => typeof chrome?.developerPrivate !== "undefined");
+    await waitForFunction(page, () => typeof chrome?.developerPrivate !== "undefined");
     return await fn(page);
   } finally {
     await page.close();
@@ -500,7 +500,28 @@ export async function approvalIn(page, { timeout = 10_000 } = {}) {
  */
 export async function answerIn(page, button) {
   await page.click(button);
-  await page.waitForFunction(() => document.querySelector("[data-approval-ready]") === null, { timeout: 10_000 });
+  await waitForFunction(page, () => document.querySelector("[data-approval-ready]") === null, { timeout: 10_000 });
+}
+
+/**
+ * Waits until `fn(...args)`, evaluated in `page`, returns a truthy value, and returns it: return a
+ * boolean or plain data, not an element, which doesn't serialize. Use it instead of
+ * `page.waitForFunction`: on Firefox 159 that fails for good when the page is still navigating
+ * (its BiDi `script.evaluate` throws "right-hand side of 'in'…"). This polls `page.evaluate` and
+ * retries the errors a navigation causes. 30 s by default, as puppeteer's.
+ */
+export async function waitForFunction(page, fn, { timeout = 30_000, interval = 100 } = {}, ...args) {
+  const end = Date.now() + timeout;
+  for (;;) {
+    try {
+      const value = await page.evaluate(fn, ...args);
+      if (value) return value;
+    } catch (error) {
+      if (!/Execution context|DiscardedBrowsingContext|no such frame|right-hand side of 'in'/i.test(error.message)) throw error;
+    }
+    if (Date.now() >= end) throw new Error(`Waiting failed: ${timeout}ms exceeded`);
+    await new Promise((resolve) => setTimeout(resolve, interval));
+  }
 }
 
 /**
@@ -523,7 +544,8 @@ export async function activitySettled(page) {
  * which counts as Vault activity.
  */
 export async function homeSettled(page) {
-  await page.waitForFunction(
+  await waitForFunction(
+    page,
     () => {
       if (document.querySelector("[data-chains-ready]") === null) return false;
       const cards = [...document.querySelectorAll("[data-account]")];
@@ -558,6 +580,6 @@ export async function relock(session, password = WALLET_PASSWORD) {
 export async function openTestApp(session, app, host) {
   const page = await session.browser.newPage();
   await page.goto(app.url(host));
-  await page.waitForFunction(() => window.testApp !== undefined);
+  await waitForFunction(page, () => window.testApp !== undefined);
   return page;
 }

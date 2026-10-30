@@ -71,6 +71,7 @@ Each normal flow checks the navigation response's CSP header and collects page e
 - `openWalletPage(session, "#/grants")`: opens a wallet screen and waits for `[data-screen-ready]`.
 - `relock(session)`: locks and unlocks from home. The wallet forgets its session cache, as on any lock, so use it in tests that change a server's chain.
 - `homeSettled(page)`: waits until every card on home has its fresh balance. Close a home page only after it: a reply to a closed page makes Firefox log an error.
+- `waitForFunction(page, fn, { timeout }, ...args)`: use it instead of `page.waitForFunction`, which on Firefox 159 fails for good if the page is still navigating. It polls `page.evaluate`, so `fn` returns a boolean or plain data, not an element.
 
 **A session** (what `launchWallet` returns) has:
 

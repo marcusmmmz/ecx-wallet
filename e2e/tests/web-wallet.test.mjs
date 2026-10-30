@@ -7,6 +7,7 @@ import { encodeTx, parseTx } from "@ecx/stub-server/bitcoin-tx";
 import {
   ABANDON, BROWSERS, ROOT, WALLET_PASSWORD, answerIn, approvalIn, homeSettled,
   importWallet, launchWebWallet, serveFlushEsplora, serveL1Esplora, serveWebWallet,
+  waitForFunction,
 } from "../harness.mjs";
 
 const wallet = await importWallet();
@@ -43,7 +44,7 @@ async function route(page, hash) {
     link.click();
     link.remove();
   }, hash);
-  await page.waitForFunction((value) => location.hash === value, {}, hash);
+  await waitForFunction(page, (value) => location.hash === value, {}, hash);
   assert.equal(await page.evaluate(() => window.sameDocument), true, "the route changed without reloading the page");
 }
 
@@ -191,7 +192,7 @@ for (const browserName of BROWSERS) describe(`${browserName}: web`, () => {
     await route(page, "#/chains");
     await page.waitForSelector("[data-chains][data-screen-ready]");
     const leaving = page.evaluate((to) => window.walletRequest({ kind: "send.start", slot: 99, outputs: [{ asset: "", amount: "10000", to: { address: to } }] }), PAY_TO);
-    await page.waitForFunction(() => /^#\/approve\/[^/]+$/.test(location.hash), { timeout: 20_000 });
+    await waitForFunction(page, () => /^#\/approve\/[^/]+$/.test(location.hash), { timeout: 20_000 });
     await approvalIn(page, { timeout: 20_000 });
     const beforeLeaving = stub.broadcasts().length;
     await route(page, "#/approve/not-pending");
@@ -206,7 +207,7 @@ for (const browserName of BROWSERS) describe(`${browserName}: web`, () => {
     for (const approved of [false, true]) {
       const before = stub.broadcasts().length;
       const sending = page.evaluate((to) => window.walletRequest({ kind: "send.start", slot: 99, outputs: [{ asset: "", amount: "10000", to: { address: to } }] }), PAY_TO);
-      await page.waitForFunction(() => /^#\/approve\/[^/]+$/.test(location.hash), { timeout: 20_000 });
+      await waitForFunction(page, () => /^#\/approve\/[^/]+$/.test(location.hash), { timeout: 20_000 });
       await approvalIn(page, { timeout: 20_000 });
       assert.match(await page.$eval("[data-origin]", (e) => e.textContent), /This wallet/);
       assert.equal(await page.$eval("[data-output] [data-destination]", (e) => e.textContent.trim()), PAY_TO);
@@ -215,7 +216,7 @@ for (const browserName of BROWSERS) describe(`${browserName}: web`, () => {
       assert.equal(answer.ok, approved);
       if (approved) assert.equal(answer.result.txid, parseTx(stub.broadcasts().at(-1)).txid);
       else assert.equal(answer.error.code, 4001);
-      await page.waitForFunction(() => location.hash === "#/chains");
+      await waitForFunction(page, () => location.hash === "#/chains");
       await page.waitForSelector("[data-chains][data-screen-ready]");
       assert.equal(stub.broadcasts().length, before + Number(approved));
     }

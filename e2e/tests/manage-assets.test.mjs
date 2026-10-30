@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 import { addressScript } from "@ecx/stub-server/bitcoin-tx";
-import { BROWSERS, homeSettled, launchWallet, openWalletPage, serveEsplora, serveL1Esplora, setUpWallet } from "../harness.mjs";
+import { BROWSERS, homeSettled, launchWallet, openWalletPage, serveEsplora, serveL1Esplora, setUpWallet, waitForFunction } from "../harness.mjs";
 
 const GENESIS = "a7754ce0debc40baddbd8c47e79d19209685f22c63edaaf8b69cf54116374d7f";
 const L1_FORK_BLOCK = { height: 967680, hash: "00000000000000030101ba5cfea54b22becc79f95dc6040beb76e01dd9d04042" };
@@ -74,8 +74,9 @@ const readEntries = (page) =>
 /** Submits the open form and waits until it closes (added) or says why not. */
 async function submit(page) {
   await page.click("[data-form-submit]");
-  await page.waitForFunction(
-    () => document.querySelector('[data-assets-screen][aria-busy="false"]') && (!document.querySelector("[data-asset-form]") || document.querySelector("[data-form-error]")),
+  await waitForFunction(
+    page,
+    () => document.querySelector('[data-assets-screen][aria-busy="false"]') !== null && (!document.querySelector("[data-asset-form]") || document.querySelector("[data-form-error]") !== null),
     { timeout: 20_000 },
   );
   return page.evaluate(() => document.querySelector("[data-form-error]")?.textContent.trim() ?? null);
@@ -161,7 +162,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
   test("removing an entry only forgets its name: the asset is Unknown again", async () => {
     const page = await openWalletPage(session, "#/assets");
     await page.click(`[data-stored-asset="${USDT}"] [data-remove]`);
-    await page.waitForFunction((id) => !document.querySelector(`[data-stored-asset="${id}"]`) && document.querySelector('[aria-busy="false"]'), {}, USDT);
+    await waitForFunction(page, (id) => !document.querySelector(`[data-stored-asset="${id}"]`) && document.querySelector('[aria-busy="false"]') !== null, {}, USDT);
     assert.deepEqual((await readEntries(page)).map((e) => e.id), [POINTS]);
     await page.close();
     assert.equal((await homeTickers(session))[USDT], "Unknown asset");

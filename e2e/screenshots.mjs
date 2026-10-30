@@ -24,6 +24,7 @@ import {
   serveTestApp,
   setUpWallet,
   turnOnChain,
+  waitForFunction,
 } from "./harness.mjs";
 
 const out = path.resolve(process.argv[2] ?? "screenshots");
@@ -218,7 +219,7 @@ try {
   page = await open("#/", "[data-balance]");
   await turnOnChain(page, 99);
   await page.reload();
-  await page.waitForFunction(() => document.querySelector('[data-account="99"] li[data-asset] .name strong')?.textContent.trim() === "BROSEVELT", { timeout: 20_000 });
+  await waitForFunction(page, () => document.querySelector('[data-account="99"] li[data-asset] .name strong')?.textContent.trim() === "BROSEVELT", { timeout: 20_000 });
   await homeSettled(page);
   await shot(page, "12-flush-home");
   await page.close();

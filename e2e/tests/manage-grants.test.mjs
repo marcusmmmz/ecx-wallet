@@ -1,7 +1,7 @@
 // Seam 1: a user sees and revokes Grants; a Sidechain App disconnects.
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
-import { BROWSERS, launchWallet, openTestApp, openWalletPage, serveTestApp, setUpWallet } from "../harness.mjs";
+import { BROWSERS, launchWallet, openTestApp, openWalletPage, serveTestApp, setUpWallet, waitForFunction } from "../harness.mjs";
 
 for (const browserName of BROWSERS) describe(browserName, () => {
 
@@ -77,7 +77,8 @@ test("revoking a Grant on the Grants screen makes that origin's next request fai
 
   const { page } = await readGrants();
   await page.click(`[data-grant][data-grant-origin="${revokedOrigin}"] [data-revoke]`);
-  await page.waitForFunction(
+  await waitForFunction(
+    page,
     (origin) => !document.querySelector(`[data-grant][data-grant-origin="${origin}"]`),
     {},
     revokedOrigin,
@@ -104,7 +105,7 @@ test("grantChanged tells an origin's open pages when its Grant is widened, revok
   const other = await connected("events-other.localhost", scope);
   for (const page of [tabA, tabB, other]) await page.evaluate(() => window.testApp.listen("grantChanged"));
   const events = (page) => page.evaluate(() => window.testApp.events);
-  const until = (page, count) => page.waitForFunction((n) => window.testApp.events.length >= n, { timeout: 10_000 }, count);
+  const until = (page, count) => waitForFunction(page, (n) => window.testApp.events.length >= n, { timeout: 10_000 }, count);
 
   // Widened by connect: both tabs of the origin hear it.
   const widened = { slots: [24], methods: ["getAddresses", "signTransaction"] };

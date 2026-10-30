@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, test } from "node:test";
 import { addressScript, encodeTx, parseTx, scripthash } from "@ecx/stub-server/bitcoin-tx";
-import { activitySettled, answerIn, approvalIn, BROWSERS, homeSettled, importWallet, launchWallet, openWalletPage, serveEsplora, serveL1Esplora, setUpWallet } from "../harness.mjs";
+import { activitySettled, answerIn, approvalIn, BROWSERS, homeSettled, importWallet, launchWallet, openWalletPage, serveEsplora, serveL1Esplora, setUpWallet, waitForFunction } from "../harness.mjs";
 
 const GENESIS = "a7754ce0debc40baddbd8c47e79d19209685f22c63edaaf8b69cf54116374d7f";
 const POLICY_ASSET = "5836dcc06130dcf6a65b6ac493813fd65559955283e44cc3f07966294eccb2c8";
@@ -218,7 +218,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
       await page.waitForSelector("[data-deposit-scanning]", { timeout: 5_000 });
       await page.waitForSelector("[data-deposit-available]", { timeout: 5_000 }); // this session's last, from the home page
       assert.match(await page.$eval("[data-deposit-scanning]", (e) => e.textContent.trim()), /^Last read at .+; scanning your main-chain addresses again…$/);
-      await page.waitForFunction(() => document.querySelector("[data-deposit-scanning]") === null, { timeout: 20_000 });
+      await waitForFunction(page, () => document.querySelector("[data-deposit-scanning]") === null, { timeout: 20_000 });
       assert.match(await page.$eval("[data-deposit-available]", (e) => e.textContent), /^0\.0025 ECX$/);
       assert.equal(await page.$("[data-deposit-unconfirmed]"), null, "nothing unconfirmed, no line for it");
       await page.close();
@@ -367,7 +367,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
       L1.utxos[L1_RECEIVE_0].push({ txid: "c9".repeat(32), vout: 0, value: 80000, confirmed: false });
       const page = await openWalletPage(session, "#/deposit/24");
       await page.waitForSelector("[data-deposit-unconfirmed]", { timeout: 20_000 });
-      await page.waitForFunction(() => document.querySelector("[data-deposit-scanning]") === null, { timeout: 20_000 });
+      await waitForFunction(page, () => document.querySelector("[data-deposit-scanning]") === null, { timeout: 20_000 });
       const text = (selector) => page.$eval(selector, (e) => e.textContent.replace(/\s+/g, " ").trim());
       assert.equal(await text("[data-deposit-available]"), "0.0025 ECX");
       assert.equal(await text("[data-deposit-unconfirmed]"), "+0.0008 ECX unconfirmed, usable once confirmed");
@@ -393,7 +393,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
       await home.waitForSelector("[data-deposit-stop-tracking]", { visible: true });
       assert.equal(await home.$eval("[data-deposit-stop-tracking]", (e) => e.textContent.trim()), "Stop tracking");
       await home.click("[data-deposit-stop-tracking]");
-      await home.waitForFunction((t) => document.querySelector(`[data-deposit="${t}"]`) === null, { timeout: 10_000 }, txid);
+      await waitForFunction(home, (t) => document.querySelector(`[data-deposit="${t}"]`) === null, { timeout: 10_000 }, txid);
       await activitySettled(home);
       await home.close();
       assert.deepEqual(await readDeposits(session), []);
@@ -465,7 +465,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
     assert.match(refused, /^Your Deposit of 0.00005 ECX failed: .*min relay fee not met.* Nothing was sent\./);
     assert.equal(await home.$eval("[data-deposit-retry]", (e) => [e.textContent.trim(), e.getAttribute("href")].join(" → ")), "Try again → #/deposit/24");
     await home.click("[data-deposit-refused-close]");
-    await home.waitForFunction(() => document.querySelector("[data-deposit-refused]") === null, { timeout: 5_000 });
+    await waitForFunction(home, () => document.querySelector("[data-deposit-refused]") === null, { timeout: 5_000 });
     await home.close();
     const again = await session.openPage("index.html#/");
     await again.waitForSelector('[data-account="24"][data-deposits-ready]', { timeout: 20_000 });
