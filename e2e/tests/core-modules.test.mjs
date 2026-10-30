@@ -10,15 +10,18 @@ import { DIST, DIST_E2E, ROOT, importWallet } from "../harness.mjs";
 const ABANDON = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
 test("every shipped .wasm imports nothing but memory", async () => {
-  const wasm = (await readdir(DIST.chromium)).filter((f) => f.endsWith(".wasm"));
-  assert.ok(wasm.includes("vault.wasm"), "vault.wasm is packaged");
-  assert.ok(wasm.includes("elements.wasm"), "elements.wasm is packaged");
-  assert.ok(wasm.includes("l1.wasm"), "l1.wasm is packaged");
-  assert.ok(wasm.includes("flush.wasm"), "flush.wasm is packaged");
-  for (const file of wasm) {
-    const module = new WebAssembly.Module(await readFile(path.join(DIST_E2E.chromium, file)));
+  // The shipped build is mainnet's: eCash and Flush, no Elements+ (docs/adr/0019). The e2e build,
+  // betanet's, adds elements.wasm, so its modules are checked too.
+  const wasmIn = async (dir) => (await readdir(dir)).filter((f) => f.endsWith(".wasm")).sort();
+  const shipped = await wasmIn(DIST.chromium);
+  assert.deepEqual(shipped, ["flush.wasm", "l1.wasm", "vault.wasm"], "the mainnet build's modules");
+  const e2e = await wasmIn(DIST_E2E.chromium);
+  assert.deepEqual(e2e, ["elements.wasm", "flush.wasm", "l1.wasm", "vault.wasm"], "the betanet build's modules");
+  const files = [...shipped.map((f) => path.join(DIST.chromium, f)), ...e2e.map((f) => path.join(DIST_E2E.chromium, f))];
+  for (const file of files) {
+    const module = new WebAssembly.Module(await readFile(file));
     const imports = WebAssembly.Module.imports(module).filter((i) => i.kind !== "memory");
-    assert.deepEqual(imports, [], `${file} imports more than memory`);
+    assert.deepEqual(imports, [], `${path.relative(ROOT, file)} imports more than memory`);
   }
 });
 

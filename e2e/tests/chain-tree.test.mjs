@@ -6,6 +6,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
 import { DIST_E2E, importWallet } from "../harness.mjs";
+import { E2E_NETWORK } from "../scripts/build.mjs";
 
 const ABANDON = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 const SLOT_24_STARTER = "buyer citizen congress doll secret merry denial law live wait pass drive";
@@ -69,9 +70,14 @@ describe("the bundled Chain Entries", () => {
   });
 
   test("every bundled Slot is one the wallet ships a module for, and no two share a Slot", () => {
-    const slots = entries.filter((e) => e.slot !== undefined).map((e) => e.slot);
-    assert.deepEqual(slots, [...new Set(slots)]);
-    assert.deepEqual(slots.sort((a, b) => a - b), [...wallet.SUPPORTED_SLOTS].sort((a, b) => a - b));
+    // A Slot is per network (docs/adr/0019): on each, no two chains share one.
+    const slotsOn = (name) => entries.map((e) => e.networks[name]?.slot).filter((slot) => slot !== undefined).sort((a, b) => a - b);
+    for (const name of new Set(entries.flatMap((e) => Object.keys(e.networks)))) {
+      assert.deepEqual(slotsOn(name), [...new Set(slotsOn(name))], `two chains share a Slot on ${name}`);
+    }
+    // The wallet's module map in source is betanet's (a build replaces it with its network's), the
+    // network of the e2e build these modules come from.
+    assert.deepEqual(slotsOn(E2E_NETWORK), [...wallet.SUPPORTED_SLOTS].sort((a, b) => a - b));
   });
 });
 
