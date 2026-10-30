@@ -23,4 +23,14 @@ await writeFile(new URL("vercel.json", output), `${JSON.stringify({
   headers: [{ source: "/(.*)", headers: Object.entries(headers).map(([key, value]) => ({ key, value })) }],
 }, null, 2)}\n`);
 await checkNoEval(fileURLToPath(output));
+// A Vercel Git build reads only the repo root's vercel.json, so hand it the site as Build Output
+// (https://vercel.com/docs/build-output-api), its headers in the config.
+if (process.env.VERCEL) {
+  const vercel = new URL("../../.vercel/output/", import.meta.url);
+  await cp(output, new URL("static/", vercel), { recursive: true });
+  await writeFile(new URL("config.json", vercel), `${JSON.stringify({
+    version: 3,
+    routes: [{ src: "/(.*)", headers, continue: true }, { handle: "filesystem" }],
+  }, null, 2)}\n`);
+}
 console.log(`web: built ${fileURLToPath(output)}`);
