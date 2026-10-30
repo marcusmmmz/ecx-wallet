@@ -178,9 +178,12 @@ describe("finding a Deposit's credit", async () => {
     const s = server([...newer(30), ...older(100)]);
     assert.equal(await isCredited(s, deposit), false);
     assert.equal(s.reads.pages, 2, "page 2 reaches older blocks: no page 3");
-    const short = server(newer(10));
+    const short = server(newer(9));
     assert.equal(await isCredited(short, deposit), false);
-    assert.equal(short.reads.pages, 1);
+    assert.equal(short.reads.pages, 1, "a page under 10 is the last, whatever the server's page size");
+    const ten = server(newer(10));
+    assert.equal(await isCredited(ten, deposit), false);
+    assert.equal(ten.reads.pages, 2, "a page of 10 may be full (explorer.blockfab.org lists 10): the next is read, and is empty");
   });
 
   test("without the Slot's height, every page is read", async () => {

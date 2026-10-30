@@ -24,10 +24,14 @@ import { parseElementsTx } from "./elements-tx.mjs";
  *   finality?: Record<string, "soft" | "anchored" | "final">, tipTime?: number,
  *   flushAssets?: Record<string, object>, holdings?: Record<string, object[]>, rejectReason?: string,
  *   marketHeight?: number, instantPayoutsFrom?: number, marketTrades?: Record<string, object>, marketDown?: boolean, blocksDown?: boolean,
- *   flushRpc?: Record<string, ((args: unknown[]) => unknown) | unknown>, flushRpcStatus?: Record<string, number> }} EsploraStubConfig
+ *   flushRpc?: Record<string, ((args: unknown[]) => unknown) | unknown>, flushRpcStatus?: Record<string, number>,
+ *   pageSize?: number }} EsploraStubConfig
  */
 
-/** How many confirmed transactions an address's list holds per page, as both electrs forks list them. */
+/**
+ * How many confirmed transactions an address's list holds per page, as both electrs forks list
+ * them; `config.pageSize` overrides it (explorer.blockfab.org/api, a mempool backend, lists 10).
+ */
 const PAGE = 25;
 
 /**
@@ -44,7 +48,7 @@ const PAGE = 25;
  * - `GET /address/{address}/txs`: `config.addressTxs[address]` (Esplora's JSON: Elements
  *   transactions, which the stub can't parse; mempool's first, then confirmed newest first), else
  *   the transactions in `config.txs` that pay or spend from the address's script: the mempool's
- *   first, newest first, then the 25 latest confirmed. Older pages: `/txs/chain/{txid}`
+ *   first, newest first, then the 25 (`config.pageSize`) latest confirmed. Older pages: `/txs/chain/{txid}`
  *   (Blockstream), or with `config.flush` `?after_txid={txid}` (mempool's fork; `/txs/chain` 404s);
  * - `GET /blocks`: the tip, with `config.tipTime` (default: now) as its timestamp;
  * - `GET /fee-estimates`: `config.feeEstimates` (404 if absent);
@@ -92,14 +96,16 @@ export function createEsploraStub(config) {
 
   /**
    * An address's list from `txs` (Esplora's JSON, newest first): the first page is the mempool's
-   * and the first PAGE confirmed; `after` gives the PAGE confirmed after that txid ([] if absent).
+   * and the first PAGE (or `config.pageSize`) confirmed; `after` gives as many confirmed after
+   * that txid ([] if absent).
    */
   function page(txs, after) {
     if (!Array.isArray(txs)) return txs; // a malformed list, as given
+    const size = config.pageSize ?? PAGE;
     const confirmed = txs.filter((tx) => tx.status?.confirmed !== false);
-    if (after === undefined) return [...txs.filter((tx) => tx.status?.confirmed === false), ...confirmed.slice(0, PAGE)];
+    if (after === undefined) return [...txs.filter((tx) => tx.status?.confirmed === false), ...confirmed.slice(0, size)];
     const at = confirmed.findIndex((tx) => tx.txid === after);
-    return at === -1 ? [] : confirmed.slice(at + 1, at + 1 + PAGE);
+    return at === -1 ? [] : confirmed.slice(at + 1, at + 1 + size);
   }
 
   /** `config.txs`, parsed, by txid. */

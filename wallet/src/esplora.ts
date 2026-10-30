@@ -19,9 +19,16 @@ import { isM5 } from "./treasury";
  */
 export const QUERIES_AT_ONCE = 20;
 
-/** How many of an address's transactions Esplora lists at once: its mempool's, then its confirmed ones. */
+/** How many of an address's mempool transactions Esplora lists at once. */
 const LISTED_MEMPOOL_TXS = 50;
-export const LISTED_CONFIRMED_TXS = 25;
+/**
+ * The fewest confirmed transactions a full page of an address's list holds on any server we know:
+ * electrs lists 50 on its first page and 25 on older ones, Flush's explorer 25, and
+ * explorer.blockfab.org/api (a mempool backend) 10 (measured 2026-10-30). A page this long may
+ * have older ones after it; a shorter one is the last. A server listing 25 costs one more request,
+ * answered [], for an address whose last page holds 10 to 24.
+ */
+export const FULL_PAGE_TXS = 10;
 
 /** The fee rate's confirmation target, in blocks. */
 const FEE_TARGET = "6";
@@ -458,11 +465,11 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
 
     /**
      * The address's transactions, newest first: all of its mempool's (Esplora lists up to 50), then
-     * its latest confirmed ones (up to `LISTED_CONFIRMED_TXS`). Older ones: `addressTxsBefore`.
+     * its latest confirmed ones (a page, as many as the server lists). Older ones: `addressTxsBefore`.
      */
     addressTxs: (address: string) => transactions(`/address/${encodeURIComponent(address)}/txs`),
 
-    /** The address's next `LISTED_CONFIRMED_TXS` confirmed transactions, newest first, after the confirmed `txid`. */
+    /** The address's next page of confirmed transactions, newest first, after the confirmed `txid`. */
     addressTxsBefore: async (address: string, txid: string) => settled(await olderTxs(address, txid)),
 
     /**
@@ -476,7 +483,7 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
       const confirmed = first.filter((tx) => tx.status.confirmed);
       let complete = mempool.length < LISTED_MEMPOOL_TXS;
       const seen = new Set(confirmed.map((tx) => tx.txid));
-      for (let page = confirmed, read = 0; page.length >= LISTED_CONFIRMED_TXS; read++) {
+      for (let page = confirmed, read = 0; page.length >= FULL_PAGE_TXS; read++) {
         if (read === pages) {
           complete = false;
           break;

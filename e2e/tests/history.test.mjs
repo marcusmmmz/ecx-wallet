@@ -310,6 +310,21 @@ for (const browserName of BROWSERS) describe(browserName, () => {
     assert.equal(shown.more, "Older Main chain transactions may not be shown.");
   });
 
+  test("a server listing 10 confirmed transactions per page (explorer.blockfab.org) is paged to the end, not cut at its first page", async () => {
+    L1.pageSize = 10;
+    try {
+      L1.txs = Array.from({ length: 15 }, (_, i) =>
+        tx(i.toString(16).padStart(2, "0"), [{ value: 1000 + i, script: addressScript(L1_RECEIVE_0) }], { blockHeight: 970000 + i }),
+      );
+      const shown = await readHistory(session, "l1");
+      assert.equal(shown.entries.length, 15, "both pages, newest first");
+      assert.deepEqual(shown.entries.at(-1).amounts, ["+0.00001 ECX"]);
+      assert.equal(shown.more, undefined);
+    } finally {
+      delete L1.pageSize;
+    }
+  });
+
   test("with no transactions, it says so", async () => {
     const shown = await readHistory(session, "l1");
     assert.equal(shown.error, undefined);
