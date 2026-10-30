@@ -816,6 +816,54 @@ describe("Flush", () => {
     }
   });
 
+  test("a Deposit's credit in a soft block that is replaced is matched again, and frees nothing for an equal Deposit (#71)", async () => {
+    const l1Config = { identityBlock: l1.chainEntry().networks.betanet.identityBlock, tipHeight: 1001, txStatuses: {} };
+    const l1Stub = createEsploraStub(l1Config);
+    const l1Url = await l1Stub.listen();
+    try {
+      const memory = new Map();
+      const store = {
+        list: async () => [...memory.values()].map((d) => structuredClone(d)),
+        put: async (d) => void memory.set(d.txid, structuredClone(d)),
+        remove: async (txid) => void memory.delete(txid),
+      };
+      const { deps } = pullPathWith();
+      const at = (network, server) => ({ ...network, sidechainServer: { ...network.sidechainServer, url: server } });
+      const deposits = wallet.createDeposits({
+        ...deps,
+        openSigningApproval: () => assert.fail("no approval"),
+        esplora: (entry, network) => wallet.esploraClient(wallet.esploraConfig(entry, at(network, network.slot === undefined ? l1Url : url)), (...args) => fetch(...args)),
+        store,
+        now: () => Date.now(),
+      });
+      const deposit = (n) => ({ slot: 99, chainName: "Flush", txid: n.repeat(32), vout: 0, value: "50000", address: RECEIVE_0.address, asset: "", scriptPubkey: RECEIVE_0.scriptPubkey, createdAt: Number.parseInt(n, 16), slotHeight: 100 });
+      const [d1, d2] = [deposit("d1"), deposit("d2")];
+      for (const d of [d1, d2]) {
+        await store.put(d);
+        l1Config.txStatuses[d.txid] = { confirmed: true, blockHeight: 1000, blockHash: "e0".repeat(32) };
+      }
+      config.finality = { [SOFT]: "soft", [ANCHORED]: "soft" };
+
+      // d1 is paid in a soft block.
+      const first = coinbase(105, [["", 0], [RECEIVE_0.scriptPubkey, 50_000]]);
+      fund([{ hex: first, blockHeight: 105, blockHash: SOFT }]);
+      let list = await deposits.list(99);
+      const state = (d) => list.find((s) => s.txid === d.txid);
+      assert.equal(state(d1).state, "credited");
+      assert.equal(state(d2).state, "awaitingCredit");
+
+      // An anchor replaces that block: the block at 105 now pays d1 in another coinbase.
+      const again = coinbase(105, [["", 0], [RECEIVE_1.scriptPubkey, 1], [RECEIVE_0.scriptPubkey, 50_000]]);
+      fund([{ hex: again, blockHeight: 105, blockHash: ANCHORED }]);
+      list = await deposits.list(99);
+      assert.deepEqual([state(d1).state, state(d2).state], ["credited", "awaitingCredit"], "the replacing payout is d1's, not d2's");
+      assert.deepEqual(memory.get(d1.txid).credit, { txid: parseTx(again).txid, vout: 2 }, "d1 takes the replacing payout");
+    } finally {
+      config.finality = {};
+      await l1Stub.close();
+    }
+  });
+
   test("a Deposit with no Flush tip from its broadcast takes one before it can be paid, and is never matched without one", async () => {
     const l1Config = { identityBlock: l1.chainEntry().networks.betanet.identityBlock, tipHeight: 1001, txStatuses: {} };
     const l1Stub = createEsploraStub(l1Config);
