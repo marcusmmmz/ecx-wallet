@@ -333,8 +333,10 @@ function walletSession(browser, profile, walletPrefix) {
     async openPage(p) {
       const page = await browser.newPage();
       const navigation = page.goto(extensionUrl(p));
-      if (walletPrefix.startsWith("moz-extension://")) navigation.catch(() => {});
-      else await navigation;
+      if (walletPrefix.startsWith("moz-extension://")) {
+        navigation.catch(() => {});
+        await landed(page, walletPrefix);
+      } else await navigation;
       return page;
     },
 
@@ -451,7 +453,9 @@ export async function openWalletPage(session, route) {
   const page = await session.browser.newPage();
   // Over BiDi (Firefox) the navigation to a moz-extension:// page never reports completion, though
   // the page loads; so wait for the screen itself rather than for goto.
-  page.goto(session.extensionUrl(`index.html${route}`)).catch(() => {});
+  const url = session.extensionUrl(`index.html${route}`);
+  page.goto(url).catch(() => {});
+  if (url.startsWith("moz-extension://")) await landed(page, session.extensionUrl(""));
   await page.waitForSelector("[data-screen-ready]");
   // The bottom bar comes in once the vault answers, and moves what's under it: click only after.
   await page.waitForSelector("[data-bar-known]");
@@ -510,6 +514,14 @@ export async function answerIn(page, button) {
  * (its BiDi `script.evaluate` throws "right-hand side of 'in'…"). This polls `page.evaluate` and
  * retries the errors a navigation causes. 30 s by default, as puppeteer's.
  */
+/**
+ * Waits until a new page has left about:blank for `origin`. Firefox 159 fails puppeteer's own waits
+ * (waitForSelector too) that start mid-navigation, so a page is handed out only after this.
+ */
+async function landed(page, origin) {
+  await waitForFunction(page, (o) => location.href.startsWith(o) && document.readyState !== "loading", { timeout: 10_000 }, origin);
+}
+
 export async function waitForFunction(page, fn, { timeout = 30_000, interval = 100 } = {}, ...args) {
   const end = Date.now() + timeout;
   for (;;) {
