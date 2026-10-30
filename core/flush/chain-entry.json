@@ -27,6 +27,7 @@
       "slot": 46,
       "parent": "ecash:mainnet",
       "identityBlock": { "height": 0, "hash": "19b25cff92c2beec1032a50d1eff87b01e1d67e658e25ca099fe599213843662" },
+      "activation": { "height": 978331, "hash": "000000000000000021edfa06433c6e13d6a06d026d6fdc26b3b894e8b4bf1f65" },
       "depositConfirmations": 2,
       "sidechainServer": { "api": "flush", "url": "https://explorer.blockfab.org/flush/api" },
       "officialApps": [],

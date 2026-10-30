@@ -24,8 +24,11 @@
 //!
 //! On mainnet Flush is Slot 46 (`ChainType::ECASH` on `flush-betanet`, `ed15158`, read 2026-10-30):
 //! HRP `flx`, the identity its explorer's genesis (`19b25cff…`), the server
-//! `explorer.blockfab.org/flush/api`. No `activation`: no M2 run for Slot 46 reached the enforcer's
-//! threshold, so the wallet makes no Deposit to it yet (docs/adr/0019).
+//! `explorer.blockfab.org/flush/api`. **`activation`:** eCash block 978,331
+//! (`000000000000000021edfa…b4bf1f65`), where the M1 for Slot 46 re-proposed in block 976,322
+//! reached 1,816 ACKs; Flush's mainnet source (`main`, `6719fa9`) pins the same block as
+//! `main_activation_height`, and explorer.blockfab.org's drivechain summary agrees, read 2026-10-30
+//! (docs/adr/0019).
 //!
 //! `build.rs` picks the file: `chain-entry.json`, or `$ECX_FLUSH_CHAIN_ENTRY` for the e2e build,
 //! whose Chain Entry differs only in its Sidechain Servers.
