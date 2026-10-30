@@ -8,6 +8,11 @@
 //! same. So a Bitcoin server fails the check, as does an ECX mainnet one (mainnet forks later, at
 //! 973,728, so its 967,680 is Bitcoin's).
 //!
+//! mainnet's identity block is its fork block, 973,728 (`EcashHeight` on the `mainnet-bridge` branch,
+//! `9ac3e37`), forked on 2026-10-29. The hash was read on 2026-10-30 from explorer.ecash.ninja and
+//! explorer.blockfab.org, which agree; Bitcoin's and betanet's 973,728 differ, and its 973,727 is
+//! Bitcoin's (docs/adr/0019).
+//!
 //! `build.rs` picks the file: `chain-entry.json`, or `$ECX_L1_CHAIN_ENTRY` for the e2e build,
 //! whose Chain Entry differs only in its Sidechain Servers.
 use std::sync::OnceLock;
@@ -30,11 +35,12 @@ pub struct L1Params {
     /// The replay marker: every L1 spend carries this `nLockTime` and a non-final `nSequence` on
     /// every input, and `sign` refuses anything else (docs/adr/0004). betanet's is 499999999
     /// (`LOCKTIME_THRESHOLD - 1`), final on betanet only (`src/consensus/tx_verify.cpp` on the
-    /// `betanet` branch of github.com/ecash-com/bitcoin, checked 2026-10-20); mainnet's will be
-    /// 499999998 (#32).
+    /// `betanet` branch of github.com/ecash-com/bitcoin, checked 2026-10-20); mainnet's is 499999998
+    /// (`LOCKTIME_THRESHOLD - 2` on the `mainnet-bridge` branch, checked 2026-10-30).
     pub replay_lock_time: u32,
     /// Which NOP the network's BIP300 enforcer reads as `OP_DRIVECHAIN`, the opcode of every
-    /// Treasury script. betanet's is NOP8 (the enforcer's betanet preset, checked 2026-10-20).
+    /// Treasury script. NOP8 on betanet (the enforcer's betanet preset, checked 2026-10-20) and on
+    /// mainnet (bip300301_enforcer PR #666, checked 2026-10-30).
     pub op_drivechain: OpDrivechain,
 }
 

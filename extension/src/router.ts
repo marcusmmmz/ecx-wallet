@@ -441,8 +441,8 @@ export function createRouter<Sender>(host: RouterHost<Sender>) {
   const triedRegistrations = new Map<string, Set<string>>();
 
   /** What a transaction's outputs carry, by its Slot's module, if that declares `tokens` (Flush, docs/adr/0013). */
-  const tokensOn = (entry: ChainEntry) => async (tx: string) => {
-    const module = entry.slot === undefined ? undefined : await chainModule(entry.slot);
+  const tokensOn = (network: NetworkEntry) => async (tx: string) => {
+    const module = network.slot === undefined ? undefined : await chainModule(network.slot);
     return module?.declare().capabilities.includes("tokens") ? module.outputTokens(tx) : undefined;
   };
 
@@ -457,7 +457,7 @@ export function createRouter<Sender>(host: RouterHost<Sender>) {
     ...signing,
     ...keys,
     l1Module,
-    sidechainServer: (entry, network) => sidechainServer(entry, network, undefined, sessionCache, tokensOn(entry), tradeStore),
+    sidechainServer: (entry, network) => sidechainServer(entry, network, undefined, sessionCache, tokensOn(network), tradeStore),
     cache: sessionCache,
   });
 

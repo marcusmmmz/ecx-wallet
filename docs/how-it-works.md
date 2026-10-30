@@ -35,7 +35,7 @@ website → client discovery → injected Provider (inpage.ts, main world)
 - **Approvals:** Send and Deposit still approve in place through their host port. An approval surface opens `#/approve/<id>` in the same page and returns to the previous route when done; leaving it cancels the request.
 - **Spending across tabs:** origin-wide Web Locks serialize Sends per Slot and Deposits across all Slots through approval and persistence of their records. Each tab keeps its own unlock state; closing a tab releases its lock. Leaving a hosted form cancels its request even while it waits for a lock.
 - **Requester:** always the wallet page, with no origin. No Provider is injected and dApp requests are refused as Unauthorized. Grants cannot attest a web caller here. Pin and side-panel controls are absent.
-- **Chains:** Slot 24 is excluded because `explorer.bitnames.info` sends no CORS headers (checked 2026-10-29). `app/scripts/web-config.mjs` selects the registry, WASM and Chain Entries together, without changing the Chain Entry format.
+- **Chains:** the build network's (see [Networks](#networks)), less Slot 24 on betanet, because `explorer.bitnames.info` sends no CORS headers (checked 2026-10-29). `app/scripts/web-config.mjs` selects the registry, WASM and Chain Entries together, without changing the Chain Entry format.
 - **Headers:** `_headers` (Netlify / Cloudflare Pages) and `vercel.json` (Vercel) carry the same HTTP CSP, `nosniff` and `no-referrer`. Its `connect-src` uses the same Chain Entry origin derivation as extension host permissions, with Slot 24 left out. The web bootstrap is external, as in the extension. Serve over HTTPS and configure the host to send those headers.
 
 ## Vault
@@ -68,13 +68,17 @@ Every chain has a Chain Entry, and its keys follow its place in the chain tree (
 
 Each chain is read from the Sidechain Server its Chain Entry names for the module's network, in the Server API named next to the URL: `sidechainServer: { api, url }` (ADR 0002). All three speak Esplora; Flush's explorer adds finality (`"flush"`, ADR 0012):
 
-| Chain | Server (betanet) | Chain Entry |
-|---|---|---|
-| eCash | `https://esplora.beta.ecash.ninja` | `core/l1/chain-entry.json` |
-| Slot 24 | `https://explorer.bitnames.info/api` | `core/elements/chain-entry.json` |
-| Slot 99 (Flush on betanet, ADR 0014) | `https://explorer.blockfab.org/betanet/flush/api` | `core/flush/chain-entry.json` |
+| Chain | Server (mainnet) | Server (betanet) | Chain Entry |
+|---|---|---|---|
+| eCash | `https://explorer.ecash.ninja/api` | `https://esplora.beta.ecash.ninja` | `core/l1/chain-entry.json` |
+| Elements+ | none (no mainnet chain) | Slot 24, `https://explorer.bitnames.info/api` | `core/elements/chain-entry.json` |
+| Flush | Slot 46, `https://explorer.blockfab.org/flush/api` | Slot 99 (ADR 0014), `https://explorer.blockfab.org/betanet/flush/api` | `core/flush/chain-entry.json` |
 
-The extension build turns those URLs into `host_permissions` and the CSP's `connect-src`. `wallet/src/server-api.ts` picks the client for the Server API.
+## Networks
+
+Each build serves one network, `$ECX_NETWORK` (ADR 0019): **mainnet** for `pnpm build` and `pnpm build:web`, **betanet** for the e2e build and `cargo test`. A Chain Entry describes a chain on each of its networks, with its Slot there (`networks.<name>.slot`). `core/scripts/chains.mjs` bundles only the modules whose Chain Entry names the build's network, and writes `wallet/src/module-files.ts` (Slot to `.wasm`) for it. Each module's `build.rs` reads the same variable into `NETWORK`, the network whose entry the module serves. Flush's link network follows it (`ecash` on mainnet, `ecashbeta` on betanet).
+
+The extension build turns the build network's server URLs into `host_permissions` and the CSP's `connect-src`. `wallet/src/server-api.ts` picks the client for the Server API.
 
 ### Esplora (`wallet/src/esplora.ts`)
 
@@ -172,12 +176,12 @@ A ticker of the Chain Entry's, in any case, is refused, with the reason shown. A
 
 **How** (`wallet/src/deposit.ts`, #31, ADR 0004):
 
-1. The Slot's Chain Module says what the Deposit credits (`depositDestination`). For Elements, that's its first receive address as UTF-8, with a minimum of 3,000 sats, credited exactly the value. For Flush, it's `s99_<address>_<checksum>` on betanet (the checksum is the first 6 hex digits of the SHA-256 of `s99_<address>_`), with a minimum of 294 sats; `flush.wasm` declares it only while its Chain Entry pins its Slot's activation (ADR 0004).
+1. The Slot's Chain Module says what the Deposit credits (`depositDestination`). For Elements, that's its first receive address as UTF-8, with a minimum of 3,000 sats, credited exactly the value. For Flush, it's `s<slot>_<address>_<checksum>`, `s99_…` on betanet (the checksum is the first 6 hex digits of the SHA-256 of `s99_<address>_`), with a minimum of 294 sats; `flush.wasm` declares it only while its Chain Entry pins its Slot's activation (ADR 0004), so not on mainnet yet (ADR 0019).
 2. `treasury.ts` finds the Slot's Treasury on eCash's Esplora by #15's strict exactly-one rule (`/scripthash/:h/utxo`, following pending M5s). With none, only a pinned `activation` in the Slot's Chain Entry allows a first Deposit.
 3. `l1.wasm`'s `build_deposit` builds the M5 from the account's confirmed coins: largest first, the fee at the 6-block estimate, change to the first unused change address. Every input carries its previous transaction, so the module checks every value itself. It refuses an M5 eCash won't relay: over 10,000 vB, or over 1,000 vB when the Treasury it spends is a pending M5's, and a destination over 100 bytes (Backbone's limits, #57).
 4. The L1 Decoder's Clear View is shown in place, on the Deposit screen. After approval: `sign`, `finalize`, `POST /tx`.
 
-**The replay marker:** `l1.wasm` refuses to check, decode, sign or finalize any spend without it: betanet's `nLockTime` 499999999 and a non-final `nSequence`.
+**The replay marker:** `l1.wasm` refuses to check, decode, sign or finalize any spend without it: the network's `nLockTime` (499999998 on mainnet, 499999999 on betanet) and a non-final `nSequence`.
 
 **Tracking:** pending Deposits sit in `storage.local` (`deposit:<txid>`) and show under "In progress" on the Activity tabs (`deposit.list`), each with its txid. They go through:
 

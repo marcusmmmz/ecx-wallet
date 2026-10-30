@@ -1,7 +1,7 @@
 import { cp, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { modules, chainEntries } from "./web-config.mjs";
-import { sidechainServerOrigins } from "../../extension/scripts/chain-origins.mjs";
+import { chains, modules } from "./web-config.mjs";
+import { sidechainServerOrigins } from "../../core/scripts/chains.mjs";
 import { checkNoEval } from "../../extension/scripts/check-no-eval.mjs";
 
 const output = new URL(`${process.env.ECX_APP_WEB_DIST ?? "build-web"}/`, new URL("../", import.meta.url));
@@ -9,7 +9,7 @@ const core = new URL(`${process.env.ECX_CORE_DIST ?? "../core/dist"}/`, new URL(
 for (const name of ["vault", ...modules]) {
   await cp(new URL(`${name}.wasm`, core), new URL(`${name}.wasm`, output));
 }
-const origins = await sidechainServerOrigins(chainEntries);
+const origins = sidechainServerOrigins(chains);
 // Svelte writes style attributes; checked asset logos are data: images. Neither needs script access.
 const csp = [
   "default-src 'self'", "script-src 'self' 'wasm-unsafe-eval'", "worker-src 'self'",

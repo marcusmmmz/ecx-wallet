@@ -8,6 +8,7 @@ import { spawnSync } from "node:child_process";
 import { readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { E2E_NETWORK } from "./build.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const e2e = path.join(root, "e2e");
@@ -35,9 +36,9 @@ run("pnpm", ["build"], { cwd: root });
 run("pnpm", ["build:e2e"], { cwd: root });
 // The web tests serve the web build, which reuses build:e2e's stub-backed core.
 if (names.includes("web-wallet")) run("pnpm", ["build:e2e:web"], { cwd: root });
-// The flags match @ecx/e2e's `test` script: --test-concurrency=1, or the pull-path tests hang.
+// The flags and $ECX_NETWORK match @ecx/e2e's `test` script: --test-concurrency=1, or the pull-path tests hang.
 run(
   process.execPath,
   ["--test", "--test-concurrency=1", "--test-timeout=120000", ...names.map((name) => `tests/${name}.test.mjs`)],
-  { cwd: e2e, env: { ...process.env, E2E_BROWSERS: "brave" } },
+  { cwd: e2e, env: { ...process.env, E2E_BROWSERS: "brave", ECX_NETWORK: E2E_NETWORK } },
 );

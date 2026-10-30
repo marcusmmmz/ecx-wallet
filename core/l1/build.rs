@@ -4,6 +4,11 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
+    // The network the module serves: `$ECX_NETWORK`, betanet when unset (as for `cargo test`). The
+    // shipped build sets mainnet, the e2e build betanet (core/scripts/build.mjs).
+    println!("cargo:rerun-if-env-changed=ECX_NETWORK");
+    let network = env::var("ECX_NETWORK").unwrap_or_else(|_| "betanet".into());
+    println!("cargo:rustc-env=ECX_NETWORK={network}");
     println!("cargo:rerun-if-env-changed=ECX_L1_CHAIN_ENTRY");
     let path = match env::var_os("ECX_L1_CHAIN_ENTRY") {
         Some(path) => PathBuf::from(path),

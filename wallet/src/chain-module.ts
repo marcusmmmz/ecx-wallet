@@ -48,6 +48,8 @@ export interface IdentityBlock {
 export interface NetworkEntry<P = unknown> {
   /** CAIP-2: `ecash:<network>` for the root, `ecash:<network>-s<slot>` under it. */
   chain: string;
+  /** The chain's Slot under its parent on this network; absent for the root. It can differ by network (docs/adr/0019). */
+  slot?: number;
   /** The parent chain's `chain`; absent for the root (eCash). */
   parent?: string;
   /** Height 0 and the genesis, or for a fork the first block after it (docs/adr/0003). */
@@ -82,11 +84,10 @@ export interface AssetEntry {
 
 /**
  * The description of one chain of the tree, eCash itself or a sidechain, that ships with its Chain
- * Module. The root has neither `slot` nor `parent`; every other chain has both (docs/adr/0003).
+ * Module. On each network the root has neither `slot` nor `parent`; every other chain has both
+ * (docs/adr/0003).
  */
 export interface ChainEntry<P = unknown> {
-  /** The chain's Slot under its parent; absent for the root. */
-  slot?: number;
   /** The name the wallet shows ("Main chain", "Elements+"). */
   name: string;
   /** One line on what the chain is for. */

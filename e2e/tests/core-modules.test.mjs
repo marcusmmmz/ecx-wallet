@@ -1,10 +1,11 @@
-// The core modules as they ship: each `.wasm` in the extension build, loaded through the wallet's
-// hand-written glue exactly as the background loads it (no browser needed).
+// The core modules: each `.wasm` in the extension builds, loaded through the wallet's hand-written
+// glue exactly as the background loads it (no browser needed). The shipped build is mainnet's; the
+// modules' betanet behaviour is checked in the e2e build, whose modules differ only in their servers.
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
-import { DIST, ROOT, importWallet } from "../harness.mjs";
+import { DIST, DIST_E2E, ROOT, importWallet } from "../harness.mjs";
 
 const ABANDON = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
@@ -15,7 +16,7 @@ test("every shipped .wasm imports nothing but memory", async () => {
   assert.ok(wasm.includes("l1.wasm"), "l1.wasm is packaged");
   assert.ok(wasm.includes("flush.wasm"), "flush.wasm is packaged");
   for (const file of wasm) {
-    const module = new WebAssembly.Module(await readFile(path.join(DIST.chromium, file)));
+    const module = new WebAssembly.Module(await readFile(path.join(DIST_E2E.chromium, file)));
     const imports = WebAssembly.Module.imports(module).filter((i) => i.kind !== "memory");
     assert.deepEqual(imports, [], `${file} imports more than memory`);
   }
@@ -23,14 +24,14 @@ test("every shipped .wasm imports nothing but memory", async () => {
 
 test("the shipped Vault yields the BitWindow Slot 24 Starters, with and without a passphrase", async () => {
   const { loadVaultModule } = await importWallet();
-  const vault = await loadVaultModule(await readFile(path.join(DIST.chromium, "vault.wasm")));
+  const vault = await loadVaultModule(await readFile(path.join(DIST_E2E.chromium, "vault.wasm")));
   assert.equal(vault.starter(ABANDON, "", 24), "buyer citizen congress doll secret merry denial law live wait pass drive");
   assert.equal(vault.starter(ABANDON, "TREZOR", 24), "raw sister combine impact penalty improve soap power tomato topic frog flip");
 });
 
 test("the shipped Vault creates from caller entropy, checks imports and stretches passwords", async () => {
   const { loadVaultModule } = await importWallet();
-  const vault = await loadVaultModule(await readFile(path.join(DIST.chromium, "vault.wasm")));
+  const vault = await loadVaultModule(await readFile(path.join(DIST_E2E.chromium, "vault.wasm")));
   assert.equal(vault.masterMnemonicFromEntropy(new Uint8Array(16)), ABANDON);
   assert.equal(vault.canonicalMnemonic(`  ${ABANDON.toUpperCase()} `), ABANDON);
   assert.throws(() => vault.canonicalMnemonic("abandon abandon"), /word count|invalid/i);
@@ -47,13 +48,13 @@ const SLOT_24_STARTER = "buyer citizen congress doll secret merry denial law liv
 
 test("the shipped Elements Chain Module declares its binding and bundles Slot 24's Chain Entry", async () => {
   const { loadChainModule } = await importWallet();
-  const elements = await loadChainModule(await readFile(path.join(DIST.chromium, "elements.wasm")));
+  const elements = await loadChainModule(await readFile(path.join(DIST_E2E.chromium, "elements.wasm")));
   assert.deepEqual(elements.declare(), {
     binding: { chain: "ecash:betanet-s24", format: "pset", payloadVersions: ["1"] },
     capabilities: ["depositDestination", "buildTransfer", "assetContract"],
   });
   const entry = elements.chainEntry();
-  assert.equal(entry.slot, 24);
+  assert.equal(entry.networks.betanet.slot, 24);
   assert.equal(entry.networks.betanet.chain, "ecash:betanet-s24");
   assert.equal(entry.networks.betanet.parent, "ecash:betanet");
   assert.equal(entry.networks.betanet.params.genesisHash, "a7754ce0debc40baddbd8c47e79d19209685f22c63edaaf8b69cf54116374d7f");
@@ -62,7 +63,7 @@ test("the shipped Elements Chain Module declares its binding and bundles Slot 24
 
 test("the shipped Elements Chain Module derives the Slot 24 receive and change addresses from the Starter", async () => {
   const { loadChainModule } = await importWallet();
-  const elements = await loadChainModule(await readFile(path.join(DIST.chromium, "elements.wasm")));
+  const elements = await loadChainModule(await readFile(path.join(DIST_E2E.chromium, "elements.wasm")));
   const account = elements.deriveAccount(SLOT_24_STARTER, { receive: 2 });
   assert.deepEqual(account.receive.map((a) => a.address), [
     "elements1qew44aehkjstjm56ng2rjrz57vwxh5g9su6dlpm",
@@ -80,7 +81,7 @@ const PSETS = JSON.parse(await readFile(path.join(ROOT, "e2e", "fixtures", "elem
 
 test("the shipped Elements Chain Module decodes a request it can't explain as Blind, with its verifiable facts", async () => {
   const { loadChainModule } = await importWallet();
-  const elements = await loadChainModule(await readFile(path.join(DIST.chromium, "elements.wasm")));
+  const elements = await loadChainModule(await readFile(path.join(DIST_E2E.chromium, "elements.wasm")));
   const decoded = elements.decode(PSETS.blind.payload, SLOT_24_STARTER);
   assert.equal(decoded.kind, "blind");
   assert.deepEqual(decoded.verifiableFacts.ownedInputs.map((i) => [i.index, i.amount]), [[0, "100000"]]);
@@ -89,7 +90,7 @@ test("the shipped Elements Chain Module decodes a request it can't explain as Bl
 
 test("the shipped Elements Chain Module signs its own input exactly as LWK does, and refuses by rule", async () => {
   const { loadChainModule, ChainModuleRefusal } = await importWallet();
-  const elements = await loadChainModule(await readFile(path.join(DIST.chromium, "elements.wasm")));
+  const elements = await loadChainModule(await readFile(path.join(DIST_E2E.chromium, "elements.wasm")));
   assert.equal(elements.sign(PSETS.blind.payload, SLOT_24_STARTER), PSETS.blind.signed);
   assert.throws(
     () => elements.sign(PSETS.wrongGenesis.payload, SLOT_24_STARTER),
@@ -103,8 +104,8 @@ test("the shipped Elements Chain Module signs its own input exactly as LWK does,
 
 test("the shipped modules name their chains, what they're for, and their ECX", async () => {
   const { loadChainModule, loadL1Module, describeChain } = await importWallet();
-  const l1 = await loadL1Module(await readFile(path.join(DIST.chromium, "l1.wasm")));
-  const elements = await loadChainModule(await readFile(path.join(DIST.chromium, "elements.wasm")));
+  const l1 = await loadL1Module(await readFile(path.join(DIST_E2E.chromium, "l1.wasm")));
+  const elements = await loadChainModule(await readFile(path.join(DIST_E2E.chromium, "elements.wasm")));
   assert.deepEqual(describeChain(l1), {
     name: "Main chain",
     description: "eCash itself",
@@ -123,6 +124,6 @@ test("the shipped modules name their chains, what they're for, and their ECX", a
     checksNames: "contract",
   });
   // Flush names its assets from their registration (docs/adr/0013); eCash has none to name.
-  const flush = await loadChainModule(await readFile(path.join(DIST.chromium, "flush.wasm")));
+  const flush = await loadChainModule(await readFile(path.join(DIST_E2E.chromium, "flush.wasm")));
   assert.equal(describeChain(flush).checksNames, "registration");
 });

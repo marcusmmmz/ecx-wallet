@@ -10,11 +10,11 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { createEsploraStub } from "@ecx/stub-server/esplora";
 import { encodeTx, parseTx } from "@ecx/stub-server/bitcoin-tx";
-import { DIST, importWallet, ROOT } from "../harness.mjs";
+import { DIST_E2E, importWallet, ROOT } from "../harness.mjs";
 
 const wallet = await importWallet();
-const flush = await wallet.loadChainModule(await readFile(path.join(DIST.chromium, "flush.wasm")));
-const l1 = await wallet.loadL1Module(await readFile(path.join(DIST.chromium, "l1.wasm")));
+const flush = await wallet.loadChainModule(await readFile(path.join(DIST_E2E.chromium, "flush.wasm")));
+const l1 = await wallet.loadL1Module(await readFile(path.join(DIST_E2E.chromium, "l1.wasm")));
 
 const STARTER = "buyer citizen congress doll secret merry denial law live wait pass drive";
 const FOREIGN = "blush cream bullet drive index disease noble east target dice put rate";
@@ -765,7 +765,7 @@ describe("Flush", () => {
       const deposits = wallet.createDeposits({
         ...deps,
         openSigningApproval: () => assert.fail("no approval"),
-        esplora: (entry, network) => wallet.esploraClient(wallet.esploraConfig(entry, at(network, entry.slot === undefined ? l1Url : url)), (...args) => fetch(...args)),
+        esplora: (entry, network) => wallet.esploraClient(wallet.esploraConfig(entry, at(network, network.slot === undefined ? l1Url : url)), (...args) => fetch(...args)),
         store,
         now: () => Date.now(),
       });
@@ -832,7 +832,7 @@ describe("Flush", () => {
       const deposits = wallet.createDeposits({
         ...deps,
         openSigningApproval: () => assert.fail("no approval"),
-        esplora: (entry, network) => wallet.esploraClient(wallet.esploraConfig(entry, at(network, entry.slot === undefined ? l1Url : url)), (...args) => fetch(...args)),
+        esplora: (entry, network) => wallet.esploraClient(wallet.esploraConfig(entry, at(network, network.slot === undefined ? l1Url : url)), (...args) => fetch(...args)),
         store,
         now: () => Date.now(),
       });

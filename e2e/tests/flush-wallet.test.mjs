@@ -16,7 +16,7 @@ import {
   answerIn,
   approvalIn,
   BROWSERS,
-  DIST,
+  DIST_E2E,
   homeSettled,
   importWallet,
   launchWallet,
@@ -32,8 +32,8 @@ import { BROSEVELT, flushSale, LIVE_TXS, REGISTRATION } from "../flush-sale.mjs"
 
 const wallet = await importWallet();
 const [vault, flush] = await Promise.all([
-  readFile(path.join(DIST.chromium, "vault.wasm")).then(wallet.loadVaultModule),
-  readFile(path.join(DIST.chromium, "flush.wasm")).then(wallet.loadChainModule),
+  readFile(path.join(DIST_E2E.chromium, "vault.wasm")).then(wallet.loadVaultModule),
+  readFile(path.join(DIST_E2E.chromium, "flush.wasm")).then(wallet.loadChainModule),
 ]);
 const account = flush.deriveAccount(vault.starter(ABANDON, "", 99), { receive: 1 });
 const RECEIVE_0 = account.receive[0];

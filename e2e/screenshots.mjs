@@ -12,7 +12,7 @@ import { flushSale } from "./flush-sale.mjs";
 import {
   ABANDON,
   activitySettled,
-  DIST,
+  DIST_E2E,
   homeSettled,
   importWallet,
   ROOT,
@@ -45,8 +45,8 @@ const historyTx = (seed, vin, vout, status) => ({
 /** Flush (Slot 99, off until its screenshots): a sale of BROSEVELT, paid by a coinbase. */
 const wallet = await importWallet();
 const [vault, flush] = await Promise.all([
-  readFile(path.join(DIST.chromium, "vault.wasm")).then(wallet.loadVaultModule),
-  readFile(path.join(DIST.chromium, "flush.wasm")).then(wallet.loadChainModule),
+  readFile(path.join(DIST_E2E.chromium, "vault.wasm")).then(wallet.loadVaultModule),
+  readFile(path.join(DIST_E2E.chromium, "flush.wasm")).then(wallet.loadChainModule),
 ]);
 const FLUSH_RECEIVE = flush.deriveAccount(vault.starter(ABANDON, "", 99), { receive: 1 }).receive[0];
 const FLUSH_SALE = flushSale(FLUSH_RECEIVE.scriptPubkey, "f0".repeat(32));

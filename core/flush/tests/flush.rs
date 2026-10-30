@@ -57,7 +57,7 @@ fn declare_reports_slot_99s_betanet_binding_and_capabilities() {
 
 #[test]
 fn flush_on_betanet_is_slot_99_identified_by_its_own_genesis() {
-    assert_eq!(chain_entry().slot, Some(99));
+    assert_eq!(network().slot, Some(99));
     assert_eq!(chain_entry().name, "Flush");
     let betanet = network();
     assert_eq!(betanet.parent.as_deref(), Some("ecash:betanet"));
@@ -69,6 +69,18 @@ fn flush_on_betanet_is_slot_99_identified_by_its_own_genesis() {
     assert_eq!(betanet.sidechain_server.api, ServerApi::Flush);
     let p = &betanet.params.address_params;
     assert_eq!((p.p2pkh_prefix, p.p2sh_prefix, p.bech_hrp.as_str()), (0, 5, "bflx"));
+}
+
+#[test]
+fn flush_on_mainnet_is_slot_46_with_no_activation_pinned() {
+    let mainnet = &chain_entry().networks["mainnet"];
+    assert_eq!((mainnet.chain.as_str(), mainnet.slot, mainnet.parent.as_deref()), ("ecash:mainnet-s46", Some(46), Some("ecash:mainnet")));
+    assert_eq!(mainnet.identity_block.height, 0);
+    assert_eq!(mainnet.identity_block.hash, "19b25cff92c2beec1032a50d1eff87b01e1d67e658e25ca099fe599213843662");
+    assert_eq!(mainnet.activation, None, "no M2 run reached the enforcer's threshold for Slot 46 (docs/adr/0019)");
+    assert_eq!(mainnet.sidechain_server.api, ServerApi::Flush);
+    let p = &mainnet.params.address_params;
+    assert_eq!((p.p2pkh_prefix, p.p2sh_prefix, p.bech_hrp.as_str()), (0, 5, "flx"));
 }
 
 #[test]

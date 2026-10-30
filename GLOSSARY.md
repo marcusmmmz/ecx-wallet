@@ -43,7 +43,7 @@ The coin of eCash, and on a sidechain the asset its Chain Entry names as that ch
 _Avoid_: eCash (for the coin, on screen), policy asset (Elements' word for its ECX), peg asset
 
 **Slot**:
-The BIP300 number (1–255) that identifies a sidechain on eCash.
+The BIP300 number (1–255) that identifies a sidechain on one eCash network. The same chain can have a different Slot on each network (Flush: 99 on betanet, 46 on mainnet).
 _Avoid_: Sidechain number, sidechain id
 
 **Treasury**:
@@ -67,7 +67,7 @@ Moving coins from a sidechain back to eCash, paid out of its Treasury once miner
 _Avoid_: Peg-out
 
 **Chain Entry**:
-The description of one chain, eCash itself or a sidechain, that ships with a Wallet Base release: its name and what it's for, its Slot and parent chain (neither for eCash, the root), its networks, and on each its identity block, Activation (for a Slot, once pinned), the main-chain confirmations before a Deposit to it is credited (for a Slot), default Sidechain Server, Official Apps and the assets it names, among them the chain's ECX.
+The description of one chain, eCash itself or a sidechain, that ships with a Wallet Base release: its name and what it's for, and its networks, on each its Slot and parent chain (neither for eCash, the root), identity block, Activation (for a Slot, once pinned), the main-chain confirmations before a Deposit to it is credited (for a Slot), default Sidechain Server, Official Apps and the assets it names, among them the chain's ECX.
 _Avoid_: Chain manifest, chain descriptor, network profile
 
 **Asset Store**:

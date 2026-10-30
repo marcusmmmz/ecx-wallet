@@ -49,8 +49,8 @@ fn no_ambient_rng(_: &mut [u8]) -> Result<(), getrandom::Error> {
 #[cfg(target_arch = "wasm32")]
 getrandom::register_custom_getrandom!(no_ambient_rng);
 
-/// The network this build serves (the skeleton targets betanet only).
-pub const NETWORK: &str = "betanet";
+/// The network this build serves, its key in the Chain Entry: `$ECX_NETWORK` at build time (build.rs).
+pub const NETWORK: &str = env!("ECX_NETWORK");
 
 /// What the module serves: requests for this chain, in this format.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

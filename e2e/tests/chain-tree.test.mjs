@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
-import { DIST, importWallet } from "../harness.mjs";
+import { DIST_E2E, importWallet } from "../harness.mjs";
 
 const ABANDON = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 const SLOT_24_STARTER = "buyer citizen congress doll secret merry denial law live wait pass drive";
@@ -14,12 +14,12 @@ const L1_RECEIVE_0 = "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu";
 const L1_CHANGE_0 = "bc1q8c6fshw2dlwun7ekn9qwf37cu2rn755upcp6el";
 
 const wallet = await importWallet();
-const load = async (file) => wallet.loadChainModule(await readFile(path.join(DIST.chromium, file)));
+const load = async (file) => wallet.loadChainModule(await readFile(path.join(DIST_E2E.chromium, file)));
 const [l1, elements, flush, vault] = await Promise.all([
   load("l1.wasm"),
   load("elements.wasm"),
   load("flush.wasm"),
-  readFile(path.join(DIST.chromium, "vault.wasm")).then(wallet.loadVaultModule),
+  readFile(path.join(DIST_E2E.chromium, "vault.wasm")).then(wallet.loadVaultModule),
 ]);
 const L1_ACCOUNT_KEY = vault.l1AccountKey(ABANDON, "");
 
@@ -62,7 +62,7 @@ describe("the bundled Chain Entries", () => {
 
   test("Flush on betanet is Slot 99, identified by its own genesis, and its ECX is its native coin", () => {
     const entry = flush.chainEntry();
-    assert.equal(entry.slot, 99);
+    assert.equal(entry.networks.betanet.slot, 99);
     assert.deepEqual(entry.networks.betanet.identityBlock, { height: 0, hash: "04dfb01bef61e44d679132f9e830719c64241f7052880418a350ff6d3c90b561" });
     assert.equal(entry.networks.betanet.sidechainServer.api, "flush");
     assert.deepEqual(entry.networks.betanet.assets.find((a) => a.ecx)?.id, "", "the empty id, as eCash's (docs/adr/0005)");

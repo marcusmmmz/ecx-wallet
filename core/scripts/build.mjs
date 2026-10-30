@@ -3,7 +3,8 @@
 //
 //   node scripts/build.mjs
 //
-// The e2e build (e2e/scripts/build.mjs) sets $ECX_ELEMENTS_CHAIN_ENTRY, $ECX_L1_CHAIN_ENTRY and
+// It builds for $ECX_NETWORK (mainnet unless set), and only the Chain Modules whose Chain Entry
+// names that network (scripts/chains.mjs). The e2e build (e2e/scripts/build.mjs) sets $ECX_ELEMENTS_CHAIN_ENTRY, $ECX_L1_CHAIN_ENTRY and
 // $ECX_FLUSH_CHAIN_ENTRY (the Chain Entries the Chain Modules embed), $ECX_CORE_DIST (instead of core/dist/) and
 // $CARGO_TARGET_DIR.
 //
@@ -17,6 +18,7 @@ import { mkdir, readFile, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { bundledChains, NETWORK } from "./chains.mjs";
 import { checkWasmImports } from "./check-wasm-imports.mjs";
 
 const core = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -24,13 +26,14 @@ const dist = process.env.ECX_CORE_DIST ?? path.join(core, "dist");
 const targetDir = process.env.CARGO_TARGET_DIR ?? path.join(core, "target");
 const TARGET = "wasm32-unknown-unknown";
 
-/** One entry per module: the C-ABI crate and the file it ships as. */
+/** One entry per module: the C-ABI crate and the file it ships as. A Chain Module ships only on the networks its Chain Entry names. */
+const bundled = new Set((await bundledChains()).map((c) => `${c.name}.wasm`));
 export const MODULES = [
   { crate: "ecx-vault-wasm", file: "vault.wasm" },
   { crate: "ecx-elements-wasm", file: "elements.wasm" },
   { crate: "ecx-l1-wasm", file: "l1.wasm" },
   { crate: "ecx-flush-wasm", file: "flush.wasm" },
-];
+].filter(({ file }) => file === "vault.wasm" || bundled.has(file));
 
 const run = (cmd, args, env = {}) =>
   execFileSync(cmd, args, { cwd: core, stdio: ["ignore", "pipe", "inherit"], env: { ...process.env, ...env } })
@@ -53,6 +56,7 @@ const env = {
   CARGO_INCREMENTAL: "0",
   SOURCE_DATE_EPOCH: "946684800",
   CARGO_ENCODED_RUSTFLAGS: rustflags.join("\x1f"),
+  ECX_NETWORK: NETWORK,
 };
 
 await rm(dist, { recursive: true, force: true });
@@ -72,5 +76,5 @@ for (const { crate, file } of MODULES) {
   ]);
   const bytes = await readFile(out);
   checkWasmImports(file, bytes);
-  console.log(`core: ${file} ${bytes.length} B sha256 ${createHash("sha256").update(bytes).digest("hex")}`);
+  console.log(`core: ${file} (${NETWORK}) ${bytes.length} B sha256 ${createHash("sha256").update(bytes).digest("hex")}`);
 }

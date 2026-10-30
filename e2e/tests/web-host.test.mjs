@@ -2,9 +2,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import * as esbuild from "esbuild";
-import { chainEntries, moduleFiles, webChains } from "../../app/scripts/web-config.mjs";
-import { sidechainServerOrigins } from "../../extension/scripts/chain-origins.mjs";
+import { chains, webChains } from "../../app/scripts/web-config.mjs";
+import { moduleFilesSource, sidechainServerOrigins } from "../../core/scripts/chains.mjs";
 
 const root = new URL("../../", import.meta.url).pathname;
 const load = async (options) => {
@@ -13,8 +14,19 @@ const load = async (options) => {
 };
 
 test("web chains exclude Elements from the registry and server origins", async () => {
-  assert.deepEqual(moduleFiles, { 99: "flush.wasm" });
-  assert.deepEqual(await sidechainServerOrigins(chainEntries), ["https://esplora.beta.ecash.ninja", "https://explorer.blockfab.org"]);
+  assert.equal(moduleFilesSource(chains), 'export const CHAIN_MODULE_FILES = {"99":"flush.wasm"};');
+  assert.deepEqual(sidechainServerOrigins(chains), ["https://esplora.beta.ecash.ninja", "https://explorer.blockfab.org"]);
+});
+
+test("the mainnet web build bundles Flush as Slot 46 and reaches only mainnet's servers", () => {
+  const script = `const { chains } = await import(${JSON.stringify(`${root}app/scripts/web-config.mjs`)});
+    const { moduleFilesSource, sidechainServerOrigins } = await import(${JSON.stringify(`${root}core/scripts/chains.mjs`)});
+    console.log(JSON.stringify([moduleFilesSource(chains), sidechainServerOrigins(chains)]));`;
+  const env = { ...process.env, ECX_NETWORK: "mainnet" };
+  delete env.ECX_CHAIN_ENTRIES;
+  const [source, origins] = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], { env }).toString());
+  assert.equal(source, 'export const CHAIN_MODULE_FILES = {"46":"flush.wasm"};');
+  assert.deepEqual(origins, ["https://explorer.blockfab.org", "https://explorer.ecash.ninja"]);
 });
 
 test("the web Worker refuses claimed dApp origins and excludes Slot 24 at the router", async () => {

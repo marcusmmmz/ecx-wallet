@@ -26,7 +26,7 @@ Useful switches:
 
 ## The e2e build
 
-The shipped build reads public explorers, which tests can't control. So `e2e/scripts/build.mjs` (`pnpm build:e2e`) builds the extension again from the same sources, with one change: each Chain Entry's betanet `sidechainServer` points at a local Esplora stub.
+The shipped build is mainnet's and reads public explorers, which tests can't control. So `e2e/scripts/build.mjs` (`pnpm build:e2e`) builds the extension again from the same sources for betanet (`E2E_NETWORK`, `$ECX_NETWORK`; ADR 0019), which every fixture is of, with each Chain Entry's betanet `sidechainServer` pointed at a local Esplora stub. The e2e test runs set `ECX_NETWORK=betanet` too (`@ecx/e2e`'s `test` script, `pnpm test:quick`).
 
 | Chain | Stub URL | Constant |
 |---|---|---|
@@ -35,7 +35,8 @@ The shipped build reads public explorers, which tests can't control. So `e2e/scr
 | Slot 99 (Flush) | `http://127.0.0.1:24046` (Server API `flush`) | `E2E_FLUSH_SERVER` |
 
 - Chain Entries are compiled into their modules (`core/<module>/build.rs` reads `$ECX_L1_CHAIN_ENTRY` / `$ECX_ELEMENTS_CHAIN_ENTRY` / `$ECX_FLUSH_CHAIN_ENTRY`), so `l1.wasm`, `elements.wasm` and `flush.wasm` are rebuilt, in their own cargo target dir (`core/target/e2e`). The output is in `e2e/dist/extension/{chromium,firefox}`.
-- `build-output.test` checks that the two builds differ only there: every other file is byte-identical, the manifest differs only in the servers' origins, and each module's `declare()` and `chainEntry()` differ only in betanet's server.
+- `build-output.test` checks that the two builds differ only in their network and servers: the e2e build adds `elements.wasm` (Elements+ has no mainnet), every other file is byte-identical but for the background's module map, the manifest differs only in the servers' origins, each module serves its build's network, and its `chainEntry()` differs only in betanet's server.
+- Tests that load a module directly (`core-modules.test`, `flush.test`…) load the e2e build's, which is betanet's. `core-modules.test` also checks that the shipped modules serve mainnet.
 - Browser tests run on the e2e build (`launchWallet`'s default), so none reaches a public explorer. Only `extension-loads.test` loads the shipped build (`{ build: "shipped" }`), and it opens only onboarding pages.
 
 ### The web e2e build

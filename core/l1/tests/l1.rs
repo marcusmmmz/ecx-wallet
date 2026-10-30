@@ -52,7 +52,7 @@ fn declare_reports_the_ecash_betanet_binding() {
 
 #[test]
 fn ecash_is_the_root_identified_by_its_fork_block() {
-    assert_eq!(chain_entry().slot, None);
+    assert_eq!(network().slot, None);
     let betanet = network();
     assert_eq!(betanet.parent, None);
     assert_eq!(betanet.identity_block.height, 967_680);
@@ -76,4 +76,17 @@ fn betanet_marks_spends_with_its_replay_locktime_and_reads_nop8_as_op_drivechain
     assert_eq!(network().params.op_drivechain, OpDrivechain::Nop8);
     assert_eq!(ecx_l1::treasury_script(24).unwrap(), "b7011851");
     assert!(ecx_l1::treasury_script(256).is_err());
+}
+
+#[test]
+fn mainnet_is_identified_by_its_fork_block_and_marks_spends_with_its_own_replay_locktime() {
+    let mainnet = &chain_entry().networks["mainnet"];
+    assert_eq!((mainnet.chain.as_str(), mainnet.slot, mainnet.parent.as_deref()), ("ecash:mainnet", None, None));
+    assert_eq!(mainnet.identity_block.height, 973_728);
+    assert_eq!(mainnet.identity_block.hash, "0000000000000001441a6a4ae49d679d4a30581db3e3eaeeb2fba5da6dc146ed");
+    assert_eq!(mainnet.sidechain_server.api, ServerApi::Esplora);
+    assert_eq!(mainnet.params.replay_lock_time, 499_999_998);
+    assert_eq!(mainnet.params.op_drivechain, OpDrivechain::Nop8);
+    let p = &mainnet.params.address_params;
+    assert_eq!((p.p2pkh_prefix, p.p2sh_prefix, p.bech_hrp.as_str()), (0, 5, "bc"));
 }
