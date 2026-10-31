@@ -60,8 +60,40 @@ const KEPT_DEPTH = 10;
  * newest kept back to the oldest, statuses settled. `end`: the oldest is the address's first.
  */
 export interface KeptHistory {
-  txs: EsploraTx[];
+  txs: (EsploraTx | ShrunkTx)[];
   end: boolean;
+}
+
+/**
+ * A kept transaction none of whose inputs are the watch's, shrunk to the outputs that pay it (and
+ * Elements' fee): only those count in its History Entry. An exchange's batch payout can list
+ * thousands of outputs (219 kB on eCash, measured 2026-10-31).
+ */
+export interface ShrunkTx extends Omit<EsploraTx, "vout"> {
+  /** How many outputs it has. */
+  outputs: number;
+  /** The outputs kept, by index. */
+  paid: [number, EsploraOutput][];
+}
+
+/** Each output a shrunk transaction left out: someone else's (no script of the watch, nor `""`). */
+const SOMEONE_ELSES: EsploraOutput = Object.freeze({ scriptpubkey: "-" });
+
+/** A kept transaction as history reads it: a shrunk one's other outputs back as `SOMEONE_ELSES`. */
+function whole(tx: EsploraTx | ShrunkTx): EsploraTx {
+  if (!("paid" in tx)) return tx;
+  const { outputs, paid, ...rest } = tx;
+  const vout = Array.from({ length: outputs }, () => SOMEONE_ELSES);
+  for (const [index, output] of paid) vout[index] = output;
+  return { ...rest, vout };
+}
+
+/** `tx` as kept: shrunk if none of its inputs are the watch's (`ours`), else whole. */
+function shrunk(tx: EsploraTx, ours: (script: string) => boolean): EsploraTx | ShrunkTx {
+  if (tx.vin.some(({ prevout }) => prevout !== null && ours(prevout.scriptpubkey))) return tx;
+  const { vout, ...rest } = tx;
+  const paid = vout.flatMap((o, index): [number, EsploraOutput][] => (o.scriptpubkey === "" || ours(o.scriptpubkey) ? [[index, o]] : []));
+  return { ...rest, outputs: vout.length, paid };
 }
 
 /** Where each address's settled history is kept, so the next read pages back only to it. */
@@ -425,15 +457,15 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
    * oldest run of transactions no reorg should undo, `KEPT_DEPTH` deep or on Flush in a final
    * block. Written only when it changed. Best effort: a failed write costs only paging next time.
    */
-  async function keep(key: string, kept: KeptHistory | undefined, confirmed: EsploraTx[], end: boolean): Promise<void> {
+  async function keep(key: string, kept: { txs: EsploraTx[]; end: boolean } | undefined, confirmed: EsploraTx[], end: boolean, ours?: (script: string) => boolean): Promise<void> {
     try {
       const tip = finality || confirmed.length === 0 ? 0 : await tipHeightNow();
       const lasting = ({ status }: EsploraTx) => (finality ? status.final === true : status.confirmed && tip - status.blockHeight! + 1 >= KEPT_DEPTH);
       let from = confirmed.length;
       while (from > 0 && lasting(confirmed[from - 1])) from--;
-      const next: KeptHistory = { txs: confirmed.slice(from), end };
-      if (kept === undefined ? next.txs.length === 0 : kept.end === end && kept.txs.length === next.txs.length && kept.txs[0]?.txid === next.txs[0]?.txid) return;
-      await historyStore!.set(key, next);
+      const txs = confirmed.slice(from);
+      if (kept === undefined ? txs.length === 0 : kept.end === end && kept.txs.length === txs.length && kept.txs[0]?.txid === txs[0]?.txid) return;
+      await historyStore!.set(key, { txs: ours === undefined ? txs : txs.map((tx) => shrunk(tx, ours)), end } satisfies KeptHistory);
     } catch (e) {
       console.error(e);
     }
@@ -531,11 +563,15 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
      * back only until it meets a transaction it kept (`CATCH_UP_PAGES` at most), adds the kept ones
      * after it, and keeps what's settled for next time. If it never meets one, the server no longer
      * lists them as kept, and it reads as if it had kept none. `older` reads up to `pages` more
-     * past the oldest.
+     * past the oldest. With `ours` (the watch's scripts), a kept transaction it didn't fund is shrunk.
      */
-    async addressHistory(address: string, { pages = HISTORY_PAGES, older = false } = {}): Promise<{ txs: EsploraTx[]; complete: boolean }> {
+    async addressHistory(
+      address: string,
+      { pages = HISTORY_PAGES, older = false, ours }: { pages?: number; older?: boolean; ours?: (script: string) => boolean } = {},
+    ): Promise<{ txs: EsploraTx[]; complete: boolean }> {
       const key = cacheKey.addressHistory(url, address);
-      const kept = await historyStore?.get<KeptHistory>(key).catch(() => undefined);
+      const stored = await historyStore?.get<KeptHistory>(key).catch(() => undefined);
+      const kept = stored && { ...stored, txs: stored.txs.map(whole) };
       const isKept = new Set(kept?.txs.map((tx) => tx.txid));
       const first = transactionList(await getJson(`/address/${encodeURIComponent(address)}/txs`, "list of transactions"));
       const mempool = first.filter((tx) => !tx.status.confirmed);
@@ -572,7 +608,7 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
         end = read === "end";
       }
       const txs = await settled([...mempool, ...confirmed]);
-      if (historyStore !== undefined && read !== "repeated") await keep(key, kept, txs.slice(mempool.length), end);
+      if (historyStore !== undefined && read !== "repeated") await keep(key, kept, txs.slice(mempool.length), end, ours);
       return { txs, complete: mempool.length < LISTED_MEMPOOL_TXS && end && read !== "repeated" };
     },
 
@@ -937,11 +973,14 @@ export function esploraServer(config: EsploraServerConfig, fetchFn: Fetch): Side
      */
     async history(watch, treasuries = [], { older = false } = {}) {
       await client.checkChain();
-      const lists = await eachAddress(watch, ({ address }) => client.addressHistory(address, { older }));
+      const ours = new Set([...watch.receive, ...watch.change].map((a) => a.scriptPubkey));
+      // Flush's tokens and trades read outputs that aren't the watch's, so its kept transactions stay
+      // whole. (Every chain is handed `tokens`; only Flush's module reads any, and only Flush has `finality`.)
+      const shrinkFor = config.finality ? undefined : (script: string) => ours.has(script);
+      const lists = await eachAddress(watch, ({ address }) => client.addressHistory(address, { older, ours: shrinkFor }));
       const txs = new Map<string, EsploraTx>();
       for (const tx of lists.flatMap((list) => list.txs)) txs.set(tx.txid, tx);
       const partial = lists.some((list) => !list.complete);
-      const ours = new Set([...watch.receive, ...watch.change].map((a) => a.scriptPubkey));
       // Trust (Bitcoin Core's `IsTrusted`) needs each input's parent. A parent missing from the lists
       // counts as confirmed: it paid one of the wallet's addresses, and an address's list has all of
       // its mempool's transactions (up to 50), so only a confirmed parent can be left out (one older

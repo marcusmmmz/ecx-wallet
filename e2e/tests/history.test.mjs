@@ -383,6 +383,37 @@ for (const browserName of BROWSERS) describe(browserName, () => {
       assert.equal(shown.more, "Older Main chain transactions may not be shown.");
     });
 
+    test("a kept batch payout keeps only the outputs paying the wallet; one the wallet funded stays whole; both read back the same", async () => {
+      const batch = tx("b0", [...Array.from({ length: 300 }, () => ({ value: 1000, script: FOREIGN })), { value: 40000, script: addressScript(L1_RECEIVE_0) }], { blockHeight: 970000 });
+      const spend = tx("b1", [{ value: 10000, script: FOREIGN }, { value: 29000, script: addressScript(L1_CHANGE_0) }], {
+        inputs: [{ txid: batch.txid, vout: 300 }],
+        blockHeight: 970001,
+      });
+      // A first page of newer ones, so that a read meets them kept and takes the two from what it kept.
+      L1.txs = [batch, spend, ...history(25, 3000).map((t, i) => ({ ...t, blockHeight: 970100 + i }))];
+      const first = await readHistory(session, "l1");
+      assert.equal(first.entries.length, 27);
+      const page = await session.openPage("index.html#/");
+      await homeSettled(page);
+      const kept = await page.evaluate(async () => Object.entries(await chrome.storage.local.get(null)).filter(([key]) => key.includes(":address-history:")).map(([, value]) => value));
+      await page.close();
+      const stored = new Map(kept.flatMap((k) => k.txs).map((t) => [t.txid, t]));
+      assert.equal(stored.get(batch.txid).outputs, 301);
+      assert.deepEqual(stored.get(batch.txid).paid.map(([index]) => index), [300], "only the wallet's output");
+      assert.equal(stored.get(spend.txid).vout.length, 2, "its own spend: whole");
+      const since = l1Stub.requests().length;
+      const again = await readHistory(session, "l1");
+      assert.equal(pagesBack(since), 0, "the two came from what it kept");
+      assert.deepEqual(again.entries, first.entries);
+      assert.deepEqual(
+        again.entries.slice(-2).map((e) => [e.txid, e.label, e.amounts]),
+        [
+          [spend.txid, "Sent", ["−0.00011 ECX"]],
+          [batch.txid, "Received", ["+0.0004 ECX"]],
+        ],
+      );
+    });
+
     test("what it kept is dropped once the server no longer lists it", async () => {
       L1.txs = history(30, 8000);
       assert.equal((await readHistory(session, "l1")).entries.length, 30);
