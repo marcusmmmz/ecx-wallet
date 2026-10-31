@@ -122,6 +122,8 @@ export interface ReportedHistory {
   entries: HistoryEntry[];
   /** The server has older transactions it didn't list. */
   partial: boolean;
+  /** Some are on pages it hasn't read yet: asking for `older` reads further back. */
+  olderPages?: boolean;
 }
 
 /** A Send: one or more payments, in order. Addresses are in the chain's own encoding. */

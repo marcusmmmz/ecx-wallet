@@ -37,6 +37,8 @@ pub enum RefusalCode {
     InvalidAccountKey,
     /// `build_deposit`: the coins don't cover the amount and its fee.
     InsufficientFunds,
+    /// `build_deposit`: the M5 would take more coins than eCash relays a Deposit with (vB).
+    TooLarge,
 }
 
 pub(crate) fn refuse(code: RefusalCode, message: impl Into<String>) -> Refusal {

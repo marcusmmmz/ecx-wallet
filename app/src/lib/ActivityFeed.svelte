@@ -328,7 +328,7 @@
     {#if v.history?.report?.partial}
       <p class="muted tiny">
         <span data-history-more>Older {v.info.name} transactions may not be shown.</span>
-        {#if !v.history.refreshing}
+        {#if v.history.report.olderPages && !v.history.refreshing}
           <button class="link" onclick={() => chains.readOlderHistory(v.info.id)} data-history-older>Show older</button>
         {/if}
       </p>

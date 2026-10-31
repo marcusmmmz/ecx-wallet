@@ -88,6 +88,23 @@ function whole(tx: EsploraTx | ShrunkTx): EsploraTx {
   return { ...rest, vout };
 }
 
+/**
+ * What's kept for an address, whole, if it reads as a `KeptHistory`; anything else (another
+ * format, a broken write) counts as nothing kept, rather than failing every read.
+ */
+function readKept(stored: unknown): { txs: EsploraTx[]; end: boolean } | undefined {
+  try {
+    const { txs, end } = stored as KeptHistory;
+    if (!Array.isArray(txs) || typeof end !== "boolean") return undefined;
+    const read = txs.map(whole);
+    return read.every((tx) => typeof tx.txid === "string" && Array.isArray(tx.vin) && Array.isArray(tx.vout) && tx.status?.confirmed === true)
+      ? { txs: read, end }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** `tx` as kept: shrunk if none of its inputs are the watch's (`ours`), else whole. */
 function shrunk(tx: EsploraTx, ours: (script: string) => boolean): EsploraTx | ShrunkTx {
   if (tx.vin.some(({ prevout }) => prevout !== null && ours(prevout.scriptpubkey))) return tx;
@@ -455,16 +472,34 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
   /**
    * Keeps an address's settled confirmed history (`confirmed`, newest first) for next time: its
    * oldest run of transactions no reorg should undo, `KEPT_DEPTH` deep or on Flush in a final
-   * block. Written only when it changed. Best effort: a failed write costs only paging next time.
+   * block. With `met` (`confirmed` holds all that `kept` had), it must hold all of it still: older
+   * pages not yet final (Flush) don't trade kept history for less. What a read running alongside
+   * kept further back meanwhile (Show older beside a quiet refresh) is added on. Written only when
+   * it changed. Best effort: a failed write costs only paging next time.
    */
-  async function keep(key: string, kept: { txs: EsploraTx[]; end: boolean } | undefined, confirmed: EsploraTx[], end: boolean, ours?: (script: string) => boolean): Promise<void> {
+  async function keep(
+    key: string,
+    kept: { txs: EsploraTx[]; end: boolean } | undefined,
+    met: boolean,
+    confirmed: EsploraTx[],
+    end: boolean,
+    ours?: (script: string) => boolean,
+  ): Promise<void> {
     try {
       const tip = finality || confirmed.length === 0 ? 0 : await tipHeightNow();
       const lasting = ({ status }: EsploraTx) => (finality ? status.final === true : status.confirmed && tip - status.blockHeight! + 1 >= KEPT_DEPTH);
       let from = confirmed.length;
       while (from > 0 && lasting(confirmed[from - 1])) from--;
-      const txs = confirmed.slice(from);
-      if (kept === undefined ? txs.length === 0 : kept.end === end && kept.txs.length === txs.length && kept.txs[0]?.txid === txs[0]?.txid) return;
+      let txs = confirmed.slice(from);
+      const ids = new Set(txs.map((tx) => tx.txid));
+      if (met && kept!.txs.some((tx) => !ids.has(tx.txid))) return;
+      const now = readKept(await historyStore!.get(key));
+      const at = txs.length === 0 ? -1 : (now?.txs.findIndex((tx) => tx.txid === txs[txs.length - 1].txid) ?? -1);
+      if (at >= 0) {
+        txs = [...txs, ...now!.txs.slice(at + 1)];
+        end ||= now!.end;
+      }
+      if (now === undefined ? txs.length === 0 : now.end === end && now.txs.length === txs.length && now.txs[0]?.txid === txs[0]?.txid) return;
       await historyStore!.set(key, { txs: ours === undefined ? txs : txs.map((tx) => shrunk(tx, ours)), end } satisfies KeptHistory);
     } catch (e) {
       console.error(e);
@@ -557,7 +592,7 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
     /**
      * The address's transactions, newest first: its mempool's, then its confirmed ones.
      * `complete` unless older ones may be missing: the mempool's list was full, the pages ran out
-     * first, or the server repeated a page.
+     * first, or the server repeated a page. `olderPages`: the pages ran out, so `older` can read on.
      *
      * With no `historyStore`, it reads up to `pages` older pages past the first. With one, it reads
      * back only until it meets a transaction it kept (`CATCH_UP_PAGES` at most), adds the kept ones
@@ -568,10 +603,9 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
     async addressHistory(
       address: string,
       { pages = HISTORY_PAGES, older = false, ours }: { pages?: number; older?: boolean; ours?: (script: string) => boolean } = {},
-    ): Promise<{ txs: EsploraTx[]; complete: boolean }> {
+    ): Promise<{ txs: EsploraTx[]; complete: boolean; olderPages: boolean }> {
       const key = cacheKey.addressHistory(url, address);
-      const stored = await historyStore?.get<KeptHistory>(key).catch(() => undefined);
-      const kept = stored && { ...stored, txs: stored.txs.map(whole) };
+      const kept = readKept(await historyStore?.get(key).catch(() => undefined));
       const isKept = new Set(kept?.txs.map((tx) => tx.txid));
       const first = transactionList(await getJson(`/address/${encodeURIComponent(address)}/txs`, "list of transactions"));
       const mempool = first.filter((tx) => !tx.status.confirmed);
@@ -598,7 +632,8 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
       const meets = (page: EsploraTx[]) => page.some((tx) => isKept.has(tx.txid));
       let read = await readBack(isKept.size > 0 ? CATCH_UP_PAGES : pages, meets, [...confirmed]);
       let end = read === "end";
-      if (kept !== undefined && meets(confirmed)) {
+      const met = kept !== undefined && meets(confirmed);
+      if (met) {
         confirmed.push(...kept.txs.filter((tx) => !seen.has(tx.txid)));
         for (const tx of kept.txs) seen.add(tx.txid);
         end ||= kept.end;
@@ -608,8 +643,8 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
         end = read === "end";
       }
       const txs = await settled([...mempool, ...confirmed]);
-      if (historyStore !== undefined && read !== "repeated") await keep(key, kept, txs.slice(mempool.length), end, ours);
-      return { txs, complete: mempool.length < LISTED_MEMPOOL_TXS && end && read !== "repeated" };
+      if (historyStore !== undefined && read !== "repeated") await keep(key, kept, met, txs.slice(mempool.length), end, ours);
+      return { txs, complete: mempool.length < LISTED_MEMPOOL_TXS && end && read !== "repeated", olderPages: !end && read !== "repeated" };
     },
 
     /** The raw transaction, hex. Whoever uses it checks it hashes to `txid`. */
@@ -981,6 +1016,7 @@ export function esploraServer(config: EsploraServerConfig, fetchFn: Fetch): Side
       const txs = new Map<string, EsploraTx>();
       for (const tx of lists.flatMap((list) => list.txs)) txs.set(tx.txid, tx);
       const partial = lists.some((list) => !list.complete);
+      const olderPages = lists.some((list) => list.olderPages);
       // Trust (Bitcoin Core's `IsTrusted`) needs each input's parent. A parent missing from the lists
       // counts as confirmed: it paid one of the wallet's addresses, and an address's list has all of
       // its mempool's transactions (up to 50), so only a confirmed parent can be left out (one older
@@ -1013,8 +1049,8 @@ export function esploraServer(config: EsploraServerConfig, fetchFn: Fetch): Side
         }
       }
       const entries = newestFirst.map((tx) => entry(tx, ours, treasuries, trusted, markers));
-      if (config.tokens === undefined) return { entries, partial };
-      return { entries: await withTrades(entries, txs, markers, ours, client, { session: config.cache, store: config.tradeStore }), partial };
+      if (config.tokens === undefined) return { entries, partial, olderPages };
+      return { entries: await withTrades(entries, txs, markers, ours, client, { session: config.cache, store: config.tradeStore }), partial, olderPages };
     },
     buildTransfer: async () => {
       throw notHere();

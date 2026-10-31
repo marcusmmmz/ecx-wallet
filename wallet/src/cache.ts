@@ -1,7 +1,9 @@
 // What the wallet keeps for the session, mostly to answer faster. Every entry lives in `storage.session`
 // (memory only, gone when the browser closes) and is forgotten on lock (the background clears
 // every key under CACHE_PREFIX). Nothing a transaction is built from comes from it, except raw
-// transactions, which are checked against their txid before they're kept.
+// transactions, which are checked against their txid before they're kept. Two kinds are also kept
+// for good in `host.persistent`, under the same keys, which lock doesn't clear: a trade's outcome
+// once final (`trade`) and an address's settled history (`addressHistory`).
 import type { IdentityBlock } from "./chain-module";
 import type { KeyValueStore } from "./vault";
 

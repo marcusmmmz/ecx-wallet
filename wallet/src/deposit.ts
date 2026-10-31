@@ -47,8 +47,8 @@ const COIN_INPUT_VBYTES = 69;
 /**
  * The fewest of `coins`, largest first as `build_deposit` picks them, whose listed values cover
  * `amount` and the most fee they could cost at `feeRate` (sats per 1000 vB); all of them if none
- * do. The module, picking from these, stops where it would among all of them, so only these
- * coins' transactions need fetching.
+ * do. The module, picking from these, takes as many as it would among all of them (of equal
+ * values at the cut, maybe another), so only these coins' transactions need fetching.
  */
 export function enoughCoins<C extends { value: number }>(coins: C[], amount: bigint, feeRate: number): C[] {
   const largest = [...coins].sort((a, b) => b.value - a.value);
