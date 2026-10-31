@@ -21,6 +21,8 @@ export const cacheKey = {
    * By block, since a soft one can be replaced and the trade mined again elsewhere.
    */
   trade: (url: string, txid: string, blockHash: string) => `${CACHE_PREFIX}trade:${url}:${txid}:${blockHash}`,
+  /** An address's settled history, kept for good so the next read pages back only to it (`KeptHistory`). */
+  addressHistory: (url: string, address: string) => `${CACHE_PREFIX}address-history:${url}:${address}`,
   /** A raw transaction (hex): it never changes. */
   tx: (txid: string) => `${CACHE_PREFIX}tx:${txid}`,
   /**

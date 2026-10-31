@@ -21,7 +21,7 @@ export interface KeyValueStore {
 export interface VaultDeps {
   /** vault.wasm, loaded on first use. */
   module(): Promise<VaultModule>;
-  /** Survives browser restarts: holds only the encrypted vault and settings. */
+  /** Survives browser restarts: the vault (encrypted), settings, and what's kept of the chains (Deposits, history). */
   persistent: KeyValueStore;
   /** Memory-only, cleared when the browser closes: holds the vault key while unlocked. */
   session: KeyValueStore;

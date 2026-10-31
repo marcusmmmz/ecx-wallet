@@ -37,8 +37,35 @@ const FALLBACK_FEE_RATE = 1;
 /** sat/vB the rate never goes below (besides the server's own 1008-block floor). */
 const MIN_FEE_RATE = 0.1;
 
-/** How many older pages of an address's confirmed transactions the history reads, past the first. */
+/**
+ * How many older pages of an address's confirmed transactions the history reads past the first,
+ * when it kept none of them; and how many more each "Show older" reads.
+ */
 export const HISTORY_PAGES = 3;
+
+/**
+ * How many older pages the history reads looking for a transaction it kept, before it drops what
+ * it kept and starts over: 1,000 transactions at 25 a page.
+ */
+const CATCH_UP_PAGES = 40;
+
+/**
+ * How deep a transaction's block must be before the history keeps it for good, on a chain without
+ * finality: the reorg margin a Deposit's credit allows too (`REORG_SLACK`). On Flush, a final block.
+ */
+const KEPT_DEPTH = 10;
+
+/**
+ * An address's confirmed transactions the history keeps for good, newest first: every one from the
+ * newest kept back to the oldest, statuses settled. `end`: the oldest is the address's first.
+ */
+export interface KeptHistory {
+  txs: EsploraTx[];
+  end: boolean;
+}
+
+/** Where each address's settled history is kept, so the next read pages back only to it. */
+export type HistoryStore = Pick<SessionCache, "get" | "set">;
 
 /**
  * How settled a block is on Flush, as `/flush/blocks` reports it: `soft` until an eCash anchor
@@ -91,6 +118,8 @@ export interface EsploraServerConfig {
   tokens?: (tx: string) => Promise<OutputTokens | undefined>;
   /** Flush, with `tokens`: where what the market index said of a trade in a final block is kept for good (docs/adr/0017). */
   tradeStore?: TradeStore;
+  /** Where each address's settled history is kept for good; without it, history is read afresh each time. */
+  historyStore?: HistoryStore;
   /** Milliseconds since the epoch. */
   now?: () => number;
 }
@@ -189,7 +218,7 @@ function ecxOf(units: string): string {
 }
 const isCount = (n: unknown): n is number => Number.isSafeInteger(n) && (n as number) >= 0;
 
-export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, finality = false }: EsploraServerConfig, fetchFn: Fetch) {
+export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, finality = false, historyStore }: EsploraServerConfig, fetchFn: Fetch) {
   const url = baseUrl.replace(/\/+$/, "");
   const malformed = (what: string) => new SidechainServerError(url, `The Sidechain Server at ${url} sent a malformed ${what}.`);
 
@@ -353,16 +382,18 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
    * The statuses as the wallet counts them. On Flush, a transaction whose block isn't
    * `FLUSH_CONFIRMATIONS` deep yet is still unconfirmed, and one in a block `/flush/blocks` says is
    * final is marked so. That route is asked only for what's kept for good: if it doesn't answer,
-   * nothing is marked final, and confirmation doesn't wait on it.
+   * nothing is marked final, and confirmation doesn't wait on it. A status already final (kept
+   * history) stays so.
    */
   async function settle(statuses: EsploraTxStatus[]): Promise<EsploraTxStatus[]> {
     if (!finality) return statuses;
-    if (!statuses.some((s) => s.confirmed)) return statuses;
+    if (!statuses.some((s) => s.confirmed && !s.final)) return statuses;
     const tip = await tipHeightNow();
     const deep = (s: EsploraTxStatus) => tip - s.blockHeight! + 1 >= FLUSH_CONFIRMATIONS;
-    const known = await blockFinality(statuses.flatMap((s) => (s.confirmed && deep(s) ? [s.blockHash!] : []))).catch(() => new Map<string, Finality | undefined>());
+    const asked = statuses.flatMap((s) => (s.confirmed && !s.final && deep(s) ? [s.blockHash!] : []));
+    const known = await blockFinality(asked).catch(() => new Map<string, Finality | undefined>());
     return statuses.map((s) => {
-      if (!s.confirmed) return s;
+      if (!s.confirmed || s.final) return s;
       if (!deep(s)) return { confirmed: false };
       return known.get(s.blockHash!) === "final" ? { ...s, final: true as const } : s;
     });
@@ -387,6 +418,25 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
   async function settled(txs: EsploraTx[]): Promise<EsploraTx[]> {
     const statuses = await settle(txs.map((tx) => tx.status));
     return txs.map((tx, i) => (statuses[i] === tx.status ? tx : { ...tx, status: statuses[i] }));
+  }
+
+  /**
+   * Keeps an address's settled confirmed history (`confirmed`, newest first) for next time: its
+   * oldest run of transactions no reorg should undo, `KEPT_DEPTH` deep or on Flush in a final
+   * block. Written only when it changed. Best effort: a failed write costs only paging next time.
+   */
+  async function keep(key: string, kept: KeptHistory | undefined, confirmed: EsploraTx[], end: boolean): Promise<void> {
+    try {
+      const tip = finality || confirmed.length === 0 ? 0 : await tipHeightNow();
+      const lasting = ({ status }: EsploraTx) => (finality ? status.final === true : status.confirmed && tip - status.blockHeight! + 1 >= KEPT_DEPTH);
+      let from = confirmed.length;
+      while (from > 0 && lasting(confirmed[from - 1])) from--;
+      const next: KeptHistory = { txs: confirmed.slice(from), end };
+      if (kept === undefined ? next.txs.length === 0 : kept.end === end && kept.txs.length === next.txs.length && kept.txs[0]?.txid === next.txs[0]?.txid) return;
+      await historyStore!.set(key, next);
+    } catch (e) {
+      console.error(e);
+    }
   }
 
   return {
@@ -473,31 +523,57 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
     addressTxsBefore: async (address: string, txid: string) => settled(await olderTxs(address, txid)),
 
     /**
-     * The address's transactions, newest first: its mempool's, then its confirmed ones, reading up
-     * to `pages` older pages past the first. `complete` unless older ones may be missing: the
-     * mempool's list was full, the pages ran out first, or the server repeated a page.
+     * The address's transactions, newest first: its mempool's, then its confirmed ones.
+     * `complete` unless older ones may be missing: the mempool's list was full, the pages ran out
+     * first, or the server repeated a page.
+     *
+     * With no `historyStore`, it reads up to `pages` older pages past the first. With one, it reads
+     * back only until it meets a transaction it kept (`CATCH_UP_PAGES` at most), adds the kept ones
+     * after it, and keeps what's settled for next time. If it never meets one, the server no longer
+     * lists them as kept, and it reads as if it had kept none. `older` reads up to `pages` more
+     * past the oldest.
      */
-    async addressHistory(address: string, pages = HISTORY_PAGES): Promise<{ txs: EsploraTx[]; complete: boolean }> {
+    async addressHistory(address: string, { pages = HISTORY_PAGES, older = false } = {}): Promise<{ txs: EsploraTx[]; complete: boolean }> {
+      const key = cacheKey.addressHistory(url, address);
+      const kept = await historyStore?.get<KeptHistory>(key).catch(() => undefined);
+      const isKept = new Set(kept?.txs.map((tx) => tx.txid));
       const first = transactionList(await getJson(`/address/${encodeURIComponent(address)}/txs`, "list of transactions"));
       const mempool = first.filter((tx) => !tx.status.confirmed);
       const confirmed = first.filter((tx) => tx.status.confirmed);
-      let complete = mempool.length < LISTED_MEMPOOL_TXS;
       const seen = new Set(confirmed.map((tx) => tx.txid));
-      for (let page = confirmed, read = 0; page.length >= FULL_PAGE_TXS; read++) {
-        if (read === pages) {
-          complete = false;
-          break;
+
+      /**
+       * Reads older pages onto `confirmed`, up to `budget`, until one is short or `stop` says so.
+       * `last`: the page read last, if the list ends with one of the server's pages as listed.
+       */
+      async function readBack(budget: number, stop: (page: EsploraTx[]) => boolean, last?: EsploraTx[]): Promise<"end" | "stopped" | "out" | "repeated"> {
+        for (let page = last, read = 0; ; read++) {
+          if (page !== undefined && page.length < FULL_PAGE_TXS) return "end";
+          if (page !== undefined && stop(page)) return "stopped";
+          if (read === budget) return "out";
+          page = (await olderTxs(address, confirmed[confirmed.length - 1].txid)).filter((tx) => tx.status.confirmed);
+          const fresh = page.filter((tx) => !seen.has(tx.txid));
+          if (fresh.length < page.length) return "repeated";
+          for (const tx of fresh) seen.add(tx.txid);
+          confirmed.push(...fresh);
         }
-        page = (await olderTxs(address, page[page.length - 1].txid)).filter((tx) => tx.status.confirmed);
-        const fresh = page.filter((tx) => !seen.has(tx.txid));
-        if (fresh.length < page.length) {
-          complete = false;
-          break;
-        }
-        for (const tx of fresh) seen.add(tx.txid);
-        confirmed.push(...fresh);
       }
-      return { txs: await settled([...mempool, ...confirmed]), complete };
+
+      const meets = (page: EsploraTx[]) => page.some((tx) => isKept.has(tx.txid));
+      let read = await readBack(isKept.size > 0 ? CATCH_UP_PAGES : pages, meets, [...confirmed]);
+      let end = read === "end";
+      if (kept !== undefined && meets(confirmed)) {
+        confirmed.push(...kept.txs.filter((tx) => !seen.has(tx.txid)));
+        for (const tx of kept.txs) seen.add(tx.txid);
+        end ||= kept.end;
+      }
+      if (older && !end && read !== "repeated") {
+        read = await readBack(pages, () => false);
+        end = read === "end";
+      }
+      const txs = await settled([...mempool, ...confirmed]);
+      if (historyStore !== undefined && read !== "repeated") await keep(key, kept, txs.slice(mempool.length), end);
+      return { txs, complete: mempool.length < LISTED_MEMPOOL_TXS && end && read !== "repeated" };
     },
 
     /** The raw transaction, hex. Whoever uses it checks it hashes to `txid`. */
@@ -859,9 +935,9 @@ export function esploraServer(config: EsploraServerConfig, fetchFn: Fetch): Side
      * Each watched address's transactions, merged: a spend touches several of them. Unconfirmed
      * first, then confirmed by height, newest first.
      */
-    async history(watch, treasuries = []) {
+    async history(watch, treasuries = [], { older = false } = {}) {
       await client.checkChain();
-      const lists = await eachAddress(watch, ({ address }) => client.addressHistory(address));
+      const lists = await eachAddress(watch, ({ address }) => client.addressHistory(address, { older }));
       const txs = new Map<string, EsploraTx>();
       for (const tx of lists.flatMap((list) => list.txs)) txs.set(tx.txid, tx);
       const partial = lists.some((list) => !list.complete);

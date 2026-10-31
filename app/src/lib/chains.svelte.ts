@@ -154,6 +154,18 @@ export class Chains {
     }
   }
 
+  /** Reads further back into a chain's partial history ("Show older"), keeping what's shown meanwhile. */
+  readOlderHistory(id: ChainId) {
+    const slot = id === "l1" ? undefined : id;
+    const newest = this.begin("history", id);
+    const report = this.get(id)?.history?.report;
+    this.update(id, { history: { report, refreshing: true } });
+    reportedHistory(slot, false, true).then(
+      (fresh) => newest() && this.update(id, { history: { report: fresh, refreshing: false } }),
+      (e) => newest() && this.update(id, { history: { report, refreshing: false, error: (e as Error).message } }),
+    );
+  }
+
   /** Reads a Slot's Deposits and refused Send again (after Stop tracking or closing a refused one). */
   readDeposits(slot: number, unattended?: boolean) {
     const newest = this.begin("deposits", slot);
