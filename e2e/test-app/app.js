@@ -5,9 +5,9 @@ import { discoverProviders } from "@ecx/client";
 let provider;
 
 window.testApp = {
-  /** Discovers wallets; returns what an outsider can see about them. */
-  async discover() {
-    const found = await discoverProviders();
+  /** Discovers wallets (`options` as `discoverProviders` takes them); returns what an outsider can see about them. */
+  async discover(options) {
+    const found = await discoverProviders(options);
     provider = found[0]?.provider;
     return found.map(({ info }) => info);
   },
@@ -30,6 +30,20 @@ window.testApp = {
   async listen(event) {
     if (!provider) await this.discover();
     provider.on(event, (payload) => this.events.push([event, payload]));
+  },
+
+  /**
+   * Shows a button that makes this request when clicked, as an app must for the web wallet's first
+   * request (it opens a popup). Its answer lands in `clicked`, as `request` returns it.
+   */
+  arm(method, params) {
+    const button = Object.assign(document.createElement("button"), { textContent: method });
+    button.dataset.arm = "";
+    button.addEventListener("click", () => {
+      button.remove();
+      this.clicked = this.request(method, params);
+    }, { once: true });
+    document.body.append(button);
   },
 
   /** Calls `provider.request` and returns `{ result }` or `{ error: { code, message } }`. */

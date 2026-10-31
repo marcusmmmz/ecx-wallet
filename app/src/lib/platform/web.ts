@@ -1,5 +1,6 @@
 import { goto } from "$app/navigation";
 import type { BackgroundMessage, ProviderResponse } from "../../../../extension/src/messages";
+import { WEB_WALLET_CHANNEL, type WebWalletHello, type WebWalletReply, type WebWalletRequest } from "../../../../client/src/web-wallet";
 import type { FromWorker, ToWorker, TransportPort } from "./types";
 export type { TransportPort } from "./types";
 export type View = "page" | "popup" | "panel";
@@ -11,6 +12,12 @@ let sequence = 0;
 let worker: Worker | undefined;
 let failure: Error | undefined;
 let approval: { id: string; back: string; opening?: Promise<void> } | undefined;
+/**
+ * Grant changes, between this origin's pages: each page has its own Worker, so a Grant revoked in
+ * one tab must still reach the app that a Provider window in another serves.
+ */
+const GRANTS_CHANNEL = "ecx-wallet:grantChanged";
+let grantsOut: BroadcastChannel | undefined;
 
 function post(message: ToWorker): void {
   if (failure) throw failure;
@@ -25,6 +32,8 @@ function post(message: ToWorker): void {
           break;
         case "announce":
           listeners.forEach((listener) => listener(m.message));
+          // Every Provider window hears it there, this page's own included.
+          if ((m.message as { kind?: string })?.kind === "grantChanged") (grantsOut ??= new BroadcastChannel(GRANTS_CHANNEL)).postMessage(m.message);
           break;
         case "portMessage":
           ports.get(m.id)?.messages.forEach((listener) => listener(m.message));
@@ -108,7 +117,58 @@ export function approvalRouteChanged(path: string): void {
 
 export function closeApproval(): void {
   if (approval) closeSurface(true);
-  else goto("#/", { replaceState: true }).catch(console.error);
+  // An approval this page no longer has (it reloaded): a Provider window goes back to serving.
+  else goto(onApp === undefined ? "#/" : "#/provider", { replaceState: true }).catch(console.error);
+}
+
+/** Apps that asked through this page's Provider window, and who to tell about a new one. */
+const appOrigins = new Set<string>();
+let onApp: ((origin: string) => void) | undefined;
+
+/**
+ * Makes this page the Provider window of the app that opened it (`#/provider`, #85): it answers
+ * Provider requests from `window.opener` only, as from the origin the browser reports for each
+ * message, and passes that origin's Grant changes back. False if no page opened this one.
+ * `onAppOrigin` hears each origin that asks, once.
+ */
+export function serveOpener(onAppOrigin: (origin: string) => void): boolean {
+  const opener = window.opener as Window | null;
+  if (opener === null) return false;
+  const first = onApp === undefined;
+  onApp = onAppOrigin;
+  appOrigins.forEach(onAppOrigin);
+  if (!first) return true;
+  const reply = (message: WebWalletReply, origin: string) => opener.postMessage(message, origin);
+  const ready = () => reply({ channel: WEB_WALLET_CHANNEL, type: "ready" }, "*");
+  window.addEventListener("message", (event: MessageEvent) => {
+    const data = event.data as WebWalletRequest | WebWalletHello | undefined;
+    if (event.source !== opener || data?.channel !== WEB_WALLET_CHANNEL) return;
+    // The app found this window already open: it has nothing in flight here.
+    if (data.type === "hello") return ready();
+    if (data.type !== "request" || typeof data.id !== "string") return;
+    // An opaque origin ("null") can't hold a Grant; this origin is the wallet's own pages.
+    const origin = event.origin;
+    if (!/^https?:\/\//.test(origin) || origin === location.origin) return;
+    if (!appOrigins.has(origin)) {
+      appOrigins.add(origin);
+      onApp?.(origin);
+    }
+    const answer = (response: ProviderResponse) => reply({ channel: WEB_WALLET_CHANNEL, type: "response", id: data.id, response }, origin);
+    const id = ++sequence;
+    pending.set(id, { resolve: answer, reject: (error) => answer({ ok: false, error: { code: 4900, message: error.message } }) });
+    try { post({ type: "appRequest", id, origin, method: data.method, params: data.params }); }
+    catch (error) { pending.delete(id); answer({ ok: false, error: { code: 4900, message: (error as Error).message } }); }
+  });
+  new BroadcastChannel(GRANTS_CHANNEL).onmessage = ({ data }: MessageEvent) => {
+    const m = data as { kind?: string; origin?: string; scope?: unknown };
+    // Sent to that origin only: if the opener has since gone elsewhere, the browser drops it.
+    if (m?.kind === "grantChanged" && typeof m.origin === "string" && appOrigins.has(m.origin)) {
+      reply({ channel: WEB_WALLET_CHANNEL, type: "event", event: "grantChanged", payload: m.scope as never }, m.origin);
+    }
+  };
+  // Carries nothing but readiness, so any origin may read it.
+  ready();
+  return true;
 }
 
 export const currentView = (): View => "page";
