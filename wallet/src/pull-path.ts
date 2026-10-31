@@ -147,9 +147,9 @@ export function createPullPath(deps: PullPathDeps) {
     return report;
   }
 
-  async function history<K extends ChainKey>(target: ChainServer<K>, treasuries?: TreasuryScript[]): Promise<ChainHistory> {
+  async function history<K extends ChainKey>(target: ChainServer<K>, treasuries?: TreasuryScript[], older = false): Promise<ChainHistory> {
     const { chain, server } = target;
-    const { entries, partial } = await server.history(await watch(target), treasuries);
+    const { entries, partial } = await server.history(await watch(target), treasuries, { older });
     const reported = { chain, server: server.url, entries, partial, readAt: deps.now() };
     await deps.cache?.set(cacheKey.history(chain, server.url), reported);
     return reported;
@@ -185,13 +185,13 @@ export function createPullPath(deps: PullPathDeps) {
     /** eCash's last reported state this session, to show while `reportedL1State` refreshes it. */
     cachedL1State: async (): Promise<ChainReport | undefined> => cached(withServer(await routing.l1())),
 
-    /** The transactions the Slot's server reports for the addresses the wallet watches. */
-    history: async (slot: number): Promise<ChainHistory> => history(withServer(await routing.slot(slot))),
+    /** The transactions the Slot's server reports for the addresses the wallet watches; `older` reads further back. */
+    history: async (slot: number, older?: boolean): Promise<ChainHistory> => history(withServer(await routing.slot(slot)), undefined, older),
 
     /** The transactions eCash's server reports for the L1 addresses the wallet watches; Deposits to a Slot it supports labelled. */
-    async l1History(): Promise<ChainHistory> {
+    async l1History(older?: boolean): Promise<ChainHistory> {
       const l1 = await routing.l1();
-      return history(withServer(l1), deps.supportedSlots.map((slot) => ({ slot, scriptPubkey: l1.module.treasuryScript(slot) })));
+      return history(withServer(l1), deps.supportedSlots.map((slot) => ({ slot, scriptPubkey: l1.module.treasuryScript(slot) })), older);
     },
 
     /** The Slot's last reported history this session, to show while `history` refreshes it. */

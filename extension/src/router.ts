@@ -40,6 +40,7 @@ import {
   type PendingDeposit,
   type SessionCache,
   type TradeStore,
+  type HistoryStore,
   type ApprovalContext,
   type SigningApproval,
   type VaultModule,
@@ -452,12 +453,18 @@ export function createRouter<Sender>(host: RouterHost<Sender>) {
    */
   const tradeStore: TradeStore = host.persistent;
 
+  /**
+   * Each watched address's settled history (docs/adr/0020): kept for good like the trades above, so
+   * a reopened Activity tab pages back only to it, and "Show older" builds on it.
+   */
+  const historyStore: HistoryStore = host.persistent;
+
   // The pull path: each Slot's Sidechain Server, in the Server API its Chain Entry names.
   const pullPath = createPullPath({
     ...signing,
     ...keys,
     l1Module,
-    sidechainServer: (entry, network) => sidechainServer(entry, network, undefined, sessionCache, tokensOn(network), tradeStore),
+    sidechainServer: (entry, network) => sidechainServer(entry, network, undefined, sessionCache, tokensOn(network), tradeStore, historyStore),
     cache: sessionCache,
   });
 
@@ -643,7 +650,8 @@ export function createRouter<Sender>(host: RouterHost<Sender>) {
         if (!host.requester(sender).walletPage) throw new ProviderRpcError(ErrorCode.Unauthorized, "Unknown requester.");
         {
           const slot = message.slot === undefined ? undefined : await onSlot(message.slot);
-          return byItself(message, () => (slot === undefined ? pullPath.l1History() : pullPath.history(slot)));
+          const older = message.older === true;
+          return byItself(message, () => (slot === undefined ? pullPath.l1History(older) : pullPath.history(slot, older)));
         }
       case "history.cached":
         if (!host.requester(sender).walletPage) throw new ProviderRpcError(ErrorCode.Unauthorized, "Unknown requester.");

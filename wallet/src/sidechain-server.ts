@@ -147,10 +147,11 @@ export interface SidechainServer {
   readonly url: string;
   state(watch: WatchData): Promise<ReportedState>;
   /**
-   * The transactions touching the watch, newest first: the latest ones only, never paged. On eCash,
-   * `treasuries` are the Slots' Treasury scripts, to label Deposits.
+   * The transactions touching the watch, newest first: the latest ones, and any older ones the
+   * wallet kept. On eCash, `treasuries` are the Slots' Treasury scripts, to label Deposits. `older`
+   * asks for more of a `partial` history, where the server pages (Esplora).
    */
-  history(watch: WatchData, treasuries?: TreasuryScript[]): Promise<ReportedHistory>;
+  history(watch: WatchData, treasuries?: TreasuryScript[], options?: { older?: boolean }): Promise<ReportedHistory>;
   /** Asks the server to build a transfer; returns its Signing Request (unvalidated). */
   buildTransfer(watch: WatchData, order: TransferOrder): Promise<unknown>;
   /** Hands the signed payload back for the server to finalize and broadcast. */

@@ -115,7 +115,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
 
     // Its details: the full txid and who reported it.
     const page = await openActivity(session, "l1");
-    await page.waitForSelector(`[data-history-entry="${received.txid}"]`, { timeout: 20_000 });
+    await page.waitForSelector(`[data-activity]:not([data-refreshing]) [data-history-entry="${received.txid}"]`, { timeout: 20_000 });
     await page.click(`[data-history-entry="${received.txid}"]`);
     await page.waitForSelector("[data-activity-details]");
     const details = await page.evaluate(() => ({
@@ -287,7 +287,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
       assert.equal(entry.warning, "Credited by the chain's operator, not in a block yet");
 
       const page = await openActivity(session, "24");
-      await page.waitForSelector(`[data-history-entry="${credit.txid}"]`, { timeout: 20_000 });
+      await page.waitForSelector(`[data-activity]:not([data-refreshing]) [data-history-entry="${credit.txid}"]`, { timeout: 20_000 });
       await page.click(`[data-history-entry="${credit.txid}"]`);
       await page.waitForSelector("[data-activity-details]");
       const from = await page.evaluate(() => document.querySelector("[data-details-deposit-from]")?.textContent.trim());
@@ -323,6 +323,77 @@ for (const browserName of BROWSERS) describe(browserName, () => {
     } finally {
       delete L1.pageSize;
     }
+  });
+
+  describe("kept history", () => {
+    // Deep enough to keep: 10 blocks under this tip. Values apart from the other tests', so no txid repeats.
+    const TIP = 980000;
+    const history = (count, value = 5000) =>
+      Array.from({ length: count }, (_, i) => tx(i.toString(16).padStart(2, "0"), [{ value: value + i, script: addressScript(L1_RECEIVE_0) }], { blockHeight: 970000 + i }));
+    const pagesBack = (since) => l1Stub.requests().slice(since).filter((path) => path.includes(`/address/${L1_RECEIVE_0}/txs/chain/`)).length;
+    beforeEach(async () => {
+      L1.tipHeight = TIP;
+      // Each test starts with nothing kept: a list kept by another would send its first read paging to the end.
+      const page = await session.openPage("index.html#/");
+      await homeSettled(page);
+      await page.evaluate(async () => {
+        const keys = Object.keys(await chrome.storage.local.get(null)).filter((key) => key.includes(":address-history:"));
+        await chrome.storage.local.remove(keys);
+      });
+      await page.close();
+    });
+    after(() => {
+      delete L1.tipHeight;
+    });
+
+    test("Show older reads HISTORY_PAGES more pages past the oldest shown, and says when none are left", async () => {
+      const read = 25 * (HISTORY_PAGES + 1);
+      L1.txs = history(read + HISTORY_PAGES * 25 + 10);
+      const page = await openActivity(session, "l1");
+      await page.waitForSelector("[data-activity]:not([data-refreshing]) [data-history-older]", { timeout: 20_000 });
+      const count = () => page.$$eval("[data-history-entry]", (entries) => entries.length);
+      assert.equal(await count(), read);
+      await page.click("[data-history-older]");
+      await page.waitForSelector("[data-activity][data-refreshing]", { timeout: 10_000 }).catch(() => {});
+      await page.waitForSelector("[data-activity]:not([data-refreshing]) [data-history-more]", { timeout: 20_000 });
+      assert.equal(await count(), read + HISTORY_PAGES * 25, "three more pages");
+      await page.click("[data-history-older]");
+      await page.waitForFunction(() => document.querySelector("[data-history-more]") === null, { timeout: 20_000 });
+      assert.equal(await count(), L1.txs.length, "to the address's first transaction");
+      await closeSettled(page);
+    });
+
+    test("reopened, the history pages back only to what it kept, and keeps what Show older read", async () => {
+      const kept = 25 * (HISTORY_PAGES + 1) + HISTORY_PAGES * 25;
+      L1.txs = history(kept + 26, 6000);
+      await readHistory(session, "l1");
+      const page = await openActivity(session, "l1");
+      await page.waitForSelector("[data-activity]:not([data-refreshing]) [data-history-older]", { timeout: 20_000 });
+      await page.click("[data-history-older]");
+      await page.waitForSelector("[data-activity][data-refreshing]", { timeout: 10_000 }).catch(() => {});
+      await page.waitForSelector("[data-activity]:not([data-refreshing]) [data-history-more]", { timeout: 20_000 });
+      await closeSettled(page);
+      const newest = tx("fe", [{ value: 7777, script: addressScript(L1_RECEIVE_0) }], { blockHeight: 979999 });
+      L1.txs = [...L1.txs, newest];
+      const since = l1Stub.requests().length;
+      const shown = await readHistory(session, "l1");
+      assert.equal(pagesBack(since), 0, "its first page meets a kept transaction");
+      assert.equal(shown.entries[0].txid, newest.txid);
+      assert.equal(shown.entries.length, 1 + kept, "the new one, then all it kept");
+      assert.equal(shown.more, "Older Main chain transactions may not be shown.");
+    });
+
+    test("what it kept is dropped once the server no longer lists it", async () => {
+      L1.txs = history(30, 8000);
+      assert.equal((await readHistory(session, "l1")).entries.length, 30);
+      L1.txs = history(3, 9000);
+      const shown = await readHistory(session, "l1");
+      assert.deepEqual(
+        shown.entries.map((e) => e.txid),
+        [...L1.txs].reverse().map((t) => t.txid),
+      );
+      assert.equal(shown.more, undefined);
+    });
   });
 
   test("with no transactions, it says so", async () => {

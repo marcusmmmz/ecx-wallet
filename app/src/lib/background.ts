@@ -228,8 +228,8 @@ export function showReport<R extends { readAt: number }>(cached: () => Promise<R
 /** Registers the Slot's addresses with its Sidechain Server and returns what the server reports. */
 export const reportedState = (slot: number, unattended?: boolean) => send<SlotReport>({ kind: "accounts.reported", slot, unattended });
 
-/** The transactions the chain's server reports: a Slot's, or eCash's when `slot` is undefined. */
-export const reportedHistory = (slot?: number, unattended?: boolean) => send<ChainHistory>({ kind: "history.reported", slot, unattended });
+/** The transactions the chain's server reports: a Slot's, or eCash's when `slot` is undefined. `older` reads further back. */
+export const reportedHistory = (slot?: number, unattended?: boolean, older?: boolean) => send<ChainHistory>({ kind: "history.reported", slot, unattended, older });
 
 /** The chain's last history this session (null if none), to show while `reportedHistory` refreshes it. */
 export const cachedHistory = (slot?: number) => send<ChainHistory | null>({ kind: "history.cached", slot });
