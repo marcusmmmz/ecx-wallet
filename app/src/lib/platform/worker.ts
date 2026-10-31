@@ -1,7 +1,7 @@
 // A dedicated Worker owns this page's wallet session; a reload drops every unlocked key.
-import { createIndexedDBStore, createMemoryStore, ErrorCode, ProviderRpcError } from "@ecx/wallet";
+import { createIndexedDBStore, createMemoryStore, ErrorCode, ProviderRpcError, scopeOf, SUPPORTED_SLOTS } from "@ecx/wallet";
 import { createRouter, type RouterHost } from "../../../../extension/src/router";
-import { ACTIVITY_PORT, APPROVAL_HOST_PORT } from "../../../../extension/src/messages";
+import { ACTIVITY_PORT, APPROVAL_HOST_PORT, type BackgroundMessage } from "../../../../extension/src/messages";
 import type { FromWorker, ToWorker } from "./types";
 
 const post = (message: FromWorker) => self.postMessage(message);
@@ -9,7 +9,10 @@ let timer: ReturnType<typeof setTimeout> | undefined;
 const approvals = new Map<string, () => void>();
 const ports = new Map<number, { name: string; closed: (() => void)[] }>();
 
-const host: RouterHost<void> = {
+/** A Sidechain App's origin, as the page's Provider window received it; none for the page itself. */
+type Sender = { origin: string } | undefined;
+
+const host: RouterHost<Sender> = {
   persistent: createIndexedDBStore("ecx-wallet"),
   session: createMemoryStore(),
   async fetchWasm(file) {
@@ -17,8 +20,9 @@ const host: RouterHost<void> = {
     if (!response.ok) throw new Error(`Couldn't load ${file}: ${response.status}`);
     return response.arrayBuffer();
   },
-  // This channel belongs only to the wallet page. No message can attest a dApp's origin.
-  requester: () => ({ walletPage: true, origin: undefined }),
+  // Only `appRequest` names an app, and it carries only Provider requests: everything else on this
+  // channel is the wallet page's own.
+  requester: (sender) => (sender === undefined ? { walletPage: true, origin: undefined } : { walletPage: false, origin: sender.origin }),
   async scheduleAutoLock(deadline) {
     clearTimeout(timer);
     if (deadline !== null) timer = setTimeout(() => router.checkAutoLock().catch(console.error), Math.max(0, deadline - Date.now()));
@@ -33,9 +37,34 @@ const host: RouterHost<void> = {
   },
   async announceDeadline(locksAt) { post({ type: "announce", message: { kind: "vault.deadline", locksAt } }); },
   async announceChains(ids) { post({ type: "announce", message: { kind: "chains.changed", ids } }); },
+  // The page's Provider window passes it on only to that origin's app.
+  async announceGrant(origin, grant) {
+    post({ type: "announce", message: { kind: "grantChanged", origin, scope: grant === undefined ? null : scopeOf(grant) } });
+  },
   async applyPinned() {},
 };
 const router = createRouter(host);
+
+/** The spend locks an app's Provider request takes, as the wallet's own Send does (see `request`). */
+function appSpendLocks(method: unknown, params: unknown): string[] {
+  // `slot` is the app's, unchecked: a value Number() can't convert must not throw here, outside `respond`.
+  const { slot } = (params ?? {}) as { slot?: unknown };
+  if (method === "sendTransfer" || method === "sendAction") return typeof slot === "number" && SUPPORTED_SLOTS.includes(slot) ? [`ecx-wallet:spend:${slot}`] : [];
+  // A `flush:` link trades on whichever Slot is Flush here; lock them all, in one order.
+  if (method === "flush_submit") return [...SUPPORTED_SLOTS].sort((a, b) => a - b).map((s) => `ecx-wallet:spend:${s}`);
+  return [];
+}
+
+function withLocks<T>(names: string[], run: () => Promise<T>): Promise<T> {
+  if (names.length === 0) return run();
+  const [first, ...rest] = names;
+  return navigator.locks.request(first, {}, () => withLocks(rest, run)) as Promise<T>;
+}
+
+const respond = (id: number, result: Promise<unknown>) => result.then(
+  (result) => post({ type: "response", id, response: { ok: true, result } }),
+  (error) => post({ type: "response", id, response: router.toErrorResponse(error) }),
+);
 
 self.addEventListener("message", (event: MessageEvent<ToWorker>) => {
   const m = event.data;
@@ -59,12 +88,14 @@ self.addEventListener("message", (event: MessageEvent<ToWorker>) => {
             throw error;
           })
         : router.route(m.message, undefined);
-      result.finally(() => {
+      respond(m.id, result.finally(() => {
         if (port) port.closed = port.closed.filter((listener) => listener !== onClosed);
-      }).then(
-        (result) => post({ type: "response", id: m.id, response: { ok: true, result } }),
-        (error) => post({ type: "response", id: m.id, response: router.toErrorResponse(error) }),
-      );
+      }));
+      break;
+    }
+    case "appRequest": {
+      const message: BackgroundMessage = { kind: "provider.request", method: m.method, params: m.params };
+      respond(m.id, Promise.resolve().then(() => withLocks(appSpendLocks(m.method, m.params), () => router.route(message, { origin: m.origin }))));
       break;
     }
     case "checkAutoLock":

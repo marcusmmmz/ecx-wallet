@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "What Sidechain Apps use to discover an ECX wallet's Provider.",
+  "description": "What Sidechain Apps use to discover an ECX wallet's Provider, or reach the web wallet in a popup.",
   "exports": { ".": "./src/index.ts" },
   "scripts": { "typecheck": "tsc --noEmit -p ." },
   "devDependencies": { "typescript": "5.9.3" }

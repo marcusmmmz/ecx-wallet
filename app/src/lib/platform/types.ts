@@ -10,6 +10,9 @@ export interface TransportPort {
 // Private Worker envelopes; the wallet messages and ProviderResponse stay unchanged.
 export type ToWorker =
   | { type: "request"; id: number; message: BackgroundMessage }
+  // A Sidechain App's Provider request through this page's Provider window (`#/provider`): `origin`
+  // is the app's, as the browser reported it on the message the page received.
+  | { type: "appRequest"; id: number; origin: string; method: unknown; params?: unknown }
   | { type: "checkAutoLock" }
   | { type: "approvalClosed"; id: string }
   | { type: "connect"; id: number; name: string }

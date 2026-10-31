@@ -29,7 +29,7 @@ test("the mainnet web build bundles Flush as Slot 46 and reaches only mainnet's 
   assert.deepEqual(origins, ["https://explorer.blockfab.org", "https://explorer.ecash.ninja"]);
 });
 
-test("the web Worker refuses claimed dApp origins and excludes Slot 24 at the router", async () => {
+test("the web Worker refuses claimed dApp origins, takes an app's only from appRequest, and excludes Slot 24 at the router", async () => {
   const previous = globalThis.self;
   const pending = new Map();
   let receive;
@@ -57,6 +57,19 @@ test("the web Worker refuses claimed dApp origins and excludes Slot 24 at the ro
     const response = await request({ kind: "provider.request", method: "getGrant", origin: "https://forged.example", walletPage: true });
     assert.equal(response.ok, false);
     assert.equal(response.error.code, 4100);
+    // From the Provider window, the request reaches the Provider handler as that origin's.
+    const fromApp = await new Promise((resolve) => {
+      pending.set(++id, resolve);
+      receive({ data: { type: "appRequest", id, origin: "https://app.example", method: "eth_accounts" } });
+    });
+    assert.equal(fromApp.ok, false);
+    assert.equal(fromApp.error.code, 4200);
+    // A `slot` Number() can't convert is refused as a reply, not a crashed Worker.
+    const odd = await new Promise((resolve) => {
+      pending.set(++id, resolve);
+      receive({ data: { type: "appRequest", id, origin: "https://app.example", method: "sendTransfer", params: { slot: { toString: "x", valueOf: "x" } } } });
+    });
+    assert.equal(odd.ok, false);
     const excluded = await request({ kind: "chains.setOn", slot: 24, on: true });
     assert.equal(excluded.ok, false);
     assert.equal(excluded.error.code, 4901);
@@ -162,6 +175,81 @@ test("web transport matches replies by id, relays ports and announcements, and r
   }
 });
 
+test("the Provider window answers only its opener, as the origin the browser reports", async () => {
+  const saved = { Worker: globalThis.Worker, document: globalThis.document, location: globalThis.location, window: globalThis.window, BroadcastChannel: globalThis.BroadcastChannel };
+  const CHANNEL = "ecx:webWallet";
+  // In memory, as the browser's: delivered to every other channel of that name. (Node's real one
+  // would keep the test process alive.)
+  const channels = new Set();
+  globalThis.BroadcastChannel = class {
+    constructor(name) { this.name = name; channels.add(this); }
+    postMessage(data) { for (const c of channels) if (c !== this && c.name === this.name) c.onmessage?.({ data }); }
+  };
+  const toOpener = [];
+  const opener = { postMessage: (message, origin) => toOpener.push([message, origin]) };
+  let receive;
+  let worker;
+  const sent = [];
+  globalThis.window = { opener: null, addEventListener: (_name, listener) => { receive = listener; } };
+  globalThis.location = { origin: "https://wallet.example", hash: "#/provider" };
+  globalThis.document = { visibilityState: "visible", addEventListener() {} };
+  globalThis.Worker = class {
+    constructor() { worker = this; }
+    postMessage(message) { sent.push(message); }
+    terminate() {}
+  };
+  try {
+    const web = await load({
+      entryPoints: [`${root}app/src/lib/platform/web.ts`],
+      define: { "import.meta.url": '"https://wallet.example/module.js"' },
+      plugins: [{ name: "navigation", setup(build) {
+        build.onResolve({ filter: /^\$app\/navigation$/ }, () => ({ path: "navigation", namespace: "test" }));
+        build.onLoad({ filter: /.*/, namespace: "test" }, () => ({ contents: "export const goto = async () => {};" }));
+      } }],
+    });
+    const seen = [];
+    assert.equal(web.serveOpener((origin) => seen.push(origin)), false, "no page opened this one");
+    globalThis.window.opener = opener;
+    assert.equal(web.serveOpener((origin) => seen.push(origin)), true);
+    assert.deepEqual(toOpener, [[{ channel: CHANNEL, type: "ready" }, "*"]]);
+
+    // The message claims an origin of its own; only the browser's counts.
+    const data = { channel: CHANNEL, type: "request", id: "r1", method: "connect", params: { origin: "https://forged.example" } };
+    receive({ source: {}, origin: "https://app.example", data });
+    receive({ source: opener, origin: "null", data });
+    receive({ source: opener, origin: "https://wallet.example", data });
+    receive({ source: opener, origin: "https://app.example", data: { ...data, channel: "other" } });
+    assert.equal(sent.length, 0, "not the opener, an opaque origin, the wallet's own, or another channel");
+    receive({ source: opener, origin: "https://app.example", data });
+    const forwarded = sent.at(-1);
+    assert.deepEqual(forwarded, { type: "appRequest", id: forwarded.id, origin: "https://app.example", method: "connect", params: data.params });
+    assert.deepEqual(seen, ["https://app.example"]);
+
+    worker.onmessage({ data: { type: "response", id: forwarded.id, response: { ok: true, result: "granted" } } });
+    assert.deepEqual(toOpener.at(-1), [{ channel: CHANNEL, type: "response", id: "r1", response: { ok: true, result: "granted" } }, "https://app.example"]);
+    worker.onmessage({ data: { type: "announce", message: { kind: "grantChanged", origin: "https://other.example", scope: null } } });
+    assert.equal(toOpener.length, 2, "another origin's Grant change isn't passed on");
+    worker.onmessage({ data: { type: "announce", message: { kind: "grantChanged", origin: "https://app.example", scope: null } } });
+    assert.deepEqual(toOpener.at(-1), [{ channel: CHANNEL, type: "event", event: "grantChanged", payload: null }, "https://app.example"]);
+    // Another tab's Worker revoked it: that page broadcasts it.
+    new BroadcastChannel("ecx-wallet:grantChanged").postMessage({ kind: "grantChanged", origin: "https://app.example", scope: { slots: [99], methods: [] } });
+    assert.deepEqual(toOpener.at(-1), [{ channel: CHANNEL, type: "event", event: "grantChanged", payload: { slots: [99], methods: [] } }, "https://app.example"]);
+    assert.equal(toOpener.length, 4);
+    // An app that reloaded finds this window open and says hello; only its opener gets an answer.
+    receive({ source: {}, origin: "https://app.example", data: { channel: CHANNEL, type: "hello" } });
+    receive({ source: opener, origin: "https://app.example", data: { channel: CHANNEL, type: "hello" } });
+    assert.deepEqual(toOpener.slice(4), [[{ channel: CHANNEL, type: "ready" }, "*"]]);
+
+    // The route mounts again after each approval: no second `ready`, and it hears the origins so far.
+    const again = [];
+    assert.equal(web.serveOpener((origin) => again.push(origin)), true);
+    assert.equal(toOpener.length, 5);
+    assert.deepEqual(again, ["https://app.example"]);
+  } finally {
+    Object.assign(globalThis, saved);
+  }
+});
+
 test("web Workers serialize Sends and Deposits across pages and release the lock on failure", async () => {
   const savedSelf = globalThis.self;
   const savedNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
@@ -179,17 +267,19 @@ test("web Workers serialize Sends and Deposits across pages and release the lock
     request(name, options, run) {
       locks.push(name);
       const result = (queues.get(name) ?? Promise.resolve()).then(() => {
-        options.signal.throwIfAborted();
+        options.signal?.throwIfAborted();
         return run();
       });
       queues.set(name, result.catch(() => {}));
       return result;
     },
   } } });
+  const senders = [];
   globalThis.webWorkerTestRouter = (page) => ({
     connectApprovalHost() {},
-    route(message) {
+    route(message, sender) {
       routed.push([page, message.kind]);
+      senders.push(sender);
       if (message.kind === "vault.status") return Promise.resolve("locked");
       return new Promise((resolve, reject) => waiting.push({ resolve, reject }));
     },
@@ -232,6 +322,28 @@ test("web Workers serialize Sends and Deposits across pages and release the lock
     await tick();
     assert.deepEqual(routed.slice(-1), [[1, "deposit.start"]], "a form closed while queued never reaches the router");
     assert.equal(responses.find((r) => r.id === 5).response.error.code, 4001);
+
+    // An app's Send through a Provider window queues behind the page's own Send on the same Slot.
+    const app = (page, id, method, params) => receivers[page - 1]({ data: { type: "appRequest", id, origin: "https://app.example", method, params } });
+    send(1, 6, "send.start");
+    app(2, 7, "sendTransfer", { slot: 99 });
+    app(2, 8, "getGrant");
+    await tick();
+    assert.deepEqual(locks.slice(-2), ["ecx-wallet:spend:99", "ecx-wallet:spend:99"], "getGrant takes no lock");
+    // getGrant goes straight through; the page's Send holds the lock and the app's waits.
+    const calls = routed.slice(-2).map(([page, kind], i) => ({ page, kind, sender: senders.at(-2 + i), done: waiting.at(-2 + i) }));
+    const own = calls.find((c) => c.kind === "send.start");
+    const grant = calls.find((c) => c.kind === "provider.request");
+    assert.deepEqual([own.page, own.sender], [1, undefined], "the page's own requests carry no app origin");
+    assert.deepEqual([grant.page, grant.sender], [2, { origin: "https://app.example" }]);
+    grant.done.resolve(null);
+    own.done.resolve({ txid: "page" });
+    await tick();
+    assert.deepEqual(routed.at(-1), [2, "provider.request"]);
+    assert.deepEqual(senders.at(-1), { origin: "https://app.example" });
+    waiting.at(-1).resolve({ txid: "app" });
+    await tick();
+    assert.deepEqual(responses.find((r) => r.id === 7).response, { ok: true, result: { txid: "app" } });
   } finally {
     globalThis.self = savedSelf;
     if (savedNavigator) Object.defineProperty(globalThis, "navigator", savedNavigator);

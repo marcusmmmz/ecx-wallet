@@ -16,6 +16,8 @@ const csp = [
   `connect-src 'self' ${origins.join(" ")}`, "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data:", "object-src 'none'", "frame-ancestors 'none'", "base-uri 'none'",
 ].join("; ");
+// No Cross-Origin-Opener-Policy: `same-origin` would cut the Provider window (`#/provider`) off from
+// the app that opened it.
 const headers = { "Content-Security-Policy": csp, "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer" };
 // The same headers for Netlify / Cloudflare Pages (`_headers`) and Vercel (`vercel.json`).
 await writeFile(new URL("_headers", output), `/*\n${Object.entries(headers).map(([name, value]) => `  ${name}: ${value}\n`).join("")}`);
