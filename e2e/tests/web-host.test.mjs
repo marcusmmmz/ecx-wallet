@@ -238,7 +238,7 @@ test("the Provider window answers only its opener, as the origin the browser rep
     // An app that reloaded finds this window open and says hello; only its opener gets an answer.
     receive({ source: {}, origin: "https://app.example", data: { channel: CHANNEL, type: "hello" } });
     receive({ source: opener, origin: "https://app.example", data: { channel: CHANNEL, type: "hello" } });
-    assert.deepEqual(toOpener.slice(4), [[{ channel: CHANNEL, type: "ready" }, "*"]]);
+    assert.deepEqual(toOpener.slice(4), [[{ channel: CHANNEL, type: "ready" }, "https://app.example"]]);
 
     // The route mounts again after each approval: no second `ready`, and it hears the origins so far.
     const again = [];
@@ -247,6 +247,111 @@ test("the Provider window answers only its opener, as the origin the browser rep
     assert.deepEqual(again, ["https://app.example"]);
   } finally {
     Object.assign(globalThis, saved);
+  }
+});
+
+test("the Apps view serves its frame as the origin of the frame's latest message, and draws approvals over it", async () => {
+  const saved = { Worker: globalThis.Worker, document: globalThis.document, location: globalThis.location, window: globalThis.window, BroadcastChannel: globalThis.BroadcastChannel };
+  const CHANNEL = "ecx:webWallet";
+  const channels = new Set();
+  globalThis.BroadcastChannel = class {
+    constructor(name) { this.name = name; channels.add(this); }
+    postMessage(data) { for (const c of channels) if (c !== this && c.name === this.name) c.onmessage?.({ data }); }
+    close() { channels.delete(this); }
+  };
+  const listeners = new Set();
+  globalThis.window = { opener: null, addEventListener: (_name, l) => listeners.add(l), removeEventListener: (_name, l) => listeners.delete(l) };
+  const receive = (event) => listeners.forEach((l) => l(event));
+  globalThis.location = { origin: "https://wallet.example", hash: "#/apps?url=x" };
+  globalThis.document = { visibilityState: "visible", addEventListener() {} };
+  let worker;
+  const sent = [];
+  globalThis.Worker = class {
+    constructor() { worker = this; }
+    postMessage(message) { sent.push(message); }
+    terminate() {}
+  };
+  const navigations = [];
+  globalThis.webHostTestGoto = async (hash) => navigations.push(hash);
+  const toFrame = [];
+  const contentWindow = { postMessage: (message, origin) => toFrame.push([message, origin]) };
+  let onLoad;
+  const frame = { contentWindow, addEventListener: (_name, l) => (onLoad = l), removeEventListener: () => (onLoad = undefined) };
+  try {
+    // A bundle of its own (the banner): an identical one would be the module already imported,
+    // with an earlier test's Worker.
+    const web = await load({
+      entryPoints: [`${root}app/src/lib/platform/web.ts`],
+      banner: { js: "// Apps view" },
+      define: { "import.meta.url": '"https://wallet.example/module.js"' },
+      plugins: [{ name: "navigation", setup(build) {
+        build.onResolve({ filter: /^\$app\/navigation$/ }, () => ({ path: "navigation", namespace: "test" }));
+        build.onLoad({ filter: /.*/, namespace: "test" }, () => ({ contents: "export const goto = (...args) => globalThis.webHostTestGoto(...args);" }));
+      } }],
+    });
+    const origins = [];
+    let loads = 0;
+    const stop = web.serveFrame(frame, { origin: (o) => origins.push(o), loaded: () => loads++ });
+    const hello = { channel: CHANNEL, type: "hello" };
+    // Framed, the app says hello before its frame's load.
+    receive({ source: contentWindow, origin: "https://app.example", data: hello });
+    assert.deepEqual(toFrame, [[{ channel: CHANNEL, type: "ready" }, "https://app.example"]]);
+    onLoad();
+    assert.equal(loads, 1);
+    assert.deepEqual(origins, ["https://app.example", undefined], "each load forgets the origin");
+    assert.deepEqual(toFrame.at(-1), [hello, "*"], "and asks whichever page is there now");
+    receive({ source: contentWindow, origin: "https://app.example", data: hello });
+    const data = { channel: CHANNEL, type: "request", id: "r1", method: "connect", params: {} };
+    receive({ source: {}, origin: "https://app.example", data });
+    receive({ source: contentWindow, origin: "null", data });
+    receive({ source: contentWindow, origin: "https://wallet.example", data });
+    assert.equal(sent.length, 0, "not the frame, an opaque origin, or the wallet's own");
+    receive({ source: contentWindow, origin: "https://app.example", data });
+    assert.deepEqual(sent.at(-1), { type: "appRequest", id: sent.at(-1).id, origin: "https://app.example", method: "connect", params: {} });
+
+    // The approval is drawn over the frame, and the route doesn't change.
+    const shown = [];
+    const unhost = web.hostApprovals((id) => shown.push(id));
+    worker.onmessage({ data: { type: "openApproval", id: "a1" } });
+    web.approvalRouteChanged("/apps");
+    assert.deepEqual(shown, ["a1"]);
+    assert.deepEqual(navigations, []);
+    web.closeOverlayApproval("other");
+    web.closeOverlayApproval("a1");
+    assert.deepEqual(shown, ["a1", undefined]);
+    assert.deepEqual(sent.at(-1), { type: "approvalClosed", id: "a1" });
+    worker.onmessage({ data: { type: "openApproval", id: "a2" } });
+    unhost();
+    assert.deepEqual(shown, ["a1", undefined, "a2", undefined]);
+    assert.deepEqual(sent.at(-1), { type: "approvalClosed", id: "a2" }, "leaving the view cancels it");
+    worker.onmessage({ data: { type: "openApproval", id: "a3" } });
+    assert.deepEqual(navigations, ["#/approve/a3"], "without the view, approvals open their route");
+
+    // Grant changes reach the frame's current origin only.
+    const grant = (origin) => {
+      const channel = new BroadcastChannel("ecx-wallet:grantChanged");
+      channel.postMessage({ kind: "grantChanged", origin, scope: null });
+      channel.close();
+    };
+    const before = toFrame.length;
+    grant("https://other.example");
+    assert.equal(toFrame.length, before);
+    grant("https://app.example");
+    assert.deepEqual(toFrame.at(-1), [{ channel: CHANNEL, type: "event", event: "grantChanged", payload: null }, "https://app.example"]);
+    // The frame went elsewhere: its new page hasn't spoken, so the app's origin hears nothing.
+    onLoad();
+    grant("https://app.example");
+    assert.deepEqual(toFrame.at(-1), [hello, "*"]);
+    receive({ source: contentWindow, origin: "https://evil.example", data: hello });
+    assert.deepEqual(origins.at(-1), "https://evil.example");
+
+    stop();
+    assert.equal(onLoad, undefined);
+    assert.equal(listeners.size, 0);
+    assert.equal(channels.size, 0);
+  } finally {
+    Object.assign(globalThis, saved);
+    delete globalThis.webHostTestGoto;
   }
 });
 

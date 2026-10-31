@@ -1,12 +1,14 @@
 // A demo Sidechain App, written the way a real one would use the client library: load it from
 // the web wallet's site (no npm), find a wallet on load, ask for a Grant from the Connect click
-// (the web wallet opens a popup, which needs a click), then read the address and Send.
+// (unless the web wallet frames the app, it opens a popup, which needs a click), then read the
+// address and Send.
 import type { GrantScope, Provider } from "@ecx/client";
 
 const params = new URLSearchParams(location.search);
-// Flush is Slot 46 on mainnet, which the production web wallet serves.
+// Flush is Slot 46 on mainnet.
 const SLOT = Number(params.get("slot") ?? 46);
-const WALLET = params.get("wallet") ?? "https://ecx-wallet.vercel.app/";
+// The web wallet that serves client.js and that the popup opens; the demo names none of its own.
+const WALLET = params.get("wallet");
 const SCOPE = { slots: [SLOT], methods: ["getAddresses", "sendTransfer"] };
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -64,7 +66,11 @@ async function send(event: SubmitEvent) {
   }
 }
 
-// What a site writes: import { discoverProviders } from "https://ecx-wallet.vercel.app/client.js";
+if (WALLET === null) {
+  $("wallet").textContent = "none: add ?wallet=<web wallet URL> to this page's address";
+  throw new Error("No ?wallet= given");
+}
+// What a site writes: import { discoverProviders } from "<web wallet URL>/client.js";
 const client: typeof import("@ecx/client") = await import(new URL("client.js", WALLET).href);
 const [found] = await client.discoverProviders({ webWallet: WALLET });
 provider = found?.provider;
