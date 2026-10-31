@@ -27,6 +27,40 @@ export const BIP300_DEPOSIT_CONFIRMATIONS = 100;
 /** L1 confirmations before the Slot credits a Deposit on this network. */
 export const depositConfirmationsOf = (network: NetworkEntry) => network.depositConfirmations ?? BIP300_DEPOSIT_CONFIRMATIONS;
 
+/** One of the account's confirmed coins as the server lists it: its value is the server's word. */
+interface ListedCoin {
+  txid: string;
+  vout: number;
+  value: number;
+  chain: 0 | 1;
+  index: number;
+}
+
+/**
+ * The most vB an M5 takes besides its coins' inputs: its version, counts and locktime, the
+ * Treasury's input and output, a 100-byte destination and change. Overstated, as `enoughCoins` needs.
+ */
+const M5_VBYTES_BESIDES_COINS = 300;
+/** The most vB a coin's input (P2WPKH, signed) adds to an M5. */
+const COIN_INPUT_VBYTES = 69;
+
+/**
+ * The fewest of `coins`, largest first as `build_deposit` picks them, whose listed values cover
+ * `amount` and the most fee they could cost at `feeRate` (sats per 1000 vB); all of them if none
+ * do. The module, picking from these, stops where it would among all of them, so only these
+ * coins' transactions need fetching.
+ */
+export function enoughCoins<C extends { value: number }>(coins: C[], amount: bigint, feeRate: number): C[] {
+  const largest = [...coins].sort((a, b) => b.value - a.value);
+  let total = 0n;
+  for (let count = 1; count <= largest.length; count++) {
+    total += BigInt(largest[count - 1].value);
+    const fee = BigInt(Math.ceil(((M5_VBYTES_BESIDES_COINS + COIN_INPUT_VBYTES * count) * feeRate) / 1000));
+    if (total >= amount + fee) return largest.slice(0, count);
+  }
+  return largest;
+}
+
 /** How far below the Slot's tip when a Deposit was made a reorg may move its credit, in blocks. */
 const REORG_SLACK = 10;
 
@@ -226,27 +260,25 @@ export function createDeposits(deps: DepositDeps) {
     return tx;
   }
 
-  /** The account's confirmed coins, each with its whole transaction, and its first unused change index. */
+  /** The account's confirmed coins, with their values as the server lists them, and its first unused change index. */
   async function coins(l1: EsploraClient, module: L1Module, key: L1AccountKey) {
     const account = module.deriveAccount(key, { receive: WATCHED_RECEIVE_ADDRESSES, change: WATCHED_CHANGE_ADDRESSES });
     const addresses = [
       ...account.receive.map((a) => ({ ...a, chain: 0 as const })),
       ...account.change.map((a) => ({ ...a, chain: 1 as const })),
     ];
-    const found: { txid: string; vout: number; chain: 0 | 1; index: number }[][] = [];
+    const found: ListedCoin[][] = [];
     for (let i = 0; i < addresses.length; i += QUERIES_AT_ONCE) {
       found.push(
         ...(await Promise.all(
           addresses.slice(i, i + QUERIES_AT_ONCE).map(async ({ address, chain, index }) =>
-            (await l1.addressUtxos(address)).filter((u) => u.confirmed && u.asset === undefined).map((u) => ({ txid: u.txid, vout: u.vout, chain, index })),
+            (await l1.addressUtxos(address))
+              .filter((u) => u.confirmed && u.asset === undefined)
+              .map((u) => ({ txid: u.txid, vout: u.vout, value: u.value ?? 0, chain, index })),
           ),
         )),
       );
     }
-    const txs = new Map<string, Promise<string>>();
-    const tx = (txid: string) => txs.get(txid) ?? txs.set(txid, txHex(l1, module, txid)).get(txid)!;
-    const coins = await Promise.all(found.flat().map(async (coin) => ({ tx: await tx(coin.txid), vout: coin.vout, chain: coin.chain, index: coin.index })));
-
     let changeIndex: number | undefined;
     for (const { address, index } of account.change) {
       if ((await l1.addressTxCount(address)) === 0) {
@@ -255,7 +287,18 @@ export function createDeposits(deps: DepositDeps) {
       }
     }
     if (changeIndex === undefined) throw refusal(`The wallet's first ${WATCHED_CHANGE_ADDRESSES} eCash change addresses are all used.`);
-    return { coins, changeIndex };
+    return { coins: found.flat(), changeIndex };
+  }
+
+  /** `coins` as the module takes them: each with its whole transaction, fetched QUERIES_AT_ONCE at a time. */
+  async function withTxs(l1: EsploraClient, module: L1Module, coins: ListedCoin[]) {
+    const txs = new Map<string, Promise<string>>();
+    const tx = (txid: string) => txs.get(txid) ?? txs.set(txid, txHex(l1, module, txid)).get(txid)!;
+    const out: { tx: string; vout: number; chain: 0 | 1; index: number }[] = [];
+    for (let i = 0; i < coins.length; i += QUERIES_AT_ONCE) {
+      out.push(...(await Promise.all(coins.slice(i, i + QUERIES_AT_ONCE).map(async ({ txid, vout, chain, index }) => ({ tx: await tx(txid), vout, chain, index })))));
+    }
+    return out;
   }
 
   /** A module refusal or a Treasury it can't determine, as the user reads it. */
@@ -372,11 +415,21 @@ export function createDeposits(deps: DepositDeps) {
         amount,
         destination: destination.destination,
         feeRate: rate,
-        coins: available,
         treasury: treasury === undefined ? null : { tx: await txHex(server, l1.module, treasury.txid), vout: treasury.vout, unconfirmed: treasury.unconfirmed },
         changeIndex,
       };
-      const psbt = await refusing(async () => l1.module.buildDeposit(order, key));
+      // Only the coins it could pick are fetched: a wallet may hold hundreds. If the module, reading
+      // their real values, finds them short (the server overstated one), it picks from all of them.
+      const build = async (from: ListedCoin[]) => l1.module.buildDeposit({ ...order, coins: await withTxs(server, l1.module, from) }, key);
+      const psbt = await refusing(async () => {
+        const enough = enoughCoins(available, BigInt(amount), rate);
+        try {
+          return await build(enough);
+        } catch (error) {
+          if (enough.length < available.length && error instanceof ChainModuleRefusal && error.code === "insufficientFunds") return build(available);
+          throw error;
+        }
+      });
       await refusing(async () => l1.module.check(psbt));
 
       const approval = deps.openSigningApproval({ origin: DEPOSIT_REQUESTER, chain: l1.chain, ...(host === undefined ? {} : { host }) });

@@ -447,6 +447,35 @@ for (const browserName of BROWSERS) describe(browserName, () => {
     });
   });
 
+  describe("many coins on one address", () => {
+    // 120 coins of 1,000 to 120,000 sats: a Deposit of 150,000 takes the two largest.
+    const COINS = Array.from({ length: 120 }, (_, i) => tx((0x10 + i).toString(16), [{ value: (i + 1) * 1000, script: L1_RECEIVE_0_SCRIPT }]));
+    const listed = (value = (coin, i) => (i + 1) * 1000) => COINS.map((coin, i) => ({ txid: coin.txid, vout: 0, value: value(coin, i), confirmed: true }));
+    const fetched = (since) => l1Stub.requests().slice(since).filter((r) => COINS.some((c) => r === `/tx/${c.txid}/hex`)).length;
+    beforeEach(() => Object.assign(L1, l1Config([...COINS, TREASURY_TX]), { utxos: { [L1_RECEIVE_0]: listed() } }));
+
+    test("a Deposit fetches only the transactions of the coins it could spend", async () => {
+      const since = l1Stub.requests().length;
+      const page = await startDeposit(session, "150000");
+      const approval = await approvalIn(page, { timeout: 20_000 });
+      assert.equal((await readDepositView(approval)).inputs.length, 3, "the Treasury and the two largest coins");
+      assert.equal(fetched(since), 2);
+      await answerIn(approval, "[data-reject]");
+      assert.equal((await outcome(page)).error, "The user rejected the request.");
+      await page.close();
+    });
+
+    test("a coin the server overstates: the module, reading its real value, picks from every coin", async () => {
+      L1.utxos[L1_RECEIVE_0] = listed((coin, i) => (i === 0 ? 10_000_000 : (i + 1) * 1000));
+      const page = await startDeposit(session, "150000");
+      const approval = await approvalIn(page, { timeout: 20_000 });
+      assert.equal((await readDepositView(approval)).inputs.length, 3, "the Treasury and the two largest coins, as they really are");
+      await answerIn(approval, "[data-reject]");
+      assert.equal((await outcome(page)).error, "The user rejected the request.");
+      await page.close();
+    });
+  });
+
   test("none of the above raised extension runtime errors", async () => {
     assert.deepEqual((await session.extensionErrors()).runtimeErrors, []);
   });
