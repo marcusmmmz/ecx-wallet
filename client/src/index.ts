@@ -2,11 +2,15 @@
 //
 // Discovery is EIP-6963-style: the app dispatches `ecx:requestProvider` on window, and every
 // wallet answers with an `ecx:announceProvider` event carrying `{ info, provider }`. No wallet
-// claims a fixed `window.*` name, so several wallets can coexist on one page. Where no wallet
-// answers (no extension), discovery falls back to the web wallet in a popup (`webWallet`).
+// claims a fixed `window.*` name, so several wallets can coexist on one page. Opened inside a
+// web wallet (ours, in its Apps view, or any other that speaks the same protocol), the app finds
+// that wallet first. Where no wallet answers (no extension), discovery can fall back to a web
+// wallet the app names, in a popup (`webWallet`).
 
+import { framedWalletProvider } from "./framed";
 import { webWalletProvider } from "./web-wallet";
 
+export { framedWalletProvider } from "./framed";
 export {
   webWalletProvider, WEB_WALLET_CHANNEL, PROVIDER_ROUTE, PROVIDER_WINDOW,
   type WebWalletHello, type WebWalletReply, type WebWalletRequest, type WebWalletResponse,
@@ -14,9 +18,6 @@ export {
 
 export const REQUEST_PROVIDER_EVENT = "ecx:requestProvider";
 export const ANNOUNCE_PROVIDER_EVENT = "ecx:announceProvider";
-
-/** The web wallet `discoverProviders` falls back to by default. */
-export const WEB_WALLET_URL = "https://ecx-wallet.vercel.app/";
 
 export interface ProviderInfo {
   /** Random per page load; tells two announcements of the same wallet apart from two wallets. */
@@ -78,19 +79,22 @@ export function onProviderAnnounced(listener: (detail: ProviderDetail) => void):
 }
 
 /**
- * Collects the wallets that announce themselves within `timeoutMs`, one entry per wallet. If none
- * does, answers the web wallet at `webWallet` instead (`WEB_WALLET_URL` unless given; `false`: none),
- * through `webWalletProvider`: its first request must then come from a click.
+ * Collects the wallets that announce themselves within `timeoutMs`, one entry per wallet. If a web
+ * wallet frames this page (any that speaks docs/web-wallet-protocol.md, on any origin), it comes
+ * first, and its requests need no click. Otherwise, if no wallet announces itself and the app names
+ * a web wallet (`webWallet`, its URL), answers that wallet in a popup, through `webWalletProvider`:
+ * its first request must then come from a click. No wallet is the default.
  */
-export function discoverProviders({ timeoutMs = 200, webWallet = WEB_WALLET_URL }: { timeoutMs?: number; webWallet?: string | false } = {}): Promise<ProviderDetail[]> {
+export async function discoverProviders({ timeoutMs = 200, webWallet }: { timeoutMs?: number; webWallet?: string } = {}): Promise<ProviderDetail[]> {
   const found = new Map<string, ProviderDetail>();
-  return new Promise((resolve) => {
-    const stop = onProviderAnnounced((detail) => {
-      if (detail?.info?.uuid && !found.has(detail.info.uuid)) found.set(detail.info.uuid, detail);
-    });
-    setTimeout(() => {
-      stop();
-      resolve(found.size === 0 && webWallet !== false ? [webWalletProvider(webWallet)] : [...found.values()]);
-    }, timeoutMs);
+  const stop = onProviderAnnounced((detail) => {
+    if (detail?.info?.uuid && !found.has(detail.info.uuid)) found.set(detail.info.uuid, detail);
   });
+  const [framing] = await Promise.all([
+    framedWalletProvider(timeoutMs),
+    new Promise((resolve) => setTimeout(resolve, timeoutMs)),
+  ]);
+  stop();
+  if (framing) return [framing, ...found.values()];
+  return found.size === 0 && webWallet !== undefined ? [webWalletProvider(webWallet)] : [...found.values()];
 }

@@ -11,7 +11,10 @@ const ports = new Map<number, { messages: ((message: unknown) => void)[]; closed
 let sequence = 0;
 let worker: Worker | undefined;
 let failure: Error | undefined;
-let approval: { id: string; back: string; opening?: Promise<void> } | undefined;
+/** The approval on show: on its route (`back`: where to return), or over the Apps view (`overlay`). */
+let approval: { id: string; back: string; opening?: Promise<void>; overlay?: true } | undefined;
+/** Draws an approval over the Apps view, or takes it away (undefined), while that view is open. */
+let overlay: ((id: string | undefined) => void) | undefined;
 /**
  * Grant changes, between this origin's pages: each page has its own Worker, so a Grant revoked in
  * one tab must still reach the app that a Provider window in another serves.
@@ -40,6 +43,12 @@ function post(message: ToWorker): void {
           break;
         case "openApproval":
           // Only one surface fits in the page; replacing it cancels its previous request.
+          if (overlay) {
+            closeSurface(false);
+            approval = { id: m.id, back: "", overlay: true };
+            overlay(m.id);
+            break;
+          }
           const back = approval?.back ?? (location.hash || "#/");
           closeSurface(false);
           approval = { id: m.id, back };
@@ -105,6 +114,8 @@ function closeSurface(back: boolean): void {
   if (!previous) return;
   approval = undefined;
   post({ type: "approvalClosed", id: previous.id });
+  // The Apps view stays where it is, its app's frame mounted.
+  if (previous.overlay) return overlay?.(undefined);
   // A request may finish before its route has opened. Wait for it before returning.
   if (back) previous.opening?.then(() => {
     if (!approval && location.hash === `#/approve/${previous.id}`) return goto(previous.back, { replaceState: true });
@@ -112,7 +123,7 @@ function closeSurface(back: boolean): void {
 }
 
 export function approvalRouteChanged(path: string): void {
-  if (approval && path !== `/approve/${approval.id}`) closeSurface(false);
+  if (approval && !approval.overlay && path !== `/approve/${approval.id}`) closeSurface(false);
 }
 
 export function closeApproval(): void {
@@ -121,15 +132,72 @@ export function closeApproval(): void {
   else goto(onApp === undefined ? "#/" : "#/provider", { replaceState: true }).catch(console.error);
 }
 
+/** An approval drawn over the Apps view has nothing more to show. */
+export function closeOverlayApproval(id: string): void {
+  if (approval?.overlay && approval.id === id) closeSurface(true);
+}
+
+/**
+ * While the Apps view is open, approvals are drawn over it by `show` (the id, or undefined to take
+ * it away) instead of opening their route, which would unmount the app's frame. Returns the undo,
+ * which cancels an approval still on show.
+ */
+export function hostApprovals(show: (id: string | undefined) => void): () => void {
+  overlay = show;
+  return () => {
+    if (overlay !== show) return;
+    if (approval?.overlay) closeSurface(false);
+    overlay = undefined;
+  };
+}
+
 /** Apps that asked through this page's Provider window, and who to tell about a new one. */
 const appOrigins = new Set<string>();
 let onApp: ((origin: string) => void) | undefined;
 
 /**
+ * Answers the Provider requests that the window `source()` posts here, each as from the origin the
+ * browser reports for it, and passes Grant changes on to the origins `tellsGrants` names. `heard`
+ * hears the origin of every message from that window, and whether it was a request (not a `hello`). A message from an opaque
+ * origin ("null", which can't hold a Grant) or from the wallet's own is ignored. Returns the undo.
+ */
+function serve(source: () => Window | null, heard: (origin: string, request: boolean) => void, tellsGrants: (origin: string) => boolean): () => void {
+  const reply = (message: WebWalletReply, origin: string) => source()?.postMessage(message, origin);
+  const onMessage = (event: MessageEvent) => {
+    const data = event.data as WebWalletRequest | WebWalletHello | undefined;
+    const from = source();
+    if (from === null || event.source !== from || data?.channel !== WEB_WALLET_CHANNEL) return;
+    const origin = event.origin;
+    if (!/^https?:\/\//.test(origin) || origin === location.origin) return;
+    heard(origin, data.type === "request");
+    // The app found this window already open, or is framed by it: it has nothing in flight here.
+    if (data.type === "hello") return reply({ channel: WEB_WALLET_CHANNEL, type: "ready" }, origin);
+    if (data.type !== "request" || typeof data.id !== "string") return;
+    const answer = (response: ProviderResponse) => reply({ channel: WEB_WALLET_CHANNEL, type: "response", id: data.id, response }, origin);
+    const id = ++sequence;
+    pending.set(id, { resolve: answer, reject: (error) => answer({ ok: false, error: { code: 4900, message: error.message } }) });
+    try { post({ type: "appRequest", id, origin, method: data.method, params: data.params }); }
+    catch (error) { pending.delete(id); answer({ ok: false, error: { code: 4900, message: (error as Error).message } }); }
+  };
+  window.addEventListener("message", onMessage);
+  const grants = new BroadcastChannel(GRANTS_CHANNEL);
+  grants.onmessage = ({ data }: MessageEvent) => {
+    const m = data as { kind?: string; origin?: string; scope?: unknown };
+    // Sent to that origin only: if the window has since gone elsewhere, the browser drops it.
+    if (m?.kind === "grantChanged" && typeof m.origin === "string" && tellsGrants(m.origin)) {
+      reply({ channel: WEB_WALLET_CHANNEL, type: "event", event: "grantChanged", payload: m.scope as never }, m.origin);
+    }
+  };
+  return () => {
+    window.removeEventListener("message", onMessage);
+    grants.close();
+  };
+}
+
+/**
  * Makes this page the Provider window of the app that opened it (`#/provider`, #85): it answers
- * Provider requests from `window.opener` only, as from the origin the browser reports for each
- * message, and passes that origin's Grant changes back. False if no page opened this one.
- * `onAppOrigin` hears each origin that asks, once.
+ * Provider requests from `window.opener` only, and passes those origins' Grant changes back. False
+ * if no page opened this one. `onAppOrigin` hears each origin that asks, once.
  */
 export function serveOpener(onAppOrigin: (origin: string) => void): boolean {
   const opener = window.opener as Window | null;
@@ -138,39 +206,46 @@ export function serveOpener(onAppOrigin: (origin: string) => void): boolean {
   onApp = onAppOrigin;
   appOrigins.forEach(onAppOrigin);
   if (!first) return true;
-  const reply = (message: WebWalletReply, origin: string) => opener.postMessage(message, origin);
-  const ready = () => reply({ channel: WEB_WALLET_CHANNEL, type: "ready" }, "*");
-  window.addEventListener("message", (event: MessageEvent) => {
-    const data = event.data as WebWalletRequest | WebWalletHello | undefined;
-    if (event.source !== opener || data?.channel !== WEB_WALLET_CHANNEL) return;
-    // The app found this window already open: it has nothing in flight here.
-    if (data.type === "hello") return ready();
-    if (data.type !== "request" || typeof data.id !== "string") return;
-    // An opaque origin ("null") can't hold a Grant; this origin is the wallet's own pages.
-    const origin = event.origin;
-    if (!/^https?:\/\//.test(origin) || origin === location.origin) return;
-    if (!appOrigins.has(origin)) {
-      appOrigins.add(origin);
-      onApp?.(origin);
-    }
-    const answer = (response: ProviderResponse) => reply({ channel: WEB_WALLET_CHANNEL, type: "response", id: data.id, response }, origin);
-    const id = ++sequence;
-    pending.set(id, { resolve: answer, reject: (error) => answer({ ok: false, error: { code: 4900, message: error.message } }) });
-    try { post({ type: "appRequest", id, origin, method: data.method, params: data.params }); }
-    catch (error) { pending.delete(id); answer({ ok: false, error: { code: 4900, message: (error as Error).message } }); }
-  });
-  new BroadcastChannel(GRANTS_CHANNEL).onmessage = ({ data }: MessageEvent) => {
-    const m = data as { kind?: string; origin?: string; scope?: unknown };
-    // Sent to that origin only: if the opener has since gone elsewhere, the browser drops it.
-    if (m?.kind === "grantChanged" && typeof m.origin === "string" && appOrigins.has(m.origin)) {
-      reply({ channel: WEB_WALLET_CHANNEL, type: "event", event: "grantChanged", payload: m.scope as never }, m.origin);
-    }
+  const heard = (origin: string, request: boolean) => {
+    if (!request || appOrigins.has(origin)) return;
+    appOrigins.add(origin);
+    onApp?.(origin);
   };
+  serve(() => opener, heard, (origin) => appOrigins.has(origin));
   // Carries nothing but readiness, so any origin may read it.
-  ready();
+  opener.postMessage({ channel: WEB_WALLET_CHANNEL, type: "ready" } satisfies WebWalletReply, "*");
   return true;
 }
 
+/**
+ * Makes this page the Provider of the app in `frame` (the Apps view, #91). The frame can navigate
+ * itself to another site, which the wallet can't see, so its origin is only ever the one the
+ * browser reports with its latest message: each load forgets it (`origin(undefined)`) and asks the
+ * page for a `hello`. `origin` hears each change; Grant changes go to that origin only.
+ * `loaded` hears each load of the frame. Returns the undo.
+ */
+export function serveFrame(frame: HTMLIFrameElement, { origin, loaded }: { origin: (origin: string | undefined) => void; loaded: () => void }): () => void {
+  let current: string | undefined;
+  const set = (next: string | undefined) => {
+    if (next === current) return;
+    current = next;
+    origin(next);
+  };
+  const onLoad = () => {
+    set(undefined);
+    loaded();
+    // To whichever page is there now: it carries nothing.
+    frame.contentWindow?.postMessage({ channel: WEB_WALLET_CHANNEL, type: "hello" } satisfies WebWalletHello, "*");
+  };
+  frame.addEventListener("load", onLoad);
+  const stop = serve(() => frame.contentWindow, set, (o) => o === current);
+  return () => {
+    frame.removeEventListener("load", onLoad);
+    stop();
+  };
+}
+
+export const canFrameApps = true;
 export const currentView = (): View => "page";
 export const canPin = () => false;
 export const pinToSide = async () => {};
