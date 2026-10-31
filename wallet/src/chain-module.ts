@@ -280,6 +280,8 @@ export type RefusalCode =
   | "invalidAccountKey"
   /** `buildDeposit`, `buildTransfer`: the coins don't cover the amounts and the fee. */
   | "insufficientFunds"
+  /** `buildDeposit`: the M5 would take more coins than eCash relays a Deposit with. */
+  | "tooLarge"
   /** `buildTransfer`: an amount, or change that can't go to the fee, is below what the chain relays. */
   | "dust"
   /** `parseAction`, `buildTrade`: a link its chain's own app would refuse, or a trade the wallet won't build (docs/adr/0016). */

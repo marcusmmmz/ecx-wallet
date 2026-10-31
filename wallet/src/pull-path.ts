@@ -53,6 +53,8 @@ export interface ChainHistory {
   entries: HistoryEntry[];
   /** The server has older transactions it didn't list. */
   partial: boolean;
+  /** Some are on pages it hasn't read yet: Show older reads further back. */
+  olderPages?: boolean;
   /** When the server reported it, in milliseconds since the epoch. */
   readAt: number;
 }
@@ -149,8 +151,8 @@ export function createPullPath(deps: PullPathDeps) {
 
   async function history<K extends ChainKey>(target: ChainServer<K>, treasuries?: TreasuryScript[], older = false): Promise<ChainHistory> {
     const { chain, server } = target;
-    const { entries, partial } = await server.history(await watch(target), treasuries, { older });
-    const reported = { chain, server: server.url, entries, partial, readAt: deps.now() };
+    const { entries, partial, olderPages } = await server.history(await watch(target), treasuries, { older });
+    const reported = { chain, server: server.url, entries, partial, ...(olderPages ? { olderPages } : {}), readAt: deps.now() };
     await deps.cache?.set(cacheKey.history(chain, server.url), reported);
     return reported;
   }

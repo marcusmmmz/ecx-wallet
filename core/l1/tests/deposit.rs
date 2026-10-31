@@ -260,7 +260,7 @@ fn a_deposit_on_an_unconfirmed_treasury_stays_within_what_ecash_relays_for_one()
     let (_, mut prev) = treasury(500_000);
     prev["unconfirmed"] = json!(true);
     let error = build_deposit(&order(20_000, small.clone(), Some(prev)), &account_key()).unwrap_err();
-    assert_eq!(error.code, RefusalCode::InsufficientFunds);
+    assert_eq!(error.code, RefusalCode::TooLarge);
     assert!(error.message.contains("eCash relays at most 1000 vB for a Deposit that spends an unconfirmed Treasury"), "{}", error.message);
     // A confirmed Treasury allows up to 10,000 vB: the same Deposit builds.
     let (_, prev) = treasury(500_000);

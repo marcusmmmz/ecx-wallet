@@ -414,6 +414,31 @@ for (const browserName of BROWSERS) describe(browserName, () => {
       );
     });
 
+    test("what it kept, if unreadable, counts as nothing kept rather than failing the history", async () => {
+      L1.txs = history(30, 4000);
+      const first = await readHistory(session, "l1");
+      const page = await session.openPage("index.html#/");
+      await homeSettled(page);
+      const broken = await page.evaluate(async () => {
+        const keys = Object.keys(await chrome.storage.local.get(null)).filter((key) => key.includes(":address-history:"));
+        await chrome.storage.local.set(Object.fromEntries(keys.map((key) => [key, { txs: [{ txid: 7 }], end: "yes" }])));
+        return keys.length;
+      });
+      await page.close();
+      assert.ok(broken > 0);
+      const again = await readHistory(session, "l1");
+      assert.equal(again.error, undefined);
+      assert.deepEqual(again.entries, first.entries);
+    });
+
+    test("with a full mempool list (50), older ones may be missing, but no Show older: more pages wouldn't find them", async () => {
+      L1.txs = Array.from({ length: 50 }, (_, i) => tx((0x40 + i).toString(16), [{ value: 2000 + i, script: addressScript(L1_RECEIVE_0) }], { confirmed: false }));
+      const page = await openActivity(session, "l1");
+      await page.waitForSelector("[data-activity]:not([data-refreshing]) [data-history-more]", { timeout: 20_000 });
+      assert.equal(await page.$("[data-history-older]"), null);
+      await closeSettled(page);
+    });
+
     test("what it kept is dropped once the server no longer lists it", async () => {
       L1.txs = history(30, 8000);
       assert.equal((await readHistory(session, "l1")).entries.length, 30);

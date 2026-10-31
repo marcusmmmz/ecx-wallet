@@ -192,7 +192,7 @@ pub fn build_deposit(order_json: &str, account_key: &str) -> Result<Built, Refus
         if size > limit {
             let (which, or) = if chained { (" that spends an unconfirmed Treasury", ", or wait for the Treasury to confirm") } else { ("", "") };
             return Err(refuse(
-                RefusalCode::InsufficientFunds,
+                RefusalCode::TooLarge,
                 format!("This Deposit would take {count} coins and {size} vB: eCash relays at most {limit} vB for a Deposit{which}. Deposit less{or}."),
             ));
         }
