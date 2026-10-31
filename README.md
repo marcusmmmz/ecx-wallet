@@ -35,7 +35,22 @@ pnpm typecheck
 
 `pnpm build:web` writes a static site to `app/build-web` (or `pnpm --filter @ecx/app build:web` after building core). Serve it over HTTPS. It supplies the CSP and security headers twice: `_headers` for Netlify / Cloudflare Pages, and `vercel.json` for Vercel (`vercel deploy app/build-web`). A Vercel Git build uses the root `vercel.json` (it installs clang and llvm, then runs `pnpm build:web`), and the postbuild hands Vercel the site as Build Output with the same headers. Other hosts must send those headers themselves.
 
-The web wallet supports eCash and Flush, with keys held in a dedicated Worker and encrypted data in IndexedDB. Reloading locks it: the session lives only in memory. Auto-lock uses a timer and checks the deadline when the tab becomes visible, as well as on every use. Approvals stay in the page. A Sidechain App reaches it through `client`'s web-wallet fallback, which opens the wallet in a popup (see [The Provider](docs/how-it-works.md#the-provider)). There is no browser side panel. Slot 24 is unavailable because its explorer sends no CORS headers (checked 2026-10-29).
+The web wallet supports eCash and Flush, with keys held in a dedicated Worker and encrypted data in IndexedDB. Reloading locks it: the session lives only in memory. Auto-lock uses a timer and checks the deadline when the tab becomes visible, as well as on every use. Approvals stay in the page. A Sidechain App reaches it through `client`'s web-wallet fallback, which opens the wallet in a popup (see [The Provider](docs/how-it-works.md#the-provider)). By default that is the production wallet, `https://ecx-wallet.vercel.app/`.
+
+`client` isn't on npm. The web build serves it, bundled, at `/client.js` (CORS open), so a site adds the wallet with one import:
+
+```js
+import { discoverProviders } from "https://ecx-wallet.vercel.app/client.js";
+
+const [wallet] = await discoverProviders(); // the extension if installed, else the web wallet
+connectButton.onclick = () => wallet.provider.request({ method: "connect", params: { slots: [46], methods: ["getAddresses"] } });
+```
+
+The script runs with the site's own privileges, so a site trusts whoever deploys the wallet. The file changes with each deploy, so pinning it with SRI breaks at the next release.
+
+## Demo app
+
+`pnpm demo` builds and serves a demo Sidechain App (`demo/`) at `http://localhost:5180/`: Connect wallet, the Flush address, Send, Disconnect. It loads `client.js` from the wallet's site, as any site would, and uses the extension if one is installed, otherwise the web wallet in a popup. `?wallet=<web wallet URL>` points it at another deploy, such as a preview, and `?slot=99` uses betanet's Flush Slot (the default is 46, mainnet's). There is no browser side panel. Slot 24 is unavailable because its explorer sends no CORS headers (checked 2026-10-29).
 
 ## Release
 

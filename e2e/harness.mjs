@@ -57,14 +57,17 @@ export function launchWebWallet(name) {
 /** Serve the e2e web build with its generated HTTP headers, including CSP on Worker scripts. */
 export async function serveWebWallet() {
   const dist = path.join(ROOT, "e2e", "dist", "web");
-  const headersFile = await readFile(path.join(dist, "_headers"), "utf8");
-  const lines = headersFile.trimEnd().split("\n");
-  if (lines.shift() !== "/*") throw new Error("Expected one global _headers rule");
-  const headers = Object.fromEntries(lines.map((line) => {
+  // `_headers`: a global `/*` rule, then rules for exact paths (`/client.js`), added to it.
+  const rules = {};
+  let current;
+  for (const line of (await readFile(path.join(dist, "_headers"), "utf8")).trimEnd().split("\n")) {
     const match = /^  ([^:]+): (.+)$/.exec(line);
-    if (!match) throw new Error(`Unsupported _headers line: ${line}`);
-    return [match[1], match[2]];
-  }));
+    if (match && current) current[match[1]] = match[2];
+    else if (line.startsWith("/")) current = rules[line] = {};
+    else throw new Error(`Unsupported _headers line: ${line}`);
+  }
+  const headers = rules["/*"];
+  if (!headers) throw new Error("Expected a global _headers rule");
   const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".wasm": "application/wasm", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".json": "application/json", ".woff2": "font/woff2" };
   const server = createServer(async (request, response) => {
     try {
@@ -82,7 +85,7 @@ export async function serveWebWallet() {
         return;
       }
       const bytes = await readFile(file);
-      response.writeHead(200, { ...headers, "Content-Type": mime[path.extname(file)] ?? "application/octet-stream" });
+      response.writeHead(200, { ...headers, ...rules[pathname], "Content-Type": mime[path.extname(file)] ?? "application/octet-stream" });
       response.end(bytes);
     } catch (error) {
       response.writeHead(error.code === "ENOENT" ? 404 : 500, headers);

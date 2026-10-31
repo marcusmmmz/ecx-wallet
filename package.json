@@ -11,6 +11,7 @@
     "build:e2e:web": "node e2e/scripts/build-web.mjs",
     "test": "pnpm --filter @ecx/core test && pnpm build && pnpm build:e2e && pnpm build:e2e:web && pnpm --filter @ecx/e2e test",
     "test:quick": "node e2e/scripts/quick.mjs",
+    "demo": "pnpm --filter @ecx/demo start",
     "typecheck": "pnpm -r --if-present typecheck"
   }
 }
