@@ -6,5 +6,6 @@ packages:
   - client
   - e2e
   - stub-server
+  - demo
 allowBuilds:
   esbuild: true

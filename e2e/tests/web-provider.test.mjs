@@ -2,7 +2,9 @@
 // opens the wallet at `#/provider` in a popup and the two talk over postMessage.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import path from "node:path";
+import * as esbuild from "esbuild";
 import { after, before, describe, test } from "node:test";
 import {
   ABANDON, BROWSERS, ROOT, WALLET_PASSWORD, approvalIn, importWallet, launchWebWallet, openTestApp,
@@ -18,6 +20,19 @@ const L1 = { cors: true, identityBlock: { height: 967680, hash: "000000000000000
 const FLUSH = { cors: true, identityBlock: flush.chainEntry().networks.betanet.identityBlock, tipHeight: 10_000, txs: [], utxos: {} };
 // The app's own origin: a different site from the wallet's (127.0.0.1).
 const HOST = "webapp.localhost";
+
+/** The demo app (demo/), bundled as its build does, on `demo.localhost`. */
+async function serveDemo() {
+  const bundle = await esbuild.build({ entryPoints: [path.join(ROOT, "demo", "src", "main.ts")], bundle: true, format: "esm", target: "es2022", write: false });
+  const html = await readFile(path.join(ROOT, "demo", "src", "index.html"), "utf8");
+  const server = createServer((request, response) => {
+    const js = request.url.split("?")[0] === "/main.js";
+    response.writeHead(200, { "Content-Type": js ? "text/javascript" : "text/html; charset=utf-8" });
+    response.end(js ? bundle.outputFiles[0].text : html);
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return { url: (query) => `http://demo.localhost:${server.address().port}/?${new URLSearchParams(query)}`, close: () => new Promise((resolve) => server.close(resolve)) };
+}
 
 for (const browserName of BROWSERS) describe(`${browserName}: web Provider`, () => {
   let web;
@@ -116,6 +131,35 @@ for (const browserName of BROWSERS) describe(`${browserName}: web Provider`, () 
       assert.deepEqual(errors, []);
     } finally {
       await session.close();
+    }
+  });
+
+  test("the demo app connects from its button, shows the wallet's address, and disconnects", async () => {
+    const demo = await serveDemo();
+    const session = await launchWebWallet(browserName);
+    try {
+      await importOnWebOrigin(session);
+      const page = await session.browser.newPage();
+      const errors = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      await page.goto(demo.url({ wallet: web.url, slot: 99 }));
+      await page.waitForSelector("[data-connect]:not([disabled])", { timeout: 10_000 });
+      assert.match(await page.$eval("[data-wallet]", (e) => e.textContent), /ECX Wallet \(web\)/);
+      await page.click("[data-connect]");
+      const popup = await (await session.browser.waitForTarget((t) => t.url().includes("#/provider") || t.url().includes("#/approve/"), { timeout: 10_000 })).page();
+      await approvalIn(popup, { timeout: 20_000 });
+      await popup.click("[data-approve]");
+      await popup.waitForSelector("[data-unlock-required]", { timeout: 20_000 });
+      await popup.type("[data-password]", WALLET_PASSWORD);
+      await popup.click("[data-unlock]");
+      await waitForFunction(page, () => document.querySelector("[data-address]")?.textContent !== "", { timeout: 20_000 });
+      assert.equal(await page.$eval("[data-address]", (e) => e.textContent), ADDRESS);
+      await page.click("[data-disconnect]");
+      await page.waitForSelector("[data-connect]", { visible: true, timeout: 10_000 });
+      assert.deepEqual(errors, []);
+    } finally {
+      await session.close();
+      await demo.close();
     }
   });
 

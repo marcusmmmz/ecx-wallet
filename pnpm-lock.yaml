@@ -26,6 +26,9 @@ importers:
       '@types/chrome':
         specifier: 0.3.5
         version: 0.3.5
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
       svelte:
         specifier: 5.57.2
         version: 5.57.2
@@ -50,6 +53,19 @@ importers:
       binaryen:
         specifier: 132.0.0
         version: 132.0.0
+
+  demo:
+    dependencies:
+      '@ecx/client':
+        specifier: workspace:*
+        version: link:../client
+    devDependencies:
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
 
   e2e:
     dependencies:

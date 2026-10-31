@@ -3,7 +3,7 @@
 // Discovery is EIP-6963-style: the app dispatches `ecx:requestProvider` on window, and every
 // wallet answers with an `ecx:announceProvider` event carrying `{ info, provider }`. No wallet
 // claims a fixed `window.*` name, so several wallets can coexist on one page. Where no wallet
-// answers (no extension), the app can fall back to the web wallet in a popup (`webWallet`).
+// answers (no extension), discovery falls back to the web wallet in a popup (`webWallet`).
 
 import { webWalletProvider } from "./web-wallet";
 
@@ -14,6 +14,9 @@ export {
 
 export const REQUEST_PROVIDER_EVENT = "ecx:requestProvider";
 export const ANNOUNCE_PROVIDER_EVENT = "ecx:announceProvider";
+
+/** The web wallet `discoverProviders` falls back to by default. */
+export const WEB_WALLET_URL = "https://ecx-wallet.vercel.app/";
 
 export interface ProviderInfo {
   /** Random per page load; tells two announcements of the same wallet apart from two wallets. */
@@ -76,10 +79,10 @@ export function onProviderAnnounced(listener: (detail: ProviderDetail) => void):
 
 /**
  * Collects the wallets that announce themselves within `timeoutMs`, one entry per wallet. If none
- * does and `webWallet` (the web wallet's URL) is given, answers that web wallet instead
- * (`webWalletProvider`): its first request must then come from a click.
+ * does, answers the web wallet at `webWallet` instead (`WEB_WALLET_URL` unless given; `false`: none),
+ * through `webWalletProvider`: its first request must then come from a click.
  */
-export function discoverProviders({ timeoutMs = 200, webWallet }: { timeoutMs?: number; webWallet?: string } = {}): Promise<ProviderDetail[]> {
+export function discoverProviders({ timeoutMs = 200, webWallet = WEB_WALLET_URL }: { timeoutMs?: number; webWallet?: string | false } = {}): Promise<ProviderDetail[]> {
   const found = new Map<string, ProviderDetail>();
   return new Promise((resolve) => {
     const stop = onProviderAnnounced((detail) => {
@@ -87,7 +90,7 @@ export function discoverProviders({ timeoutMs = 200, webWallet }: { timeoutMs?: 
     });
     setTimeout(() => {
       stop();
-      resolve(found.size === 0 && webWallet !== undefined ? [webWalletProvider(webWallet)] : [...found.values()]);
+      resolve(found.size === 0 && webWallet !== false ? [webWalletProvider(webWallet)] : [...found.values()]);
     }, timeoutMs);
   });
 }
