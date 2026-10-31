@@ -23,6 +23,12 @@ website → client discovery → injected Provider (inpage.ts, main world)
 ```
 
 - The background takes the requester's origin from the browser's `sender`, never from the request.
+- **The web wallet** has no injected Provider. There, `discoverProviders({ webWallet })` falls back to a popup (#85):
+
+  ```text
+  website → client's webWalletProvider → popup at <wallet>#/provider (postMessage)
+          → page (serveOpener) → Worker (`appRequest`) → wallet's Provider handler
+  ```
 - The approval window is the app page at `#/approve/<id>` (`app/src/lib/Approval.svelte`). It talks to the background only through `runtime.sendMessage`.
 - **The wallet's own Send and Deposit approve in place.** The toolbar popup closes whenever another window takes focus, so those screens don't open a window (the side panel stays open, and approves in place the same way): each connects a port (`approval.host:<host>`, `hostApprovals`) and passes `host` with its request, and the background posts the approval's id on that port. The screen then shows the same `Approval` component where its form was. Closing the popup disconnects the port, which rejects the request, as closing an approval window does. An app's request, and a `/v1` server's, still get a window.
 - Wallet pages (home, Send, Settings…) talk to the background the same way, one message kind per action (`vault.*`, `send.start`, `history.reported`…). The shared router is in `extension/src/router.ts`; `extension/src/background.ts` supplies its browser operations and wires the listeners.
@@ -34,7 +40,8 @@ website → client discovery → injected Provider (inpage.ts, main world)
 - **Storage:** encrypted vault and other persistent data in IndexedDB; unlock state and session cache only in Worker memory. Reloading locks the wallet. Auto-lock uses a timer, checks again when the page becomes visible (background timers may be throttled), and still enforces the deadline on every use.
 - **Approvals:** Send and Deposit still approve in place through their host port. An approval surface opens `#/approve/<id>` in the same page and returns to the previous route when done; leaving it cancels the request.
 - **Spending across tabs:** origin-wide Web Locks serialize Sends per Slot and Deposits across all Slots through approval and persistence of their records. Each tab keeps its own unlock state; closing a tab releases its lock. Leaving a hosted form cancels its request even while it waits for a lock.
-- **Requester:** always the wallet page, with no origin. No Provider is injected and dApp requests are refused as Unauthorized. Grants cannot attest a web caller here. Pin and side-panel controls are absent.
+- **Requester:** the wallet page, with no origin, for every message but `appRequest`. That envelope carries only Provider requests, from the Provider window (`#/provider`), and names the app by the origin the browser reported on the `postMessage` (`serveOpener` in `app/src/lib/platform/web.ts`). The window answers only `window.opener`, skips opaque origins and the wallet's own, and replies to that origin alone. A Provider request in any other envelope is still refused as Unauthorized. Pin and side-panel controls are absent.
+- **Provider window:** the app's first request opens it with `window.open`, so it must come from a click, or the browser blocks the popup and the request fails with 4900. The window has its own Worker, so it starts locked and asks to unlock in place. Closing it answers what it was showing with 4900 (the app polls `closed`), and the next request opens it again. The window is named `ecx-web-wallet`. The app looks it up with `window.open("", name)`, which never reloads an open window: a new one is `about:blank`, and the app then points it at the wallet. An open one gets a `hello` and answers `ready`, so an app that reloaded keeps the window's session. Reloading the window itself, even on an approval route, serves again at once (the layout checks the window's name), and its new `ready` makes the app fail what was in flight with 4900. An app's `sendTransfer`, `sendAction` and `flush_submit` take the same spend locks as the wallet's own Send. The wallet must not send `Cross-Origin-Opener-Policy: same-origin`, or the popup loses its opener; an app that sends it can't use the popup either.
 - **Chains:** the build network's (see [Networks](#networks)), less Slot 24 on betanet, because `explorer.bitnames.info` sends no CORS headers (checked 2026-10-29). `app/scripts/web-config.mjs` selects the registry, WASM and Chain Entries together, without changing the Chain Entry format.
 - **Headers:** `_headers` (Netlify / Cloudflare Pages) and `vercel.json` (Vercel) carry the same HTTP CSP, `nosniff` and `no-referrer`. Its `connect-src` uses the same Chain Entry origin derivation as extension host permissions, with Slot 24 left out. The web bootstrap is external, as in the extension. Serve over HTTPS and configure the host to send those headers.
 
@@ -195,7 +202,7 @@ A stuck Deposit (its server doesn't know it, or its status can't be read) offers
 
 ## The Provider
 
-What a Sidechain App calls (`wallet/src/provider.ts`). It finds the Provider with `client`'s `discoverProviders()`, then calls `request({ method, params })`.
+What a Sidechain App calls (`wallet/src/provider.ts`). It finds the Provider with `client`'s `discoverProviders()`, then calls `request({ method, params })`. Without the extension, `discoverProviders({ webWallet: "<wallet URL>" })` answers the web wallet in a popup instead (`rdns` `cash.ecx.wallet.web`, see [Web build](#web-build)); the same methods and events apply.
 
 | Method | Needs a Grant | What it does |
 |---|---|---|
@@ -212,7 +219,7 @@ What a Sidechain App calls (`wallet/src/provider.ts`). It finds the Provider wit
 
 **While locked,** every granted method that needs a key opens the approval window to unlock first; closing it is 4001. `suggestAsset` needs none. An origin's `getAddresses` calls share its one unlock window (a signing request or Send unlocks in its own approval window). `connect` and `getGrant` need no key, so they work locked. A page can check `getGrant().unlocked` on load and ask for addresses only after a click, so a reload never opens a window. The wallet sends no lock or unlock events: they would tell sites when the user is away.
 
-**Events:** `provider.on("grantChanged", listener)` (and `removeListener`). The listener gets the origin's Grant scope, or `null` once it has none. It fires in every open tab of that origin when the Grant is widened by `connect`, revoked on the Grants screen, or removed by `disconnect`. The background sends it to every tab's top frame (`chrome.tabs.sendMessage`, no tab permission needed), and each content script passes it to its page only if the origin is the page's own.
+**Events:** `provider.on("grantChanged", listener)` (and `removeListener`). The listener gets the origin's Grant scope, or `null` once it has none. It fires in every open tab of that origin when the Grant is widened by `connect`, revoked on the Grants screen, or removed by `disconnect`. The background sends it to every tab's top frame (`chrome.tabs.sendMessage`, no tab permission needed), and each content script passes it to its page only if the origin is the page's own. In the web wallet, each page has its own Worker, so pages relay it to each other over a `BroadcastChannel` (`ecx-wallet:grantChanged`). A Provider window passes it on to its opener only for origins that asked through it, and only while the opener is still at that origin.
 
 **Chains that are off:** a request for one turns it on only once the user approves, either in the connect prompt ("Approving also turns on …") or in a `turnOn` prompt first. If the user refuses, 4001.
 

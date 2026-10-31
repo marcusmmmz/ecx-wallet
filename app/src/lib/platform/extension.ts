@@ -14,6 +14,8 @@ export function onMessage(listener: (message: unknown) => void): () => void {
 
 export const approvalRouteChanged = (_path: string): void => {};
 export const closeApproval = () => window.close();
+/** The web build's Provider window; the extension injects its Provider instead. */
+export const serveOpener = (_onAppOrigin: (origin: string) => void): boolean => false;
 
 export type View = "popup" | "panel" | "page";
 

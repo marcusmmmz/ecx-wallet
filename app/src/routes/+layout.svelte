@@ -1,6 +1,7 @@
 <script lang="ts">
   import "../app.css";
-  import { approvalRouteChanged } from "$platform";
+  import { approvalRouteChanged, serveOpener } from "$platform";
+  import { PROVIDER_WINDOW } from "../../../client/src/web-wallet";
   import { reportActivity } from "$lib/activity";
   import { onLockDeadline, vaultStatus } from "$lib/background";
   import BottomBar from "$lib/BottomBar.svelte";
@@ -11,10 +12,13 @@
   let { children } = $props();
 
   $effect(reportActivity);
-  // The bottom bar: on every screen of an unlocked wallet, but not in an approval window or while setting one up.
+  // A Provider window reloaded on another route (an approval) serves its app again at once, so the
+  // app hears `ready` and fails what this page lost. The window keeps its name across reloads.
+  if (typeof window !== "undefined" && window.name === PROVIDER_WINDOW) serveOpener(() => {});
+  // The bottom bar: on every screen of an unlocked wallet, but not in an approval or Provider window or while setting one up.
   const path = $derived(pathOf(page.url.hash));
   $effect(() => approvalRouteChanged(path));
-  const barless = $derived(/^\/(approve|create|import)(\/|$)/.test(path));
+  const barless = $derived(/^\/(approve|create|import|provider)(\/|$)/.test(path));
   // Until the first answer the bar's place isn't known (`data-bar-known`, which the e2e tests wait for).
   let barKnown = $state(false);
   // When the wallet locks itself without use (asked again then, as the deadline may have moved).

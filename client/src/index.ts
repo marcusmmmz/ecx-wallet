@@ -2,7 +2,15 @@
 //
 // Discovery is EIP-6963-style: the app dispatches `ecx:requestProvider` on window, and every
 // wallet answers with an `ecx:announceProvider` event carrying `{ info, provider }`. No wallet
-// claims a fixed `window.*` name, so several wallets can coexist on one page.
+// claims a fixed `window.*` name, so several wallets can coexist on one page. Where no wallet
+// answers (no extension), the app can fall back to the web wallet in a popup (`webWallet`).
+
+import { webWalletProvider } from "./web-wallet";
+
+export {
+  webWalletProvider, WEB_WALLET_CHANNEL, PROVIDER_ROUTE, PROVIDER_WINDOW,
+  type WebWalletHello, type WebWalletReply, type WebWalletRequest, type WebWalletResponse,
+} from "./web-wallet";
 
 export const REQUEST_PROVIDER_EVENT = "ecx:requestProvider";
 export const ANNOUNCE_PROVIDER_EVENT = "ecx:announceProvider";
@@ -66,8 +74,12 @@ export function onProviderAnnounced(listener: (detail: ProviderDetail) => void):
   return () => window.removeEventListener(ANNOUNCE_PROVIDER_EVENT, handler);
 }
 
-/** Collects the wallets that announce themselves within `timeoutMs`, one entry per wallet. */
-export function discoverProviders({ timeoutMs = 200 }: { timeoutMs?: number } = {}): Promise<ProviderDetail[]> {
+/**
+ * Collects the wallets that announce themselves within `timeoutMs`, one entry per wallet. If none
+ * does and `webWallet` (the web wallet's URL) is given, answers that web wallet instead
+ * (`webWalletProvider`): its first request must then come from a click.
+ */
+export function discoverProviders({ timeoutMs = 200, webWallet }: { timeoutMs?: number; webWallet?: string } = {}): Promise<ProviderDetail[]> {
   const found = new Map<string, ProviderDetail>();
   return new Promise((resolve) => {
     const stop = onProviderAnnounced((detail) => {
@@ -75,7 +87,7 @@ export function discoverProviders({ timeoutMs = 200 }: { timeoutMs?: number } = 
     });
     setTimeout(() => {
       stop();
-      resolve([...found.values()]);
+      resolve(found.size === 0 && webWallet !== undefined ? [webWalletProvider(webWallet)] : [...found.values()]);
     }, timeoutMs);
   });
 }

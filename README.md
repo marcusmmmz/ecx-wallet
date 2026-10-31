@@ -35,7 +35,7 @@ pnpm typecheck
 
 `pnpm build:web` writes a static site to `app/build-web` (or `pnpm --filter @ecx/app build:web` after building core). Serve it over HTTPS. It supplies the CSP and security headers twice: `_headers` for Netlify / Cloudflare Pages, and `vercel.json` for Vercel (`vercel deploy app/build-web`). A Vercel Git build uses the root `vercel.json` (it installs clang and llvm, then runs `pnpm build:web`), and the postbuild hands Vercel the site as Build Output with the same headers. Other hosts must send those headers themselves.
 
-The web wallet supports eCash and Flush, with keys held in a dedicated Worker and encrypted data in IndexedDB. Reloading locks it: the session lives only in memory. Auto-lock uses a timer and checks the deadline when the tab becomes visible, as well as on every use. Approvals stay in the page. There is no Provider or dApp connection, and no browser side panel. Slot 24 is unavailable because its explorer sends no CORS headers (checked 2026-10-29).
+The web wallet supports eCash and Flush, with keys held in a dedicated Worker and encrypted data in IndexedDB. Reloading locks it: the session lives only in memory. Auto-lock uses a timer and checks the deadline when the tab becomes visible, as well as on every use. Approvals stay in the page. A Sidechain App reaches it through `client`'s web-wallet fallback, which opens the wallet in a popup (see [The Provider](docs/how-it-works.md#the-provider)). There is no browser side panel. Slot 24 is unavailable because its explorer sends no CORS headers (checked 2026-10-29).
 
 ## Release
 
