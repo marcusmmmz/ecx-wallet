@@ -1,0 +1,14 @@
+{
+  "name": "@ecx/demo",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "A demo Sidechain App: Connect wallet, show the address, Send, Disconnect, through the client library.",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "node scripts/build.mjs && node scripts/serve.mjs",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": { "@ecx/client": "workspace:*" },
+  "devDependencies": { "esbuild": "0.28.2", "typescript": "5.9.3" }
+}

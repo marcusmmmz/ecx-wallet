@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ECX Demo App</title>
+    <style>
+      :root { color-scheme: light dark; --accent: #0b6e4f; --muted: #6b7280; --line: #d1d5db; }
+      body { margin: 0; font: 16px/1.5 system-ui, sans-serif; background: Canvas; color: CanvasText; }
+      main { max-width: 34rem; margin: 0 auto; padding: 24px 16px; }
+      h1 { font-size: 1.4rem; margin: 0 0 4px; }
+      .muted { color: var(--muted); font-size: 0.9rem; }
+      section { border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-top: 16px; }
+      button { font: inherit; padding: 10px 16px; border-radius: 999px; border: 0; background: var(--accent); color: white; cursor: pointer; }
+      button.secondary { background: transparent; color: inherit; border: 1px solid var(--line); }
+      button:disabled { opacity: 0.5; cursor: default; }
+      label { display: block; margin-top: 12px; font-size: 0.9rem; }
+      input { box-sizing: border-box; width: 100%; font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: Field; color: FieldText; }
+      code { word-break: break-all; }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+      #status:empty { display: none; }
+      #status { margin-top: 16px; padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 12%, transparent); }
+      #status.error { background: color-mix(in srgb, crimson 15%, transparent); }
+      [hidden] { display: none !important; }
+    </style>
+    <script type="module" src="./main.js"></script>
+  </head>
+  <body>
+    <main>
+      <h1>ECX Demo App</h1>
+      <p class="muted">A Sidechain App on Flush. It uses the ECX extension if you have it, and otherwise opens the ECX web wallet in a popup.</p>
+
+      <section>
+        <p class="muted">Wallet: <span id="wallet" data-wallet>looking…</span></p>
+        <div id="disconnected" class="row">
+          <button id="connect" data-connect disabled>Connect wallet</button>
+        </div>
+        <div id="connected" hidden>
+          <p>Your Flush address:<br /><code id="address" data-address></code></p>
+          <div class="row"><button id="disconnect" class="secondary" data-disconnect>Disconnect</button></div>
+        </div>
+      </section>
+
+      <section id="send" hidden>
+        <strong>Send</strong>
+        <form id="send-form">
+          <label>To address <input id="to" data-send-to required autocomplete="off" /></label>
+          <label>Amount (sats) <input id="amount" data-send-amount required inputmode="numeric" pattern="[0-9]+" /></label>
+          <div class="row"><button type="submit" data-send>Send</button></div>
+        </form>
+      </section>
+
+      <p id="status" data-status role="status"></p>
+    </main>
+  </body>
+</html>
