@@ -16,6 +16,10 @@ const csp = [
   "default-src 'self'", "script-src 'self' 'wasm-unsafe-eval'", "worker-src 'self'",
   `connect-src 'self' ${origins.join(" ")}`, "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data:", "object-src 'none'", "frame-ancestors 'none'", "base-uri 'none'",
+  // The Apps view (#91) frames apps that opt in, at any https origin or on this computer (as the
+  // popup serves those too, so app developers can try the real wallet). The app's own
+  // `frame-ancestors` decides whether it loads.
+  "frame-src https: http://localhost:* http://*.localhost:* http://127.0.0.1:*",
 ].join("; ");
 // No Cross-Origin-Opener-Policy: `same-origin` would cut the Provider window (`#/provider`) off from
 // the app that opened it.

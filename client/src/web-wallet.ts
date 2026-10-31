@@ -1,7 +1,9 @@
-// The web wallet as a Provider (#8, #85): a page can't inject one, so the app opens the wallet in a
-// popup at `#/provider` and the two talk over `postMessage`. Each side checks the other's origin as
-// the browser reports it (`event.origin`); the wallet takes the requester from there, never from
-// a message.
+// The web wallet as a Provider (#8, #85, #91): a page can't inject one, so the app reaches the
+// wallet's window over `postMessage`. Either the wallet frames the app (its Apps view, #91) and the
+// app talks to `parent` (./framed.ts), or the app opens the wallet in a popup at `#/provider` (#85).
+// The wallet imports this module too, so it has no side effects. Each side
+// checks the other's origin as the browser reports it (`event.origin`); the wallet takes the
+// requester from there, never from a message.
 import type { Provider, ProviderDetail, ProviderEvents, RequestArguments } from "./index";
 
 /** Tags every message between an app and the web wallet's Provider window. */
@@ -25,8 +27,10 @@ export interface WebWalletRequest {
 }
 
 /**
- * From the app to a Provider window it found already open (e.g. after the app reloaded): asks it
- * to say `ready` again.
+ * Asks the other side to say it's there. From an app: to a Provider window it found already open
+ * (e.g. after the app reloaded), or to the wallet framing it; the wallet answers `ready`. From the
+ * wallet: to the page it frames, after each load, since the frame may now hold another site; a
+ * framed app answers with its own `hello`.
  */
 export interface WebWalletHello {
   channel: typeof WEB_WALLET_CHANNEL;
@@ -49,6 +53,8 @@ const ICON =
 /** How often to check whether the user closed the wallet window. */
 const CLOSED_POLL_MS = 300;
 
+export const HELLO: WebWalletHello = { channel: WEB_WALLET_CHANNEL, type: "hello" };
+
 class ProviderRpcError extends Error {
   constructor(
     readonly code: number,
@@ -59,22 +65,16 @@ class ProviderRpcError extends Error {
 }
 
 /**
- * The web wallet at `walletUrl` as a Provider. The first request opens the wallet's window, so
- * make it from a click: browsers block a popup opened any other way, and the request then fails
- * with 4900. Closing the window disconnects; the next request opens it again, locked.
+ * What both ways in share: requests waiting on the wallet's window, and the replies and events
+ * from it. `current()` is that window, if there is one; only its messages, from `walletOrigin`,
+ * are heard. `reloads`: a second `ready` means the window reloaded, losing what it was answering.
+ * `ready`: the window already said it was.
  */
-export function webWalletProvider(walletUrl: string): ProviderDetail {
-  const url = new URL(walletUrl);
-  url.hash = PROVIDER_ROUTE;
-  const walletOrigin = url.origin;
-
+export function link(walletOrigin: string, current: () => Window | null, { reloads, ready = false }: { reloads: boolean; ready?: boolean }) {
   type Pending = { message: WebWalletRequest; resolve(result: unknown): void; reject(error: Error): void; sent: boolean };
   const pending = new Map<string, Pending>();
   type Listener = (payload: ProviderEvents[keyof ProviderEvents]) => void;
   const listeners = new Map<keyof ProviderEvents, Set<Listener>>();
-  let popup: Window | null = null;
-  let ready = false;
-  let poll: ReturnType<typeof setInterval> | undefined;
 
   function fail(which: (p: Pending) => boolean, message: string) {
     for (const [id, p] of pending) {
@@ -85,19 +85,21 @@ export function webWalletProvider(walletUrl: string): ProviderDetail {
   }
 
   function flush() {
+    const target = current();
+    if (target === null) return;
     for (const p of pending.values()) {
       if (p.sent) continue;
       p.sent = true;
-      popup!.postMessage(p.message, walletOrigin);
+      target.postMessage(p.message, walletOrigin);
     }
   }
 
   window.addEventListener("message", (event: MessageEvent) => {
     const data = event.data as WebWalletReply | undefined;
-    if (popup === null || event.source !== popup || event.origin !== walletOrigin || data?.channel !== WEB_WALLET_CHANNEL) return;
+    const target = current();
+    if (target === null || event.source !== target || event.origin !== walletOrigin || data?.channel !== WEB_WALLET_CHANNEL) return;
     if (data.type === "ready") {
-      // A reloaded window is a new session: what it was answering is gone.
-      if (ready) fail((p) => p.sent, "The wallet window reloaded.");
+      if (ready && reloads) fail((p) => p.sent, "The wallet window reloaded.");
       ready = true;
       flush();
     } else if (data.type === "response") {
@@ -120,15 +122,64 @@ export function webWalletProvider(walletUrl: string): ProviderDetail {
     }
   });
 
+  return {
+    fail,
+    /** The window went away or was replaced: wait for its `ready` again. */
+    unready: () => (ready = false),
+    /** A request for the window `open()` gives (null: the browser blocked it, failing with `blocked`). */
+    provider(open: () => Window | null, blocked: string): Provider {
+      return Object.freeze({
+        request({ method, params }: RequestArguments): Promise<unknown> {
+          return new Promise((resolve, reject) => {
+            const target = open();
+            if (target === null) return reject(new ProviderRpcError(4900, blocked));
+            const id = crypto.randomUUID();
+            pending.set(id, { message: { channel: WEB_WALLET_CHANNEL, type: "request", id, method, params }, resolve, reject, sent: false });
+            if (ready) flush();
+            target.focus();
+          });
+        },
+        on<E extends keyof ProviderEvents>(event: E, listener: (payload: ProviderEvents[E]) => void) {
+          if (!listeners.has(event)) listeners.set(event, new Set());
+          listeners.get(event)!.add(listener as Listener);
+        },
+        removeListener<E extends keyof ProviderEvents>(event: E, listener: (payload: ProviderEvents[E]) => void) {
+          listeners.get(event)?.delete(listener as Listener);
+        },
+      });
+    },
+  };
+}
+
+/** `name` and `rdns`: ours unless given (a framing wallet we can only name by its origin). */
+export function detail(provider: Provider, { name = "ECX Wallet (web)", rdns = "cash.ecx.wallet.web" }: { name?: string; rdns?: string } = {}): ProviderDetail {
+  return Object.freeze({
+    info: Object.freeze({ uuid: crypto.randomUUID(), name, icon: ICON, rdns }),
+    provider,
+  });
+}
+
+/**
+ * The web wallet at `walletUrl` as a Provider. The first request opens the wallet's window, so
+ * make it from a click: browsers block a popup opened any other way, and the request then fails
+ * with 4900. Closing the window disconnects; the next request opens it again, locked.
+ */
+export function webWalletProvider(walletUrl: string): ProviderDetail {
+  const url = new URL(walletUrl);
+  url.hash = PROVIDER_ROUTE;
+  let popup: Window | null = null;
+  let poll: ReturnType<typeof setInterval> | undefined;
+  const wallet = link(url.origin, () => popup, { reloads: true });
+
   /** The wallet's window, opened if it isn't; null if the browser blocked it. */
   function walletWindow(): Window | null {
     if (popup !== null && !popup.closed) return popup;
     // Closed before the poll noticed: what it was answering is gone.
-    if (popup !== null) fail((p) => p.sent, "The wallet window was closed.");
+    if (popup !== null) wallet.fail((p) => p.sent, "The wallet window was closed.");
     // An empty URL finds a window of that name as it is: opening the wallet's URL in one already
     // open would reload it, dropping its session and whatever it was answering.
     popup = window.open("", PROVIDER_WINDOW, "popup,width=420,height=680");
-    ready = false;
+    wallet.unready();
     clearInterval(poll);
     if (popup === null) return null;
     let fresh = false;
@@ -138,44 +189,18 @@ export function webWalletProvider(walletUrl: string): ProviderDetail {
     } catch {
       // Another origin's: the wallet's, already open (e.g. before the app reloaded).
     }
+    // It won't load again, so ask it to say `ready`.
     if (fresh) popup.location.href = url.href;
-    else {
-      // It won't load again, so ask it to say `ready`.
-      const hello: WebWalletHello = { channel: WEB_WALLET_CHANNEL, type: "hello" };
-      popup.postMessage(hello, walletOrigin);
-    }
+    else popup.postMessage(HELLO, url.origin);
     poll = setInterval(() => {
       if (!popup?.closed) return;
       clearInterval(poll);
       popup = null;
-      ready = false;
-      fail(() => true, "The wallet window was closed.");
+      wallet.unready();
+      wallet.fail(() => true, "The wallet window was closed.");
     }, CLOSED_POLL_MS);
     return popup;
   }
 
-  const provider: Provider = Object.freeze({
-    request({ method, params }: RequestArguments): Promise<unknown> {
-      return new Promise((resolve, reject) => {
-        const target = walletWindow();
-        if (target === null) return reject(new ProviderRpcError(4900, "The browser blocked the wallet window. Ask again from a click."));
-        const id = crypto.randomUUID();
-        pending.set(id, { message: { channel: WEB_WALLET_CHANNEL, type: "request", id, method, params }, resolve, reject, sent: false });
-        if (ready) flush();
-        target.focus();
-      });
-    },
-    on<E extends keyof ProviderEvents>(event: E, listener: (payload: ProviderEvents[E]) => void) {
-      if (!listeners.has(event)) listeners.set(event, new Set());
-      listeners.get(event)!.add(listener as Listener);
-    },
-    removeListener<E extends keyof ProviderEvents>(event: E, listener: (payload: ProviderEvents[E]) => void) {
-      listeners.get(event)?.delete(listener as Listener);
-    },
-  });
-
-  return Object.freeze({
-    info: Object.freeze({ uuid: crypto.randomUUID(), name: "ECX Wallet (web)", icon: ICON, rdns: "cash.ecx.wallet.web" }),
-    provider,
-  });
+  return detail(wallet.provider(walletWindow, "The browser blocked the wallet window. Ask again from a click."));
 }

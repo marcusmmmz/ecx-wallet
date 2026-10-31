@@ -116,6 +116,7 @@ test("the shipped modules name their chains, what they're for, and their ECX", a
     network: "betanet",
     assets: [{ id: "", ticker: "ECX", name: "eCash", decimals: 8, ecx: true }],
     sends: false,
+    officialApps: [],
   });
   assert.deepEqual(describeChain(elements), {
     name: "Elements+",
@@ -124,6 +125,7 @@ test("the shipped modules name their chains, what they're for, and their ECX", a
     network: "betanet",
     assets: [{ id: "5836dcc06130dcf6a65b6ac493813fd65559955283e44cc3f07966294eccb2c8", ticker: "ECX", name: "eCash on Elements+", decimals: 8, ecx: true }],
     sends: true,
+    officialApps: ["https://elements-app.invalid"],
     checksNames: "contract",
   });
   // Flush names its assets from their registration (docs/adr/0013); eCash has none to name.
