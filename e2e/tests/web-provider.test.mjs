@@ -1,5 +1,6 @@
-// The web wallet as a Sidechain App's Provider (#85): with no extension to announce one, the app
-// opens the wallet at `#/provider` in a popup and the two talk over postMessage.
+// The web wallet as a Sidechain App's Provider (#85, #91): with no extension to announce one, the
+// app opens the wallet at `#/provider` in a popup, or the wallet frames the app in its Apps view,
+// and the two talk over postMessage.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -21,17 +22,54 @@ const FLUSH = { cors: true, identityBlock: flush.chainEntry().networks.betanet.i
 // The app's own origin: a different site from the wallet's (127.0.0.1).
 const HOST = "webapp.localhost";
 
-/** The demo app (demo/), bundled as its build does, on `demo.localhost`. */
-async function serveDemo() {
+/**
+ * The demo app (demo/), bundled as its build does, on `demo.localhost`. `framedBy`: the wallet
+ * origin it lets frame it, as demo/scripts/serve.mjs does (none: it sends no `frame-ancestors`).
+ */
+async function serveDemo(framedBy) {
   const bundle = await esbuild.build({ entryPoints: [path.join(ROOT, "demo", "src", "main.ts")], bundle: true, format: "esm", target: "es2022", write: false });
   const html = await readFile(path.join(ROOT, "demo", "src", "index.html"), "utf8");
   const server = createServer((request, response) => {
     const js = request.url.split("?")[0] === "/main.js";
-    response.writeHead(200, { "Content-Type": js ? "text/javascript" : "text/html; charset=utf-8" });
+    response.writeHead(200, {
+      "Content-Type": js ? "text/javascript" : "text/html; charset=utf-8",
+      ...(framedBy ? { "Content-Security-Policy": `frame-ancestors ${framedBy}` } : {}),
+    });
     response.end(js ? bundle.outputFiles[0].text : html);
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  return { url: (query) => `http://demo.localhost:${server.address().port}/?${new URLSearchParams(query)}`, close: () => new Promise((resolve) => server.close(resolve)) };
+  return { origin: `http://demo.localhost:${server.address().port}`, url: (query) => `http://demo.localhost:${server.address().port}/?${new URLSearchParams(query)}`, close: () => new Promise((resolve) => server.close(resolve)) };
+}
+
+/**
+ * A page that isn't a Sidechain App, on `plain.localhost`: it loads no client library. `framing`:
+ * its `frame-ancestors` (`'none'`: it refuses every frame).
+ */
+async function servePlainPage(framing) {
+  const server = createServer((request, response) => {
+    response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": `frame-ancestors ${framing}` });
+    response.end("<!doctype html><title>Plain</title><p>Not an app.</p>");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return { url: `http://plain.localhost:${server.address().port}/`, close: () => new Promise((resolve) => server.close(resolve)) };
+}
+
+/** Waits for an approval drawn over the Apps view to finish rising into place, so a click lands on it. */
+async function overlaySettled(page) {
+  await approvalIn(page, { timeout: 20_000 });
+  await waitForFunction(page, risen, { timeout: 10_000 }, "[data-app-approval] [data-approve]");
+}
+
+/** In the page: `selector` is there, and the overlay's entrance animations (not looping ones) are done. */
+function risen(selector) {
+  const overlay = document.querySelector("[data-app-approval]");
+  return Boolean(document.querySelector(selector)) && overlay.getAnimations({ subtree: true }).every((a) => a.playState !== "running" || a.effect.getComputedTiming().iterations === Infinity);
+}
+
+/** The wallet page's frame once it holds a page of `origin`. */
+async function frameOf(page, origin) {
+  await waitForFunction(page, (o) => document.querySelector("[data-app-frame]")?.src.startsWith(o), { timeout: 10_000 }, origin);
+  return page.waitForFrame((frame) => frame.url().startsWith(origin), { timeout: 10_000 });
 }
 
 for (const browserName of BROWSERS) describe(`${browserName}: web Provider`, () => {
@@ -160,6 +198,78 @@ for (const browserName of BROWSERS) describe(`${browserName}: web Provider`, () 
     } finally {
       await session.close();
       await demo.close();
+    }
+  });
+
+  test("an app opened in the Apps view connects with no popup: refused, then approved and unlocked over the frame, which stays mounted", async () => {
+    const demo = await serveDemo(new URL(web.url).origin);
+    const session = await launchWebWallet(browserName);
+    try {
+      await importOnWebOrigin(session);
+      const page = await session.browser.newPage();
+      const errors = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      await page.goto(`${web.url}#/apps?url=${encodeURIComponent(demo.url({ wallet: web.url, slot: 99 }))}`);
+      const app = await frameOf(page, demo.origin);
+      await waitForFunction(page, () => document.querySelector("[data-app-origin]")?.textContent, { timeout: 10_000 });
+      assert.equal(await page.$eval("[data-app-origin]", (e) => e.textContent), demo.origin);
+      await waitForFunction(app, () => document.querySelector("[data-connect]")?.disabled === false, { timeout: 10_000 });
+      // Named by the origin that frames it: any wallet speaking the protocol would be found.
+      assert.equal(await app.$eval("[data-wallet]", (e) => e.textContent), `Wallet at ${new URL(web.url).origin}`);
+      // Marks this document: a reload of the frame would lose it.
+      await app.evaluate(() => (window.mounted = true));
+
+      await app.click("[data-connect]");
+      await overlaySettled(page);
+      assert.ok(await page.$("[data-app-approval] [data-approval-ready]"), "the approval is drawn over the frame");
+      await page.click("[data-reject]");
+      await waitForFunction(app, () => /rejected/.test(document.querySelector("[data-status]")?.textContent ?? ""), { timeout: 10_000 });
+      assert.equal(await page.$("[data-app-approval]"), null);
+
+      await app.click("[data-connect]");
+      await overlaySettled(page);
+      await page.click("[data-approve]");
+      await page.waitForSelector("[data-app-approval] [data-unlock-required]", { timeout: 20_000 });
+      await waitForFunction(page, risen, { timeout: 10_000 }, "[data-app-approval] [data-unlock]");
+      await page.type("[data-password]", WALLET_PASSWORD);
+      await page.click("[data-unlock]");
+      await waitForFunction(app, () => document.querySelector("[data-address]")?.textContent !== "", { timeout: 20_000 });
+      assert.equal(await app.$eval("[data-address]", (e) => e.textContent), ADDRESS);
+      assert.equal(await app.evaluate(() => window.mounted ?? null), true);
+      assert.equal(await page.$("[data-app-approval]"), null);
+      assert.equal((await session.browser.pages()).some((p) => p.url().includes("#/provider")), false, "no popup opened");
+
+      await app.click("[data-disconnect]");
+      await app.waitForSelector("[data-connect]", { visible: true, timeout: 10_000 });
+      assert.deepEqual(errors, []);
+    } finally {
+      await session.close();
+      await demo.close();
+    }
+  });
+
+  test("the Apps view forgets the app's origin when its frame goes to another page, and says when a page doesn't connect", async () => {
+    const demo = await serveDemo(new URL(web.url).origin);
+    const [opted, refusing] = await Promise.all([servePlainPage(new URL(web.url).origin), servePlainPage("'none'")]);
+    const session = await launchWebWallet(browserName);
+    try {
+      const page = await session.browser.newPage();
+      await page.goto(`${web.url}#/apps?url=${encodeURIComponent(demo.url({ wallet: web.url, slot: 99 }))}`);
+      const app = await frameOf(page, demo.origin);
+      await waitForFunction(page, () => document.querySelector("[data-app-origin]")?.textContent, { timeout: 10_000 });
+      // The app sends its frame to a page that allows the wallet to frame it but says nothing.
+      await app.evaluate((url) => (location.href = url), opted.url);
+      await page.waitForSelector("[data-app-origin-unknown]", { timeout: 10_000 });
+      await page.waitForSelector("[data-app-silent]", { timeout: 10_000 });
+      assert.equal(await page.$("[data-app-origin]"), null);
+
+      // A page that refuses every frame never loads there.
+      await page.goto(`${web.url}#/apps?url=${encodeURIComponent(refusing.url)}`);
+      await page.waitForSelector("[data-app-silent]", { timeout: 10_000 });
+      assert.equal(await page.$("[data-app-origin]"), null);
+    } finally {
+      await session.close();
+      await Promise.all([demo.close(), opted.close(), refusing.close()]);
     }
   });
 

@@ -16,6 +16,11 @@ export const approvalRouteChanged = (_path: string): void => {};
 export const closeApproval = () => window.close();
 /** The web build's Provider window; the extension injects its Provider instead. */
 export const serveOpener = (_onAppOrigin: (origin: string) => void): boolean => false;
+/** The web build's Apps view (#91); the extension's pages frame no apps. */
+export const canFrameApps = false;
+export const serveFrame = (_frame: HTMLIFrameElement, _on: { origin: (origin: string | undefined) => void; loaded: () => void }): (() => void) => () => {};
+export const hostApprovals = (_show: (id: string | undefined) => void): (() => void) => () => {};
+export const closeOverlayApproval = (_id: string): void => {};
 
 export type View = "popup" | "panel" | "page";
 

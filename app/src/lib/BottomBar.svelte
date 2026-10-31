@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from "$app/state";
+  import { canFrameApps } from "$platform";
   import Icon from "$lib/Icon.svelte";
   import { nav, pathOf, type Tab } from "$lib/nav.svelte";
 
@@ -47,6 +48,12 @@
       <span>Activity</span>
     </a>
   </div>
+  {#if canFrameApps}
+    <a class="bar-item" href="#/apps" aria-current={route === "/apps" ? "page" : undefined} data-nav="apps" data-apps-link>
+      <Icon name="apps" size={20} />
+      <span>Apps</span>
+    </a>
+  {/if}
   <a class="bar-item" href="#/chains" aria-current={route === "/chains" ? "page" : undefined} data-nav="chains" data-chains-link-bar>
     <Icon name="layers" size={20} />
     <span>Chains</span>

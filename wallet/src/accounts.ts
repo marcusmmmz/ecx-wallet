@@ -88,6 +88,8 @@ export interface ChainDescription {
    * (Elements, `assetContract` over Esplora) or its registration (Flush, `tokens`; docs/adr/0013).
    */
   checksNames?: "contract" | "registration";
+  /** The network's Official App origins. */
+  officialApps: string[];
 }
 
 export function describeChain(module: ChainModule<never>): ChainDescription {
@@ -98,7 +100,7 @@ export function describeChain(module: ChainModule<never>): ChainDescription {
   const { api } = network.sidechainServer;
   const checksNames =
     api === "esplora" && capabilities.includes("assetContract") ? "contract" : api === "flush" && capabilities.includes("tokens") ? "registration" : undefined;
-  return { name: entry.name, description: entry.description, chain, network: key, assets: network.assets, sends, ...(checksNames ? { checksNames } : {}) };
+  return { name: entry.name, description: entry.description, chain, network: key, assets: network.assets, sends, officialApps: network.officialApps, ...(checksNames ? { checksNames } : {}) };
 }
 
 /** True if a sidechain can Send through this wallet: its server builds, or its module does over Esplora (Flush's included). */
