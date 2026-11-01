@@ -102,6 +102,8 @@ export type BackgroundMessage =
   | { kind: "deposit.list"; slot: number; unattended?: boolean }
   | { kind: "deposit.dismiss"; txid: string }
   | { kind: "deposit.refused"; slot: number }
+  /** Sats of confirmed main-chain coins the server lists but a Send or Deposit holds. */
+  | { kind: "deposit.held"; unattended?: boolean }
   | { kind: "deposit.dismissRefused"; slot: number }
   // Vault: accepted only from the wallet's own pages.
   | { kind: "vault.status" }

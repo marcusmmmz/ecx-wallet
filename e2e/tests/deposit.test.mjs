@@ -412,7 +412,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
 
       // Its coin stays held until the server has forgotten the M5 for 6 blocks: it may still be out there.
       const held = await startDeposit(session, "5000");
-      assert.match((await outcome(held)).error, /^Not enough confirmed eCash: .* the wallet has 0\.$/);
+      assert.match((await outcome(held)).error, /^Not enough confirmed eCash: .* the wallet has 0\. 250000 sats more are held by a Send or Deposit waiting to confirm\.$/);
       await held.close();
       L1.tipHeight += 6;
       const released = await startDeposit(session, "5000");

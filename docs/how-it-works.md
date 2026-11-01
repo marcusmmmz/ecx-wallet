@@ -184,7 +184,7 @@ A ticker of the Chain Entry's, in any case, is refused, with the reason shown. A
 
 ## Deposit
 
-**What the user sees:** home's "Deposit to" sheet, or a Slot's own screen, opens `#/deposit/<slot>` (`deposit.start`). A Deposit moves coins from eCash into the Slot.
+**What the user sees:** home's "Deposit to" sheet, or a Slot's own screen, opens `#/deposit/<slot>` (`deposit.start`). A Deposit moves coins from eCash into the Slot. The screen shows the confirmed balance eCash's server reports, less the coins a Send or Deposit holds that the server still lists (`deposit.held`, on a line of its own); a Deposit refused for want of coins says how many sats are held.
 
 **How** (`wallet/src/deposit.ts`, #31, ADR 0004):
 

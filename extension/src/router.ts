@@ -699,6 +699,9 @@ export function createRouter<Sender>(host: RouterHost<Sender>) {
         if (!host.requester(sender).walletPage) throw new ProviderRpcError(ErrorCode.Unauthorized, "Unknown requester.");
         await deposits.dismiss(String(message.txid ?? ""));
         return null;
+      case "deposit.held":
+        if (!host.requester(sender).walletPage) throw new ProviderRpcError(ErrorCode.Unauthorized, "Unknown requester.");
+        return byItself(message, () => deposits.held());
       case "deposit.refused":
         // The Slot's last Deposit that failed after approval, for the home page: its page may be gone.
         if (!host.requester(sender).walletPage) throw new ProviderRpcError(ErrorCode.Unauthorized, "Unknown requester.");
