@@ -92,7 +92,7 @@
       {/if}
     </div>
     <div class="panel" role="tabpanel" hidden={tab !== "activity"}>
-      <ActivityFeed {chains} views={[view]} slots={id === "l1" ? [] : [view]} active={tab === "activity"} />
+      <ActivityFeed {chains} views={[view]} spenders={[view]} active={tab === "activity"} />
     </div>
   {/if}
 

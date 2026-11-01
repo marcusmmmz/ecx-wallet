@@ -23,7 +23,7 @@ export interface Binding {
 export interface Declaration {
   binding: Binding;
   /**
-   * Optional capabilities: `depositDestination`, `buildTransfer` and `assetContract` (a Slot's), `buildDeposit` (L1's),
+   * Optional capabilities: `depositDestination` and `assetContract` (a Slot's), `buildTransfer` (a Slot's or L1's), `buildDeposit` (L1's),
    * `tokens` and `trades` (Flush's).
    */
   capabilities: string[];
@@ -268,7 +268,7 @@ export type RefusalCode =
   | "wrongGenesis"
   | "confidential"
   | "missingInputFields"
-  /** No input in the request is the Starter's: signing would change nothing. */
+  /** No input in the request is the module's key's (a Starter, or the L1 Account Key): signing would change nothing. */
   | "nothingToSign"
   /** The request's evidence doesn't check out against the payload (docs/adr/0009). */
   | "invalidEvidence"
@@ -562,8 +562,8 @@ export interface L1Module extends ChainModule<L1AccountKey> {
   treasuryScript(slot: number): string;
   /** A raw transaction's (hex) txid. Throws CoreModuleError if it isn't one. */
   txid(tx: string): string;
-  /** An unsigned M5 (base64 PSBT). Throws ChainModuleRefusal (e.g. `insufficientFunds`). */
-  buildDeposit(order: DepositOrder, key: L1AccountKey): string;
+  /** An unsigned M5 (base64 PSBT) and the account's coins it spends. Throws ChainModuleRefusal (e.g. `insufficientFunds`). */
+  buildDeposit(order: DepositOrder, key: L1AccountKey): { psbt: string; spent: { txid: string; vout: number }[] };
 }
 
 /** Turns a module's JSON error result into a ChainModuleRefusal. */
@@ -617,6 +617,6 @@ export async function loadL1Module(bytes: BufferSource): Promise<L1Module> {
     ...module,
     treasuryScript: (slot) => m.callText("treasury_script", slot),
     txid: (tx) => m.callText("txid", tx),
-    buildDeposit: (order, key) => refusals(() => json<{ psbt: string }>("build_deposit", JSON.stringify(order), key).psbt),
+    buildDeposit: (order, key) => refusals(() => json<{ psbt: string; spent: { txid: string; vout: number }[] }>("build_deposit", JSON.stringify(order), key)),
   };
 }

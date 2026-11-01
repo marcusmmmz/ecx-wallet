@@ -11,6 +11,7 @@ import {
   createProviderHandler,
   createPullPath,
   createSends,
+  createSpendQueue,
   createSettings,
   describeChain,
   servedNetwork,
@@ -33,6 +34,7 @@ import {
   type Grant,
   type HeldSpend,
   type HeldStore,
+  type ChainId,
   type TransferOutput,
   type UsedLinks,
   type GrantStore,
@@ -172,7 +174,7 @@ export function createRouter<Sender>(host: RouterHost<Sender>) {
     },
   };
 
-  // Coins a broadcast Send spent, held back from later Sends until it confirms (wallet/src/send.ts).
+  // Coins a broadcast Send (or a main-chain Deposit) spent, held back from later ones until it confirms (wallet/src/spends.ts).
   const HELD_PREFIX = "held:";
 
   const heldStore: HeldStore = {
@@ -471,6 +473,9 @@ export function createRouter<Sender>(host: RouterHost<Sender>) {
   /** A client for a network's default server, which speaks Esplora (Flush's included). */
   const esplora = (entry: ChainEntry, network: NetworkEntry) => esploraClient(esploraConfig(entry, network, sessionCache), (...args) => fetch(...args));
 
+  /** Each chain's spends, one at a time: the main chain's Sends and Deposits share one queue. */
+  const spendQueue = createSpendQueue();
+
   // Deposits: the L1 module builds the M5 from the wallet's own coins, over eCash's Esplora.
   const deposits = createDeposits({
     ...keys,
@@ -480,6 +485,8 @@ export function createRouter<Sender>(host: RouterHost<Sender>) {
     isUnlocked: signing.isUnlocked,
     esplora,
     store: depositStore,
+    held: heldStore,
+    queue: spendQueue,
     cache: sessionCache,
     now: () => Date.now(),
   });
@@ -491,10 +498,13 @@ export function createRouter<Sender>(host: RouterHost<Sender>) {
     add: (digest) => host.session.set(`usedLink:${digest}`, true),
   };
 
-  const sends = createSends({ ...keys, chainModule, l1Module, pullPath, esplora, openSigningApproval, isUnlocked: signing.isUnlocked, held: heldStore, usedLinks, cache: sessionCache, now: () => Date.now() });
+  const sends = createSends({ ...keys, chainModule, l1Module, pullPath, esplora, openSigningApproval, isUnlocked: signing.isUnlocked, held: heldStore, queue: spendQueue, usedLinks, cache: sessionCache, now: () => Date.now() });
 
   /** The page a wallet page's request names to show its approval (`APPROVAL_HOST_PORT`), if any. */
   const hostOf = (message: { host?: unknown }) => (typeof message.host === "string" && message.host !== "" ? message.host : undefined);
+
+  /** The chain a wallet page's Send names: its `slot` (on, as `onSlot`), or the main chain without one. */
+  const sendChain = async (slot: unknown): Promise<ChainId> => (slot === undefined ? "l1" : onSlot(slot));
 
   /** A wallet page's `slot`, if the wallet has a Chain Module for it. */
   function supportedSlot(slot: unknown): number {
@@ -660,20 +670,20 @@ export function createRouter<Sender>(host: RouterHost<Sender>) {
         // The wallet's own Send: resolves once broadcast, or once a `/v1` server accepted it.
         if (!host.requester(sender).walletPage) throw new ProviderRpcError(ErrorCode.Unauthorized, "Unknown requester.");
         {
-          const slot = await onSlot(message.slot);
-          return announcing([slot], sends.send(slot, { outputs: Array.isArray(message.outputs) ? (message.outputs as TransferOutput[]) : [] }, undefined, hostOf(message)));
+          const chain = await sendChain(message.slot);
+          return announcing([chain], sends.send(chain, { outputs: Array.isArray(message.outputs) ? (message.outputs as TransferOutput[]) : [] }, undefined, hostOf(message)));
         }
       case "send.spendable":
-        // What a Send on the Slot can spend now, per asset.
+        // What a Send on the Slot (or, without one, the main chain) can spend now, per asset.
         if (!host.requester(sender).walletPage) throw new ProviderRpcError(ErrorCode.Unauthorized, "Unknown requester.");
-        return sends.spendable(await onSlot(message.slot));
+        return sends.spendable(await sendChain(message.slot));
       case "send.refused":
-        // The Slot's last Send that failed after approval, for the Activity feed: its page may be gone.
+        // The chain's last Send that failed after approval, for the Activity feed: its page may be gone.
         if (!host.requester(sender).walletPage) throw new ProviderRpcError(ErrorCode.Unauthorized, "Unknown requester.");
-        return (await sends.refused(supportedSlot(message.slot))) ?? null;
+        return (await sends.refused(message.slot === undefined ? "l1" : supportedSlot(message.slot))) ?? null;
       case "send.dismissRefused":
         if (!host.requester(sender).walletPage) throw new ProviderRpcError(ErrorCode.Unauthorized, "Unknown requester.");
-        await sends.dismissRefused(supportedSlot(message.slot));
+        await sends.dismissRefused(message.slot === undefined ? "l1" : supportedSlot(message.slot));
         return null;
       case "deposit.start":
         // Resolves once the M5 is broadcast (after the user's approval).

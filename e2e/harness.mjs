@@ -554,7 +554,7 @@ export async function activitySettled(page) {
 /**
  * Waits until the unlocked home page's requests have settled: a section for each chain that's on,
  * each with its fresh balance (not this session's last one, shown while refreshing) or why there
- * is none, and each Slot's with its Deposits. Close
+ * is none, with its refused Send read, and each Slot's with its Deposits. Close
  * the page only after: a reply to a closed page makes Firefox log, and each request derives a key,
  * which counts as Vault activity.
  */
@@ -567,7 +567,7 @@ export async function homeSettled(page) {
       const settled = (card) =>
         !card.hasAttribute("data-refreshing") &&
         card.querySelector("[data-balance], [data-no-balance], [data-balance-error]") !== null &&
-        (card.getAttribute("data-account") === "l1" || card.hasAttribute("data-deposits-ready"));
+        card.hasAttribute("data-deposits-ready");
       return cards.length > 0 && cards.every(settled);
     },
     { timeout: 20_000 },

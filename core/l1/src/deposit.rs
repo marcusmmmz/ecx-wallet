@@ -24,7 +24,7 @@ use crate::{hex, network, AccountKeys};
 
 /// Every input's `nSequence`: non-final (the replay marker) and opting in to replacement, as
 /// Bitcoin Core's wallet does.
-const SEQUENCE: Sequence = Sequence::ENABLE_RBF_NO_LOCKTIME;
+pub(crate) const SEQUENCE: Sequence = Sequence::ENABLE_RBF_NO_LOCKTIME;
 
 /// Change below this is left to the fee rather than paid to a change address.
 const MIN_CHANGE: u64 = 546;
@@ -85,6 +85,17 @@ pub struct PrevOut {
 pub struct Built {
     /// Base64.
     pub psbt: String,
+    /// The account's coins it spends (not the Treasury): what the wallet holds back from later spends.
+    pub spent: Vec<Spent>,
+}
+
+/// One of the account's outputs a built transaction spends.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Spent {
+    /// Display hex.
+    pub txid: String,
+    pub vout: u32,
 }
 
 /// The Treasury script of `slot` on this network, hex: what the wallet looks the Treasury up by.
@@ -98,16 +109,43 @@ pub fn txid(tx: &str) -> Result<String, String> {
     deserialize_hex::<Transaction>(tx).map(|tx| tx.compute_txid().to_string()).map_err(|e| format!("not a transaction: {e}"))
 }
 
-struct Spendable {
-    outpoint: OutPoint,
-    tx: Transaction,
-    txout: TxOut,
-    chain: u32,
-    index: u32,
+/// One of the account's coins, read from its transaction.
+pub(crate) struct Spendable {
+    pub outpoint: OutPoint,
+    pub tx: Transaction,
+    pub txout: TxOut,
+    pub chain: u32,
+    pub index: u32,
 }
 
-fn malformed(message: impl Into<String>) -> Refusal {
+pub(crate) fn malformed(message: impl Into<String>) -> Refusal {
     refuse(RefusalCode::Malformed, message)
+}
+
+/// `coins` read from their transactions, largest first: each must pay the account's address it
+/// names, and none may be listed twice.
+pub(crate) fn read_coins(coins: &[Coin], keys: &AccountKeys) -> Result<Vec<Spendable>, Refusal> {
+    let mut read: Vec<Spendable> = vec![];
+    for (i, coin) in coins.iter().enumerate() {
+        let tx = parse_tx(&coin.tx, &format!("Coin {i}'s transaction"))?;
+        let txout = tx.output.get(coin.vout as usize).cloned().ok_or_else(|| malformed(format!("Coin {i}'s transaction has no output {}.", coin.vout)))?;
+        let ours = (coin.chain <= 1).then(|| keys.script(coin.chain, coin.index).ok()).flatten();
+        if ours.as_ref() != Some(&txout.script_pubkey) {
+            return Err(malformed(format!("Coin {i} doesn't pay this account's address {}/{}.", coin.chain, coin.index)));
+        }
+        let outpoint = OutPoint { txid: tx.compute_txid(), vout: coin.vout };
+        if read.iter().any(|c| c.outpoint == outpoint) {
+            return Err(malformed(format!("Coin {i} is listed twice.")));
+        }
+        read.push(Spendable { outpoint, tx, txout, chain: coin.chain, index: coin.index });
+    }
+    read.sort_by(|a, b| b.txout.value.cmp(&a.txout.value).then(a.outpoint.cmp(&b.outpoint)));
+    Ok(read)
+}
+
+/// What `chosen` spends, as `Built` names it.
+pub(crate) fn spent_by(chosen: &[Spendable]) -> Vec<Spent> {
+    chosen.iter().map(|coin| Spent { txid: coin.outpoint.txid.to_string(), vout: coin.outpoint.vout }).collect()
 }
 
 fn parse_tx(tx: &str, what: &str) -> Result<Transaction, Refusal> {
@@ -123,21 +161,7 @@ pub fn build_deposit(order_json: &str, account_key: &str) -> Result<Built, Refus
         .and_then(|d| PushBytesBuf::try_from(d).ok())
         .ok_or_else(|| malformed(format!("The destination must be 1 to {MAX_DESTINATION_BYTES} bytes of hex.")))?;
 
-    let mut coins = order
-        .coins
-        .iter()
-        .enumerate()
-        .map(|(i, coin)| {
-            let tx = parse_tx(&coin.tx, &format!("Coin {i}'s transaction"))?;
-            let txout = tx.output.get(coin.vout as usize).cloned().ok_or_else(|| malformed(format!("Coin {i}'s transaction has no output {}.", coin.vout)))?;
-            let ours = (coin.chain <= 1).then(|| keys.script(coin.chain, coin.index).ok()).flatten();
-            if ours.as_ref() != Some(&txout.script_pubkey) {
-                return Err(malformed(format!("Coin {i} doesn't pay this account's address {}/{}.", coin.chain, coin.index)));
-            }
-            Ok(Spendable { outpoint: OutPoint { txid: tx.compute_txid(), vout: coin.vout }, tx, txout, chain: coin.chain, index: coin.index })
-        })
-        .collect::<Result<Vec<_>, Refusal>>()?;
-    coins.sort_by(|a, b| b.txout.value.cmp(&a.txout.value).then(a.outpoint.cmp(&b.outpoint)));
+    let coins = read_coins(&order.coins, &keys)?;
 
     let treasury_script = treasury_script_of(order.slot);
     let treasury = order
@@ -237,5 +261,5 @@ fn psbt(
         let pubkey = keys.public_key(1, index).map_err(|e| refuse(RefusalCode::InvalidAccountKey, e))?;
         psbt.outputs[2] = Output { bip32_derivation: [(pubkey, (keys.fingerprint, keys.path(1, index)))].into(), ..Output::default() };
     }
-    Ok(Built { psbt: psbt.to_string() })
+    Ok(Built { psbt: psbt.to_string(), spent: spent_by(chosen) })
 }

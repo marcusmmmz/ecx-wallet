@@ -15,11 +15,15 @@ use crate::decode::{classify_input, InputKind};
 use crate::psbt::{refuse, spent, treasury_slot, validated, Refusal, RefusalCode};
 use crate::AccountKeys;
 
-/// Refuses exactly what `decode` refuses. Signs P2WPKH inputs with SIGHASH_ALL only.
+/// Refuses what `decode` refuses, and a PSBT with no input of the key's (`NothingToSign`): it would
+/// come back unchanged and fail only at broadcast. Signs P2WPKH inputs with SIGHASH_ALL only.
 pub fn sign(payload: &str, account_key: &str) -> Result<String, Refusal> {
     let mut psbt = validated(payload)?;
     let keys = AccountKeys::new(account_key).map_err(|e| refuse(RefusalCode::InvalidAccountKey, e))?;
     let kinds: Vec<_> = (0..psbt.inputs.len()).map(|i| classify_input(&keys, &psbt.inputs[i], spent(&psbt, i))).collect();
+    if !kinds.iter().any(|kind| matches!(kind, InputKind::Yours { .. })) {
+        return Err(refuse(RefusalCode::NothingToSign, "No input of this PSBT is this wallet's: there is nothing to sign."));
+    }
 
     let mut signatures = vec![];
     let mut cache = SighashCache::new(&psbt.unsigned_tx);

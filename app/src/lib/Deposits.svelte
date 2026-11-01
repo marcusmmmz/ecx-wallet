@@ -1,19 +1,21 @@
 <script lang="ts">
   import { dismissDeposit, dismissRefusedDeposit, dismissRefusedSend } from "$lib/background";
+  import type { ChainId } from "$lib/background";
   import { depositState, type ChainView } from "$lib/chains.svelte";
   import Icon from "$lib/Icon.svelte";
   import { amountText } from "$lib/unit.svelte";
 
   /**
-   * The Deposits in progress to `slots`, and each one's last Deposit and Send that failed after approval.
+   * The Deposits in progress to `spenders`, and each one's last Deposit and Send that failed after
+   * approval: every Slot, and the main chain (a Send only).
    * `ecx` names the main chain's coin, in which a Deposit's value is counted.
    */
-  let { slots, ecx, onchange }: { slots: ChainView[]; ecx: ChainView["info"]["assets"]; onchange: (slot: number) => void } = $props();
+  let { spenders, ecx, onchange }: { spenders: ChainView[]; ecx: ChainView["info"]["assets"]; onchange: (chain: ChainId) => void } = $props();
 
-  const list = $derived(slots.flatMap((s) => (Array.isArray(s.deposits) ? s.deposits : [])));
-  const errors = $derived(slots.flatMap((s) => (s.deposits !== undefined && "error" in s.deposits ? [{ name: s.info.name, error: s.deposits.error }] : [])));
-  const refused = $derived(slots.flatMap((s) => (s.refused ? [s.refused] : [])));
-  const refusedSends = $derived(slots.flatMap((s) => (s.refusedSend ? [{ failed: s.refusedSend, assets: s.info.assets }] : [])));
+  const list = $derived(spenders.flatMap((s) => (Array.isArray(s.deposits) ? s.deposits : [])));
+  const errors = $derived(spenders.flatMap((s) => (s.deposits !== undefined && "error" in s.deposits ? [{ name: s.info.name, error: s.deposits.error }] : [])));
+  const refused = $derived(spenders.flatMap((s) => (s.refused ? [s.refused] : [])));
+  const refusedSends = $derived(spenders.flatMap((s) => (s.refusedSend ? [{ failed: s.refusedSend, assets: s.info.assets }] : [])));
   /** The main-chain confirmations the listed Deposits wait for, if they all wait for the same. */
   const depositConfirmations = $derived.by(() => {
     const each = new Set(list.flatMap((d) => ("depositConfirmations" in d ? [d.depositConfirmations] : [])));
@@ -31,9 +33,9 @@
     return outputs.length === 1 ? `of ${amountText(outputs[0].amount, outputs[0].asset, assets)}` : `to ${outputs.length} recipients`;
   }
 
-  async function closeRefusedSend(slot: number) {
-    await dismissRefusedSend(slot).catch(() => {});
-    onchange(slot);
+  async function closeRefusedSend(chain: ChainId) {
+    await dismissRefusedSend(chain).catch(() => {});
+    onchange(chain);
   }
 
   async function closeRefused(slot: number) {

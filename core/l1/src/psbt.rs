@@ -33,12 +33,17 @@ pub enum RefusalCode {
     MissingInputFields,
     /// Not replay-marked: the `nLockTime` isn't the network's, or an input's `nSequence` is final.
     NoReplayMarker,
+    /// `sign`: no input is the L1 Account Key's, so signing would change nothing. Only the wallet's
+    /// own builders reach `sign`, so this is a wallet bug.
+    NothingToSign,
     /// The key handed in isn't an L1 Account Key (a wallet bug, not the requester's).
     InvalidAccountKey,
-    /// `build_deposit`: the coins don't cover the amount and its fee.
+    /// `build_deposit`, `build_transfer`: the coins don't cover the amounts and the fee.
     InsufficientFunds,
     /// `build_deposit`: the M5 would take more coins than eCash relays a Deposit with (vB).
     TooLarge,
+    /// `build_transfer`: a payment is below what eCash relays to its address.
+    Dust,
 }
 
 pub(crate) fn refuse(code: RefusalCode, message: impl Into<String>) -> Refusal {

@@ -131,6 +131,8 @@ for (const browserName of BROWSERS) describe(browserName, () => {
     await home.click('[data-nav="activity"]');
     await home.waitForSelector('[data-tab="activity"][aria-selected="true"]', { timeout: 10_000 });
     assert.equal(await home.$eval("[data-activity]", (e) => e.closest("[hidden]") === null), true, "home opened on Activity");
+    // Coming back, home reads every chain again: closing it before those answer is a Firefox runtime error.
+    await homeSettled(home);
     await home.close();
   });
 

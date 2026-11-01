@@ -122,7 +122,8 @@ export {
   type SendResult,
   type SlotReport,
 } from "./pull-path";
-export { createSends, HOLD_BLOCKS, sendRequester, type HeldSpend, type HeldStore, type RefusedSend, type SendDeps, type Sends } from "./send";
+export { createSends, sendRequester, type RefusedSend, type SendDeps, type Sends } from "./send";
+export { createSpendQueue, HOLD_BLOCKS, type ChainId, type HeldSpend, type HeldStore, type SpendQueue } from "./spends";
 export { LINK_NETWORKS, linkDigest, type UsedLinks } from "./flush-links";
 export type { TradeStore } from "./flush-trades";
 export { CACHE_PREFIX, cacheKey, type SessionCache } from "./cache";

@@ -427,6 +427,13 @@ test("web Workers serialize Sends and Deposits across pages and release the lock
     await tick();
     assert.deepEqual(routed.slice(-1), [[1, "deposit.start"]], "a form closed while queued never reaches the router");
     assert.equal(responses.find((r) => r.id === 5).response.error.code, 4001);
+    // The main chain's Send names no Slot: it spends L1 coins, under the Deposits' lock.
+    send(1, 20, "send.start", { slot: undefined });
+    await tick();
+    assert.equal(locks.at(-1), "ecx-wallet:spend:l1", "a main-chain Send shares the Deposits' lock");
+    waiting.at(-1).resolve({ txid: "sent on l1" });
+    await tick();
+    assert.deepEqual(responses.find((r) => r.id === 20).response, { ok: true, result: { txid: "sent on l1" } });
 
     // An app's Send through a Provider window queues behind the page's own Send on the same Slot.
     const app = (page, id, method, params) => receivers[page - 1]({ data: { type: "appRequest", id, origin: "https://app.example", method, params } });

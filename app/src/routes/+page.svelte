@@ -187,7 +187,7 @@
           data-account={c.info.id}
           data-refreshing={c.shown.refreshing ? "" : undefined}
           data-server={c.shown.report?.server}
-          data-deposits-ready={c.info.id === "l1" || (c.deposits !== undefined && c.refused !== undefined) ? "" : undefined}
+          data-deposits-ready={c.refusedSend !== undefined && (c.info.id === "l1" || (c.deposits !== undefined && c.refused !== undefined)) ? "" : undefined}
         >
           <div class="chain-head">
             <a class="chain-name" href="#/chain/{c.info.id}" data-chain-link>
@@ -222,7 +222,7 @@
 
     <div class="panel" role="tabpanel" hidden={nav.tab !== "activity"}>
       {#if chains}
-        <ActivityFeed {chains} views={list} {slots} active={nav.tab === "activity"} chips />
+        <ActivityFeed {chains} views={list} spenders={chains.all ?? []} active={nav.tab === "activity"} chips />
       {/if}
     </div>
   {/if}

@@ -2,13 +2,15 @@
   import { page } from "$app/state";
   import { parseAmount } from "@ecx/wallet";
   import { assetTrust, shortAsset } from "$lib/asset";
-  import { hostApprovals, listChains, spendable, startSend, type AssetAmount, type ChainInfo, type SendResult } from "$lib/background";
+  import { hostApprovals, listChains, spendable, startSend, type AssetAmount, type ChainId, type ChainInfo, type SendResult } from "$lib/background";
   import Approval from "$lib/Approval.svelte";
   import Icon from "$lib/Icon.svelte";
   import TopBar from "$lib/TopBar.svelte";
   import { amountText, unit } from "$lib/unit.svelte";
 
-  const slot = Number(page.params.slot);
+  /** A Slot, or "l1": the main chain sends from this screen too (#40). */
+  const slot: ChainId = page.params.slot === "l1" ? "l1" : Number(page.params.slot);
+  const main = slot === "l1";
   let info = $state<ChainInfo | undefined>(undefined);
   const assets = $derived(info?.assets ?? []);
 
@@ -175,7 +177,7 @@
             <input inputmode="decimal" bind:value={row.amount} data-send-amount />
           </label>
           <label>
-            Destination address
+            {main ? "eCash address" : "Destination address"}
             <input class="mono" bind:value={row.address} autocomplete="off" spellcheck="false" data-send-destination />
           </label>
         </div>
@@ -186,6 +188,12 @@
       {#each overspent as asset (asset)}
         <p class="error" role="alert" data-send-overspent>These recipients add up to more {nameOf(asset)} than the wallet can spend.</p>
       {/each}
+      {#if main}
+        <p class="muted small" data-send-ecash-note>
+          eCash addresses look like Bitcoin's (<code>bc1…</code>, <code>1…</code>, <code>3…</code>). This sends ECX on eCash; nothing arrives
+          on Bitcoin.
+        </p>
+      {/if}
       <p class="muted small">
         Spendable is confirmed, plus change from your own sends. You review exactly what will be sent, decoded by this
         wallet, before anything is signed.

@@ -50,12 +50,23 @@ pub unsafe extern "C" fn txid(tx: *const u8, tx_len: usize) -> i32 {
     ret_text(text(tx, tx_len).and_then(ecx_l1::txid))
 }
 
-/// Deposit order (JSON) + L1 Account Key → `{ psbt }` (an unsigned M5) as JSON, or a refusal.
+/// Deposit order (JSON) + L1 Account Key → `{ psbt, spent }` (an unsigned M5 and the account's coins
+/// it spends) as JSON, or a refusal.
 #[no_mangle]
 pub unsafe extern "C" fn build_deposit(order: *const u8, order_len: usize, key: *const u8, key_len: usize) -> i32 {
     ret_text(text(order, order_len).and_then(|o| {
         let k = text(key, key_len)?;
         ecx_l1::build_deposit(o, k).map_err(refusal).and_then(|b| json(&b))
+    }))
+}
+
+/// Transfer order (JSON) + L1 Account Key → `{ pset, spent }` (an unsigned PSBT and the coins it
+/// spends) as JSON, or a refusal.
+#[no_mangle]
+pub unsafe extern "C" fn build_transfer(order: *const u8, order_len: usize, key: *const u8, key_len: usize) -> i32 {
+    ret_text(text(order, order_len).and_then(|o| {
+        let k = text(key, key_len)?;
+        ecx_l1::build_transfer(o, k).map_err(refusal).and_then(|b| json(&b))
     }))
 }
 
