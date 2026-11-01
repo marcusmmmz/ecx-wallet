@@ -115,7 +115,7 @@ test("the shipped modules name their chains, what they're for, and their ECX", a
     chain: "ecash:betanet",
     network: "betanet",
     assets: [{ id: "", ticker: "ECX", name: "eCash", decimals: 8, ecx: true }],
-    sends: false,
+    sends: true,
     officialApps: [],
   });
   assert.deepEqual(describeChain(elements), {

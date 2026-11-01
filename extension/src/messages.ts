@@ -92,10 +92,11 @@ export type BackgroundMessage =
   | { kind: "history.reported"; slot?: number; unattended?: boolean; older?: boolean }
   | { kind: "history.cached"; slot?: number }
   // The wallet's own Send (pull path): wallet pages only.
-  | { kind: "send.start"; slot: number; outputs: { asset: string; amount: string; to: { address: string } }[]; host?: string }
-  | { kind: "send.spendable"; slot: number }
-  | { kind: "send.refused"; slot: number }
-  | { kind: "send.dismissRefused"; slot: number }
+  /** The `send.*` kinds act on the main chain when `slot` is absent, as `history.*` do. */
+  | { kind: "send.start"; slot?: number; outputs: { asset: string; amount: string; to: { address: string } }[]; host?: string }
+  | { kind: "send.spendable"; slot?: number }
+  | { kind: "send.refused"; slot?: number }
+  | { kind: "send.dismissRefused"; slot?: number }
   // Deposit from the main chain to a Slot, and the Slot's pending Deposits: wallet pages only.
   | { kind: "deposit.start"; slot: number; amount: string; host?: string }
   | { kind: "deposit.list"; slot: number; unattended?: boolean }

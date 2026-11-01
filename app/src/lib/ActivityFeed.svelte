@@ -17,10 +17,10 @@
   let {
     chains,
     views,
-    slots,
+    spenders,
     active,
     chips = false,
-  }: { chains: Chains; views: ChainView[]; slots: ChainView[]; active: boolean; chips?: boolean } = $props();
+  }: { chains: Chains; views: ChainView[]; spenders: ChainView[]; active: boolean; chips?: boolean } = $props();
 
   let read = false;
   $effect(() => {
@@ -44,7 +44,7 @@
   /** Chains shown whose activity hasn't been read once yet (and hasn't failed). */
   const loading = $derived(shown.filter((v) => v.history?.report === undefined && v.history?.error === undefined));
   const ecx = $derived(chains.get("l1")?.info.assets ?? []);
-  const anyDeposits = $derived(slots.some((s) => Array.isArray(s.deposits) && s.deposits.length > 0));
+  const anyDeposits = $derived(spenders.some((s) => Array.isArray(s.deposits) && s.deposits.length > 0));
   /** The transaction whose details sheet is open. */
   let inspecting = $state<{ chain: ChainView; entry: HistoryEntry } | undefined>(undefined);
   let copied = $state(false);
@@ -207,7 +207,7 @@
     </div>
   {/if}
 
-  <Deposits {slots} {ecx} onchange={(slot) => chains.readDeposits(slot)} />
+  <Deposits {spenders} {ecx} onchange={(chain) => chains.readDeposits(chain)} />
 
   {#each shown as v (v.info.id)}
     {@const h = v.history}

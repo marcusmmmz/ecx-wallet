@@ -5,6 +5,7 @@
 // for good in `host.persistent`, under the same keys, which lock doesn't clear: a trade's outcome
 // once final (`trade`) and an address's settled history (`addressHistory`).
 import type { IdentityBlock } from "./chain-module";
+import type { ChainId } from "./spends";
 import type { KeyValueStore } from "./vault";
 
 export const CACHE_PREFIX = "cache:";
@@ -33,6 +34,6 @@ export const cacheKey = {
    * page shows it instead, until closed or the next Deposit is sent.
    */
   depositRefused: (slot: number) => `${CACHE_PREFIX}deposit-refused:${slot}`,
-  /** The Slot's last Send that failed after the user approved it, for the same reason. */
-  sendRefused: (slot: number) => `${CACHE_PREFIX}send-refused:${slot}`,
+  /** The chain's (a Slot's, or "l1") last Send that failed after the user approved it, for the same reason. */
+  sendRefused: (chain: ChainId) => `${CACHE_PREFIX}send-refused:${chain}`,
 };

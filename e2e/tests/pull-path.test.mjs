@@ -152,7 +152,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
     assert.deepEqual(shown.balances.map((b) => b.asset), [""]);
     assert.equal(shown.balances[0].text, "0.001025 ECX", "100 000 received + 2 500 change, not the unconfirmed 900");
     assert.deepEqual(shown.unconfirmed, [{ asset: "", text: "+0.000009 ECX unconfirmed" }]);
-    assert.equal(shown.send, false, "no Send on L1 yet");
+    assert.equal(shown.send, true, "the main chain sends too (#40)");
 
     const requests = l1Stub.requests();
     assert.equal(requests[0], "/block-height/967680", "the fork block is checked first");

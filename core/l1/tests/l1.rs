@@ -47,7 +47,7 @@ fn declare_reports_the_ecash_betanet_binding() {
     assert_eq!(d.binding.chain, "ecash:betanet");
     assert_eq!(d.binding.format, "psbt");
     assert_eq!(d.binding.payload_versions, ["0"]);
-    assert_eq!(d.capabilities, ["buildDeposit"]);
+    assert_eq!(d.capabilities, ["buildDeposit", "buildTransfer"]);
 }
 
 #[test]

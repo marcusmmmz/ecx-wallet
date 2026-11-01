@@ -42,7 +42,13 @@ const STRAY = tx("f3", [{ value: 1000, script: L1_RECEIVE_0_SCRIPT }, { value: 5
 
 /** What eCash's stub holds (read on every request); each test starts from `l1Config()`. */
 const L1 = {};
+/**
+ * Broadcasts a test confirmed, kept across `l1Config()`: the wallet holds a Deposit's coins until
+ * its server confirms it (or forgets it for 6 blocks), even in a world rebuilt without it.
+ */
+const SETTLED = {};
 const l1Config = (txs) => ({
+  txStatuses: { ...SETTLED },
   identityBlock: L1_FORK_BLOCK,
   blocks: { [ACTIVATION.height]: ACTIVATION.hash },
   tipHeight: 971000,
@@ -203,6 +209,8 @@ for (const browserName of BROWSERS) describe(browserName, () => {
   let stub;
   let l1Stub;
   before(async () => {
+    // Each browser signs the same first Deposit again: it isn't settled until this run confirms it.
+    for (const txid of Object.keys(SETTLED)) delete SETTLED[txid];
     Object.assign(L1, l1Config([FUNDING, TREASURY_TX, STRAY]));
     [session, stub, l1Stub] = await Promise.all([launchWallet(browserName), serveEsplora(ESPLORA), serveL1Esplora(L1)]);
     await setUpWallet(session); // ABANDON, no passphrase
@@ -296,6 +304,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
 
       const broadcast = L1.txs.find((t) => parseTx(t.hex).txid === depositTxid);
       Object.assign(broadcast, { confirmed: true, blockHeight: 970950, blockHash: "ab".repeat(32) });
+      SETTLED[depositTxid] = { confirmed: true, blockHeight: 970950, blockHash: "ab".repeat(32) };
       L1.tipHeight = 970952;
       assert.equal((await readDeposits(session))[0].status, "3 / 6 confirmations on the main chain");
 
@@ -400,6 +409,16 @@ for (const browserName of BROWSERS) describe(browserName, () => {
       await activitySettled(home);
       await home.close();
       assert.deepEqual(await readDeposits(session), []);
+
+      // Its coin stays held until the server has forgotten the M5 for 6 blocks: it may still be out there.
+      const held = await startDeposit(session, "5000");
+      assert.match((await outcome(held)).error, /^Not enough confirmed eCash: .* the wallet has 0\.$/);
+      await held.close();
+      L1.tipHeight += 6;
+      const released = await startDeposit(session, "5000");
+      await answerIn(await approvalIn(released, { timeout: 20_000 }), "[data-reject]");
+      assert.equal((await outcome(released)).error, "The user rejected the request.");
+      await released.close();
     });
 
     test("a server that sends another transaction than the one asked for is refused, and nothing is kept", async () => {

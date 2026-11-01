@@ -4,12 +4,16 @@
 // is it signed, finalized and broadcast. A Slot whose server speaks the Standard Sidechain API has
 // the server build it instead (pull-path.ts).
 //
-// Coins a broadcast Send spent are held back from later ones until it confirms, or until the server
-// has forgotten it for HOLD_BLOCKS blocks: the server may not list the spend in its mempool yet. On
-// On Flush a block confirms once a block of stake is on top of it (esplora.ts, `FLUSH_CONFIRMATIONS`).
+// The main chain sends the same way (#40): its module builds, decodes and signs as a Slot's does,
+// with the L1 Account Key, and the approval names "This wallet (Send on Main chain)".
 //
-// A Chain Module whose format is `psbt` (Flush) builds from whole transactions, as L1's Deposits do:
-// the wallet fetches each coin's, and the module reads its value from it, never from the server.
+// Coins a broadcast Send spent are held back from later ones (spends.ts); on the main chain from
+// later Deposits too. On Flush a block confirms once a block of stake is on top of it (esplora.ts,
+// `FLUSH_CONFIRMATIONS`).
+//
+// A Chain Module whose format is `psbt` (Flush, eCash) builds from whole transactions, as L1's
+// Deposits do: the wallet fetches each coin's, and the module reads its value from it, never from
+// the server.
 import { canSend, createKeyRouting, type ChainModules, type KeyedChain, type Keys } from "./accounts";
 import { cacheKey, type SessionCache } from "./cache";
 import {
@@ -19,6 +23,7 @@ import {
   type BuiltTrade,
   type BuiltTransfer,
   type ChainEntry,
+  type ChainKey,
   type ClearView,
   type FlushAction,
   type ModuleTransferOrder,
@@ -31,33 +36,15 @@ import {
 } from "./chain-module";
 import { ErrorCode, ProviderRpcError } from "./errors";
 import { feeRate, QUERIES_AT_ONCE, type EsploraClient } from "./esplora";
+import { accountUtxos, changeIndex, createSpendQueue, heldOutpoints, type ChainId, type HeldStore, type SpendQueue } from "./spends";
 import { checkedOrder, isTransferAskedFor, WATCHED_CHANGE_ADDRESSES, WATCHED_RECEIVE_ADDRESSES, type PullPath, type SendResult } from "./pull-path";
 import { rejected, type ApprovalContext, type SignPrompt, type SigningApproval } from "./signing";
 import { speaksEsplora } from "./server-api";
 import { SidechainServerError, type TransferOrder } from "./sidechain-server";
 import { linkDigest, type UsedLinks } from "./flush-links";
 
-/** Blocks past its broadcast after which a Send the server doesn't know releases its coins. */
-export const HOLD_BLOCKS = 6;
-
 /** Who the approval window names for a Send over Esplora: the wallet itself built it. */
 export const sendRequester = (chainName: string) => `This wallet (Send on ${chainName})`;
-
-/** The coins a broadcast Send spent, held back from later Sends. */
-export interface HeldSpend {
-  slot: number;
-  txid: string;
-  spent: { txid: string; vout: number }[];
-  /** The server's tip when it was broadcast. */
-  tipHeight: number;
-}
-
-/** Where held spends are kept (`storage.local`): they must outlive the session. */
-export interface HeldStore {
-  list(): Promise<HeldSpend[]>;
-  put(held: HeldSpend): Promise<void>;
-  remove(txid: string): Promise<void>;
-}
 
 export interface SendDeps extends Keys, ChainModules {
   /** The Slot's reads and its `/v1` Send. */
@@ -67,9 +54,11 @@ export interface SendDeps extends Keys, ChainModules {
   openSigningApproval(context: ApprovalContext): SigningApproval;
   isUnlocked(): Promise<boolean>;
   held: HeldStore;
+  /** Runs each chain's spends one at a time; pass the Deposits' one so the main chain's share it. Default: its own. */
+  queue?: SpendQueue;
   /** Links whose trade went out this session (docs/adr/0016). */
   usedLinks: UsedLinks;
-  /** Where the Slot's last Send refused after approval is kept for the session. */
+  /** Where each chain's last Send refused after approval is kept for the session. */
   cache?: SessionCache;
   /** Milliseconds since the epoch. */
   now(): number;
@@ -80,7 +69,7 @@ export interface SendDeps extends Keys, ChainModules {
  * by then (the toolbar popup closes when the approval window opens), so the Activity feed shows it.
  */
 export interface RefusedSend {
-  slot: number;
+  slot: ChainId;
   outputs: TransferOutput[];
   /** Why, as the user would have read it on the Send screen. */
   reason: string;
@@ -93,30 +82,15 @@ const refusal = (message: string) => new ProviderRpcError(ErrorCode.InvalidParam
 
 export function createSends(deps: SendDeps) {
   const routing = createKeyRouting(deps);
+  const queue = deps.queue ?? createSpendQueue();
 
-  function esplora(target: KeyedChain<Starter>): EsploraClient | undefined {
+  function esplora<K extends ChainKey>(target: KeyedChain<K>): EsploraClient | undefined {
     const { api } = target.network.sidechainServer;
     if (!speaksEsplora(api)) return undefined;
     if (!canSend(target.module.declare().capabilities, target.network)) {
       throw refusal(`This wallet can't send on ${target.entry.name}: its Chain Module doesn't build transfers.`);
     }
     return deps.esplora(target.entry, target.network);
-  }
-
-  /** The Slot's held outpoints, after releasing those whose Send confirmed or was forgotten long enough. */
-  async function heldOutpoints(slot: number, server: EsploraClient): Promise<Set<string>> {
-    const held = new Set<string>();
-    let tip: Promise<number> | undefined;
-    for (const spend of (await deps.held.list()).filter((h) => h.slot === slot)) {
-      const status = await server.txStatus(spend.txid);
-      const forgotten = status === undefined && (await (tip ??= server.tipHeight())) >= spend.tipHeight + HOLD_BLOCKS;
-      if (status?.confirmed || forgotten) {
-        await deps.held.remove(spend.txid);
-        continue;
-      }
-      for (const { txid, vout } of spend.spent) held.add(`${txid}:${vout}`);
-    }
-    return held;
   }
 
   /**
@@ -127,31 +101,21 @@ export function createSends(deps: SendDeps) {
    * carrying an asset token is that asset's coin, in its units: the mempool refuses a token spent
    * unconfirmed (`ba-token-unconfirmed`). The module reads the token again when it builds.
    */
-  async function spendableCoins(slot: number, target: KeyedChain<Starter>, server: EsploraClient, key: Starter) {
+  async function spendableCoins<K extends ChainKey>(chain: ChainId, target: KeyedChain<K>, server: EsploraClient, key: K) {
     const account = target.module.deriveAccount(key, { receive: WATCHED_RECEIVE_ADDRESSES, change: WATCHED_CHANGE_ADDRESSES });
     const readsTokens = target.module.declare().capabilities.includes("tokens");
-    const addresses = [...account.receive.map((a) => ({ ...a, chain: 0 as const })), ...account.change.map((a) => ({ ...a, chain: 1 as const }))];
-    const found = [];
-    for (let i = 0; i < addresses.length; i += QUERIES_AT_ONCE) {
-      found.push(
-        ...(await Promise.all(
-          addresses.slice(i, i + QUERIES_AT_ONCE).map(async ({ address, chain, index }) =>
-            (await server.addressUtxos(address)).flatMap((u) =>
-              u.value === undefined || (u.value === 0 && !(readsTokens && u.confirmed))
-                ? []
-                : [{ txid: u.txid, vout: u.vout, asset: u.asset ?? NATIVE_COIN, value: String(u.value), chain, index, confirmed: u.confirmed }],
-            ),
-          ),
-        )),
-      );
-    }
-    const utxos = await withTokens(target, server, found.flat());
+    const found = (await accountUtxos(server, account)).flatMap((u) =>
+      u.value === undefined || (u.value === 0 && !(readsTokens && u.confirmed))
+        ? []
+        : [{ txid: u.txid, vout: u.vout, asset: u.asset ?? NATIVE_COIN, value: String(u.value), chain: u.chain, index: u.index, confirmed: u.confirmed }],
+    );
+    const utxos = await withTokens(target, server, found);
     const trusted = new Set<string>();
     if (utxos.some((u) => !u.confirmed)) {
-      const history = await deps.pullPath.history(slot);
+      const history = await (chain === "l1" ? deps.pullPath.l1History() : deps.pullPath.history(chain));
       if (!history.partial) for (const e of history.entries) if (!e.confirmed && e.trusted) trusted.add(e.txid);
     }
-    const held = await heldOutpoints(slot, server);
+    const held = await heldOutpoints(deps.held, chain, server);
     const coins = utxos
       .filter((u) => (u.confirmed || trusted.has(u.txid)) && !held.has(`${u.txid}:${u.vout}`))
       .map(({ confirmed: _, ...coin }) => coin);
@@ -162,8 +126,8 @@ export function createSends(deps: SendDeps) {
    * `utxos` with each value-0 one as the asset token its transaction lists on it, by the module;
    * one that carries no asset token (a control coin, a result, nothing) is left out.
    */
-  async function withTokens<T extends { txid: string; vout: number; asset: string; value: string }>(
-    target: KeyedChain<Starter>,
+  async function withTokens<K extends ChainKey, T extends { txid: string; vout: number; asset: string; value: string }>(
+    target: KeyedChain<K>,
     server: EsploraClient,
     utxos: T[],
   ): Promise<T[]> {
@@ -197,13 +161,6 @@ export function createSends(deps: SendDeps) {
     return coins.map(({ txid, vout, chain, index }) => ({ tx: hex.get(txid)!, vout, chain, index }));
   }
 
-  /** The first change address nothing has paid yet; the last one once all are used. */
-  async function changeIndex(server: EsploraClient, change: { address: string; index: number }[]): Promise<number> {
-    const counts = await Promise.all(change.map(({ address }) => server.addressTxCount(address)));
-    const unused = change.find((_, i) => counts[i] === 0);
-    return (unused ?? change[change.length - 1]).index;
-  }
-
   /** A module refusal, as the user reads it. */
   async function refusing<T>(call: () => Promise<T>): Promise<T> {
     try {
@@ -214,13 +171,24 @@ export function createSends(deps: SendDeps) {
     }
   }
 
-  /** One Send, once the Slot's previous one is done. */
-  async function sendNow(slot: number, order: TransferOrder, from: { origin: string } | undefined, host: string | undefined): Promise<SendResult> {
+  /** One Send on `chain`, once its previous spend is done. */
+  async function sendNow(chain: ChainId, order: TransferOrder, from: { origin: string } | undefined, host: string | undefined): Promise<SendResult> {
     const checked = checkedOrder(order);
-    const target = await routing.slot(slot);
+    return chain === "l1" ? sendWith(chain, await routing.l1(), checked, undefined, host) : sendWith(chain, await routing.slot(chain), checked, from, host);
+  }
+
+  async function sendWith<K extends ChainKey>(
+    chain: ChainId,
+    target: KeyedChain<K>,
+    checked: TransferOrder,
+    from: { origin: string } | undefined,
+    host: string | undefined,
+  ): Promise<SendResult> {
     const server = esplora(target);
     // An app may ask while the wallet is locked: the window unlocks first, then shows the transfer.
     if (server === undefined) {
+      if (chain === "l1") throw new Error("The main chain's server always speaks Esplora.");
+      const slot = chain;
       if (from === undefined) return deps.pullPath.send(slot, checked);
       const approval = deps.openSigningApproval({ origin: from.origin, chain: target.chain });
       try {
@@ -244,7 +212,7 @@ export function createSends(deps: SendDeps) {
         await server.checkChain();
         const key = await target.key();
         const [{ coins, account }, estimates, tip] = await Promise.all([
-          spendableCoins(slot, target, server, key),
+          spendableCoins(chain, target, server, key),
           server.feeEstimates().catch(() => undefined),
           server.tipHeight(),
         ]);
@@ -269,7 +237,7 @@ export function createSends(deps: SendDeps) {
         if (decoded.kind !== "clear") throw new Error(`The wallet can't fully explain the transfer it built: ${decoded.reason}`);
         // Anything else is a wallet bug: refused, never shown.
         if (!isTransferAskedFor(decoded.view, checked)) throw new Error("The built transfer isn't the one asked for.");
-        const prompt: SignPrompt = { origin: requester, chain: target.chain, requestId: `send-${slot}`, decoded };
+        const prompt: SignPrompt = { origin: requester, chain: target.chain, requestId: `send-${chain}`, decoded };
         if (!(await approval.confirm(prompt))) throw rejected();
         approved = true;
         const signed = await refusing(async () => target.module.sign(built.pset, await target.key()));
@@ -287,9 +255,9 @@ export function createSends(deps: SendDeps) {
         throw new SidechainServerError(error.server, `${error.message} Nothing was sent.`);
       }
       // It went out, whatever the server answers: its coins are held from here on.
-      await deps.held.put({ slot, txid: finalized.txid, spent: built.spent, tipHeight });
+      await deps.held.put({ slot: chain, txid: finalized.txid, spent: built.spent, tipHeight });
       if (txid !== finalized.txid) throw new SidechainServerError(server.url, `${server.url} reported txid ${txid} for transaction ${finalized.txid}.`);
-      if (from === undefined) await deps.cache?.set(cacheKey.sendRefused(slot), null);
+      if (from === undefined) await deps.cache?.set(cacheKey.sendRefused(chain), null);
       return { server: server.url, accepted: true, txid };
     } catch (error) {
       // By now the page that asked may be gone (a popup closes when the approval window opens).
@@ -297,7 +265,7 @@ export function createSends(deps: SendDeps) {
       // is still there, and gets the error as its answer.
       if (approved && !broadcast && from === undefined) {
         const reason = error instanceof ProviderRpcError || error instanceof SidechainServerError ? error.message : "Internal wallet error.";
-        await deps.cache?.set(cacheKey.sendRefused(slot), { slot, outputs: checked.outputs, reason, at: deps.now() } satisfies RefusedSend);
+        await deps.cache?.set(cacheKey.sendRefused(chain), { slot: chain, outputs: checked.outputs, reason, at: deps.now() } satisfies RefusedSend);
       }
       throw error;
     }
@@ -462,38 +430,33 @@ export function createSends(deps: SendDeps) {
     return { server: server.url, accepted: true, txid };
   }
 
-  /** Each Slot's last Send or trade, which the next one waits for. */
-  const queues = new Map<number, Promise<unknown>>();
-
-  /** Runs `run` once the Slot's previous Send or trade is done. */
-  function queued<T>(slot: number, run: () => Promise<T>): Promise<T> {
-    const result = (queues.get(slot) ?? Promise.resolve()).then(run, run);
-    queues.set(slot, result.catch(() => {}));
-    return result;
+  /** Per asset, what a Send on the chain can spend now: over Esplora confirmed plus trusted, less held; else the reported balance. */
+  async function spendableWith<K extends ChainKey>(chain: ChainId, target: KeyedChain<K>): Promise<AssetAmount[]> {
+    const server = esplora(target);
+    if (server === undefined) {
+      if (chain === "l1") throw new Error("The main chain's server always speaks Esplora.");
+      return (await deps.pullPath.reportedState(chain)).balances;
+    }
+    await server.checkChain();
+    const { coins } = await spendableCoins(chain, target, server, await target.key());
+    const totals = new Map<string, bigint>();
+    for (const { asset, value } of coins) totals.set(asset, (totals.get(asset) ?? 0n) + BigInt(value));
+    return [...totals].map(([asset, amount]) => ({ asset, amount: amount.toString() }));
   }
 
   return {
-    /** Per asset, what a Send on the Slot can spend now: over Esplora confirmed plus trusted, less held; else the reported balance. */
-    async spendable(slot: number): Promise<AssetAmount[]> {
-      const target = await routing.slot(slot);
-      const server = esplora(target);
-      if (server === undefined) return (await deps.pullPath.reportedState(slot)).balances;
-      await server.checkChain();
-      const { coins } = await spendableCoins(slot, target, server, await target.key());
-      const totals = new Map<string, bigint>();
-      for (const { asset, value } of coins) totals.set(asset, (totals.get(asset) ?? 0n) + BigInt(value));
-      return [...totals].map(([asset, amount]) => ({ asset, amount: amount.toString() }));
-    },
+    /** Per asset, what a Send on the chain (a Slot, or "l1") can spend now. */
+    spendable: async (chain: ChainId): Promise<AssetAmount[]> => (chain === "l1" ? spendableWith(chain, await routing.l1()) : spendableWith(chain, await routing.slot(chain))),
 
     /**
-     * Sends `order` from the Slot. Resolves once broadcast (or accepted by a `/v1` server); throws on
-     * refusal or rejection. `from` is the Sidechain App that asked (`sendTransfer`): the approval
-     * names it, and a failure after approval goes back to it rather than to the Activity feed.
-     * `host` is the wallet page that shows the approval itself (`ApprovalContext`). One Send per
-     * Slot at a time, so two never pick the same coins.
+     * Sends `order` from the chain (a Slot, or "l1" for the main chain). Resolves once broadcast (or
+     * accepted by a `/v1` server); throws on refusal or rejection. `from` is the Sidechain App that
+     * asked (`sendTransfer`, a Slot only): the approval names it, and a failure after approval goes
+     * back to it rather than to the Activity feed. `host` is the wallet page that shows the approval
+     * itself (`ApprovalContext`). One spend per chain at a time, so two never pick the same coins.
      */
-    send(slot: number, order: TransferOrder, from?: { origin: string }, host?: string): Promise<SendResult> {
-      return queued(slot, () => sendNow(slot, order, from, host));
+    send(chain: ChainId, order: TransferOrder, from?: { origin: string }, host?: string): Promise<SendResult> {
+      return queue(chain, () => sendNow(chain, order, from, host));
     },
 
     /**
@@ -502,14 +465,14 @@ export function createSends(deps: SendDeps) {
      * the link kept as run. Throws on refusal or rejection. In the Slot's queue with its Sends.
      */
     trade(slot: number, link: string, from: { origin: string }): Promise<SendResult> {
-      return queued(slot, () => tradeNow(slot, link, from));
+      return queue(slot, () => tradeNow(slot, link, from));
     },
 
-    /** The Slot's last Send refused after approval this session, if not closed since. */
-    refused: async (slot: number): Promise<RefusedSend | undefined> => (await deps.cache?.get<RefusedSend | null>(cacheKey.sendRefused(slot))) ?? undefined,
+    /** The chain's last Send refused after approval this session, if not closed since. */
+    refused: async (chain: ChainId): Promise<RefusedSend | undefined> => (await deps.cache?.get<RefusedSend | null>(cacheKey.sendRefused(chain))) ?? undefined,
 
-    /** Forgets the Slot's refused Send. */
-    dismissRefused: (slot: number) => deps.cache?.set(cacheKey.sendRefused(slot), null) ?? Promise.resolve(),
+    /** Forgets the chain's refused Send. */
+    dismissRefused: (chain: ChainId) => deps.cache?.set(cacheKey.sendRefused(chain), null) ?? Promise.resolve(),
   };
 }
 

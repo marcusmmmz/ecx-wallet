@@ -97,7 +97,7 @@ export class Chains {
     for (const { info } of this.all) {
       if (only !== undefined && info.id !== only) continue;
       if (info.on) this.readReport(info.id);
-      if (info.id !== "l1") this.readDeposits(info.id);
+      this.readDeposits(info.id);
     }
   }
 
@@ -166,14 +166,16 @@ export class Chains {
     );
   }
 
-  /** Reads a Slot's Deposits and refused Send again (after Stop tracking or closing a refused one). */
-  readDeposits(slot: number, unattended?: boolean) {
-    const newest = this.begin("deposits", slot);
-    const keep = (change: Partial<ChainView>) => newest() && this.update(slot, change);
-    refusedSend(slot).then(
+  /** Reads a chain's refused Send, and a Slot's Deposits, again (after Stop tracking or closing a refused one). */
+  readDeposits(id: ChainId, unattended?: boolean) {
+    const newest = this.begin("deposits", id);
+    const keep = (change: Partial<ChainView>) => newest() && this.update(id, change);
+    refusedSend(id).then(
       (r) => keep({ refusedSend: r }),
       () => keep({ refusedSend: null }),
     );
+    if (id === "l1") return;
+    const slot = id;
     refusedDeposit(slot).then(
       (r) => keep({ refused: r }),
       () => keep({ refused: null }),
@@ -213,7 +215,7 @@ export class Chains {
         () => {},
       );
     }
-    if (slot !== undefined) this.readDeposits(slot, true);
+    this.readDeposits(id, true);
   }
 
   private readReport(id: ChainId) {

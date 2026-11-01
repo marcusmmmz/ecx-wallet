@@ -81,7 +81,7 @@ export interface ChainDescription {
   network: string;
   /** The Chain Entry's, and in `chains.list` the asset store's after them (docs/adr/0010). */
   assets: NamedAsset[];
-  /** The wallet can Send on it (a sidechain whose server builds transfers, or whose module does over Esplora). */
+  /** The wallet can Send on it (a chain whose server builds transfers, or whose module does over Esplora). */
   sends: boolean;
   /**
    * How the wallet checks a name for one of its assets, if it can: by the asset's contract
@@ -96,14 +96,14 @@ export function describeChain(module: ChainModule<never>): ChainDescription {
   const { entry, network, chain } = servedNetwork(module);
   const key = Object.keys(entry.networks).find((k) => entry.networks[k] === network)!;
   const { capabilities } = module.declare();
-  const sends = network.parent !== undefined && canSend(capabilities, network);
+  const sends = canSend(capabilities, network);
   const { api } = network.sidechainServer;
   const checksNames =
     api === "esplora" && capabilities.includes("assetContract") ? "contract" : api === "flush" && capabilities.includes("tokens") ? "registration" : undefined;
   return { name: entry.name, description: entry.description, chain, network: key, assets: network.assets, sends, officialApps: network.officialApps, ...(checksNames ? { checksNames } : {}) };
 }
 
-/** True if a sidechain can Send through this wallet: its server builds, or its module does over Esplora (Flush's included). */
+/** True if a chain can Send through this wallet: its server builds, or its module does over Esplora (Flush's and eCash's included). */
 export function canSend(capabilities: string[], network: NetworkEntry): boolean {
   const { api } = network.sidechainServer;
   return api === "ecx-v0" || (speaksEsplora(api) && capabilities.includes("buildTransfer"));

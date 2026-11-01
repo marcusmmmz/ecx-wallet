@@ -4,7 +4,8 @@
 // Starter); the wallet finds the Slot's Treasury on its own L1 Esplora (treasury.ts); the L1 module
 // builds the M5 from the account's confirmed coins, the L1 Decoder explains it in the normal
 // approval window, and only then is it signed, finalized and broadcast. Each module only ever gets
-// its own key. No Sidechain Server sees the L1 coins.
+// its own key. No Sidechain Server sees the L1 coins. A Deposit shares the main chain's held coins
+// and queue with its Sends (spends.ts, #40): it skips what a Send took, and holds what it takes.
 //
 // Afterwards the Deposit waits: the Slot's L1 confirmations (6 on betanet), then for someone
 // running the Slot's node to import it (crediting isn't automatic on Elements), then it shows on
@@ -16,6 +17,7 @@ import { ChainModuleRefusal, type ChainEntry, type ClearView, type DepositCredit
 import { ErrorCode, ProviderRpcError } from "./errors";
 import { feeRate, FULL_PAGE_TXS, isCoinbase, QUERIES_AT_ONCE, type EsploraClient, type EsploraTx } from "./esplora";
 import { WATCHED_CHANGE_ADDRESSES, WATCHED_RECEIVE_ADDRESSES } from "./pull-path";
+import { accountUtxos, changeIndex, createSpendQueue, heldOutpoints, type HeldStore, type SpendQueue } from "./spends";
 import { rejected, type ApprovalContext, type SignPrompt, type SigningApproval } from "./signing";
 import { speaksEsplora } from "./server-api";
 import { SidechainServerError } from "./sidechain-server";
@@ -201,6 +203,10 @@ export interface DepositDeps extends Keys, ChainModules {
   openSigningApproval(context: ApprovalContext): SigningApproval;
   isUnlocked(): Promise<boolean>;
   store: DepositStore;
+  /** The main chain's held coins, shared with its Sends. */
+  held: HeldStore;
+  /** Runs the main chain's spends one at a time; pass the Sends' one so they share it. Default: its own. */
+  queue?: SpendQueue;
   /**
    * Where raw transactions are kept for the session (each checked against its txid first), and
    * the Slot's last Deposit refused after approval.
@@ -229,6 +235,7 @@ function depositView(view: ClearView, slot: number, amount: string, destination:
 
 export function createDeposits(deps: DepositDeps) {
   const routing = createKeyRouting(deps);
+  const queue = deps.queue ?? createSpendQueue();
 
   function esplora(target: { entry: ChainEntry; network: NetworkEntry }): EsploraClient {
     if (target.network.sidechainServer.api !== "esplora") {
@@ -260,34 +267,17 @@ export function createDeposits(deps: DepositDeps) {
     return tx;
   }
 
-  /** The account's confirmed coins, with their values as the server lists them, and its first unused change index. */
+  /**
+   * The account's confirmed coins not held by a Send or Deposit, with their values as the server
+   * lists them, and the change index: the first unused, else the last.
+   */
   async function coins(l1: EsploraClient, module: L1Module, key: L1AccountKey) {
     const account = module.deriveAccount(key, { receive: WATCHED_RECEIVE_ADDRESSES, change: WATCHED_CHANGE_ADDRESSES });
-    const addresses = [
-      ...account.receive.map((a) => ({ ...a, chain: 0 as const })),
-      ...account.change.map((a) => ({ ...a, chain: 1 as const })),
-    ];
-    const found: ListedCoin[][] = [];
-    for (let i = 0; i < addresses.length; i += QUERIES_AT_ONCE) {
-      found.push(
-        ...(await Promise.all(
-          addresses.slice(i, i + QUERIES_AT_ONCE).map(async ({ address, chain, index }) =>
-            (await l1.addressUtxos(address))
-              .filter((u) => u.confirmed && u.asset === undefined)
-              .map((u) => ({ txid: u.txid, vout: u.vout, value: u.value ?? 0, chain, index })),
-          ),
-        )),
-      );
-    }
-    let changeIndex: number | undefined;
-    for (const { address, index } of account.change) {
-      if ((await l1.addressTxCount(address)) === 0) {
-        changeIndex = index;
-        break;
-      }
-    }
-    if (changeIndex === undefined) throw refusal(`The wallet's first ${WATCHED_CHANGE_ADDRESSES} eCash change addresses are all used.`);
-    return { coins: found.flat(), changeIndex };
+    const [utxos, held, change] = await Promise.all([accountUtxos(l1, account), heldOutpoints(deps.held, "l1", l1), changeIndex(l1, account.change)]);
+    const listed: ListedCoin[] = utxos
+      .filter((u) => u.confirmed && u.asset === undefined && !held.has(`${u.txid}:${u.vout}`))
+      .map((u) => ({ txid: u.txid, vout: u.vout, value: u.value ?? 0, chain: u.chain, index: u.index }));
+    return { coins: listed, changeIndex: change };
   }
 
   /** `coins` as the module takes them: each with its whole transaction, fetched QUERIES_AT_ONCE at a time. */
@@ -377,133 +367,141 @@ export function createDeposits(deps: DepositDeps) {
     return pending.map((d) => statuses.get(d.txid)!);
   }
 
+  /** One Deposit, once the main chain's previous spend is done. */
+  async function startNow(slot: number, amount: string, host?: string): Promise<{ txid: string; server: string }> {
+    if (!/^[1-9][0-9]*$/.test(amount)) throw refusal("The amount must be a whole number of sats.");
+    const l1 = await routing.l1();
+    const target = await routing.slot(slot);
+    if (!target.module.declare().capabilities.includes("depositDestination")) {
+      throw refusal(`${target.entry.name} (Slot ${slot}) can't receive Deposits through this wallet.`);
+    }
+    const destination = target.module.depositDestination(await target.key());
+    if (BigInt(amount) < BigInt(destination.minimum)) throw refusal(`The smallest Deposit to Slot ${slot} is ${destination.minimum} sats.`);
+
+    const server = esplora(l1);
+    await server.checkChain();
+    const treasury = await refusing(() => findTreasury(server, l1.module.treasuryScript(slot), slot));
+    if (treasury === undefined) {
+      const { activation } = target.network;
+      if (activation === undefined) {
+        throw refusal(
+          `Slot ${slot} has no Treasury yet, and this wallet has no pinned activation for it, so it can't tell whether the Slot is active.`,
+        );
+      }
+      if ((await server.blockHash(activation.height)) !== activation.hash) {
+        throw refusal(`${server.url} doesn't have Slot ${slot}'s activation block ${activation.height} (${activation.hash}).`);
+      }
+    }
+    const rate = feeRate(await server.feeEstimates().catch(() => undefined));
+    const key = await l1.key();
+    const [{ coins: available, changeIndex }, tipHeight] = await Promise.all([coins(server, l1.module, key), server.tipHeight()]);
+    const order = {
+      slot,
+      amount,
+      destination: destination.destination,
+      feeRate: rate,
+      treasury: treasury === undefined ? null : { tx: await txHex(server, l1.module, treasury.txid), vout: treasury.vout, unconfirmed: treasury.unconfirmed },
+      changeIndex,
+    };
+    // Only the coins it could pick are fetched: a wallet may hold hundreds. If the module, reading
+    // their real values, finds them short (the server overstated one), it picks from all of them.
+    const build = async (from: ListedCoin[]) => l1.module.buildDeposit({ ...order, coins: await withTxs(server, l1.module, from) }, key);
+    const built = await refusing(async () => {
+      const enough = enoughCoins(available, BigInt(amount), rate);
+      try {
+        return await build(enough);
+      } catch (error) {
+        if (enough.length < available.length && error instanceof ChainModuleRefusal && error.code === "insufficientFunds") return build(available);
+        throw error;
+      }
+    });
+    const { psbt } = built;
+    await refusing(async () => l1.module.check(psbt));
+
+    const approval = deps.openSigningApproval({ origin: DEPOSIT_REQUESTER, chain: l1.chain, ...(host === undefined ? {} : { host }) });
+    let approved = false;
+    try {
+      const sent = await approveAndSend();
+      await deps.cache?.set(cacheKey.depositRefused(slot), null);
+      return sent;
+    } catch (error) {
+      // By now the page that asked may be gone (a popup closes when the approval window opens).
+      if (approved) {
+        const reason = error instanceof ProviderRpcError || error instanceof SidechainServerError ? error.message : "Internal wallet error.";
+        await deps.cache?.set(cacheKey.depositRefused(slot), { slot, value: amount, reason, at: deps.now() } satisfies RefusedDeposit);
+      }
+      throw error;
+    }
+
+    async function approveAndSend(): Promise<{ txid: string; server: string }> {
+      let finalized: { tx: string; txid: string };
+      let vout: number;
+      try {
+        if (!(await deps.isUnlocked()) && !(await approval.unlock())) throw rejected();
+        const decoded = await refusing(async () => l1.module.decode(psbt, await l1.key()));
+        if (decoded.kind !== "clear") throw new Error(`The wallet can't fully explain the Deposit it built: ${decoded.reason}`);
+        const credit: DepositCredit = {
+          chain: target.chain,
+          chainName: target.entry.name,
+          address: destination.address,
+          yours: true,
+          confirmations: depositConfirmationsOf(target.network),
+          paidBy: target.network.sidechainServer.api === "flush" ? "chain" : "operator",
+        };
+        const view = depositView(decoded.view, slot, amount, destination.destination, credit);
+        vout = view.outputs.find((o) => o.destination.kind === "deposit")!.index;
+        const prompt: SignPrompt = { origin: DEPOSIT_REQUESTER, chain: l1.chain, requestId: `deposit-${slot}`, decoded: { kind: "clear", view } };
+        if (!(await approval.confirm(prompt))) throw rejected();
+        approved = true;
+        const signed = await refusing(async () => l1.module.sign(psbt, await l1.key()));
+        finalized = await refusing(async () => l1.module.finalize(signed));
+      } finally {
+        approval.close();
+      }
+
+      let txid: string;
+      try {
+        txid = await server.broadcast(finalized.tx);
+      } catch (error) {
+        if (!(error instanceof SidechainServerError)) throw error;
+        throw new SidechainServerError(
+          error.server,
+          `${error.message} Nothing was sent. If another Deposit to Slot ${slot} took its Treasury first, start again to review a new one.`,
+        );
+      }
+      // It went out, whatever the server answers: its coins are held from here on, from Sends too.
+      await deps.held.put({ slot: "l1", txid: finalized.txid, spent: built.spent, tipHeight });
+      if (txid !== finalized.txid) throw new SidechainServerError(server.url, `${server.url} reported txid ${txid} for transaction ${finalized.txid}.`);
+      // Only after the broadcast, and not for long: a Slot server that hangs mustn't hold up the M5.
+      const credits = creditServer(target);
+      const slotHeight = await Promise.race([
+        credits?.tipHeight().catch(() => undefined),
+        new Promise<undefined>((resolve) => setTimeout(resolve, TIP_WAIT_MS)),
+      ]);
+      await deps.store.put({
+        slot,
+        chainName: target.entry.name,
+        txid,
+        vout,
+        value: amount,
+        address: destination.address,
+        asset: destination.asset,
+        createdAt: deps.now(),
+        ...(destination.scriptPubkey === undefined ? {} : { scriptPubkey: destination.scriptPubkey }),
+        ...(slotHeight === undefined ? {} : { slotHeight }),
+      });
+      return { txid, server: server.url };
+    }
+  }
+
   return {
     /**
      * Deposits `amount` sats of the wallet's confirmed eCash to `slot`, credited to the Slot's first
      * receive address. Resolves once the M5 is broadcast; throws on refusal or rejection. `host`
      * is the wallet page that shows the approval itself (`ApprovalContext`).
      */
-    async start(slot: number, amount: string, host?: string): Promise<{ txid: string; server: string }> {
-      if (!/^[1-9][0-9]*$/.test(amount)) throw refusal("The amount must be a whole number of sats.");
-      const l1 = await routing.l1();
-      const target = await routing.slot(slot);
-      if (!target.module.declare().capabilities.includes("depositDestination")) {
-        throw refusal(`${target.entry.name} (Slot ${slot}) can't receive Deposits through this wallet.`);
-      }
-      const destination = target.module.depositDestination(await target.key());
-      if (BigInt(amount) < BigInt(destination.minimum)) throw refusal(`The smallest Deposit to Slot ${slot} is ${destination.minimum} sats.`);
-
-      const server = esplora(l1);
-      await server.checkChain();
-      const treasury = await refusing(() => findTreasury(server, l1.module.treasuryScript(slot), slot));
-      if (treasury === undefined) {
-        const { activation } = target.network;
-        if (activation === undefined) {
-          throw refusal(
-            `Slot ${slot} has no Treasury yet, and this wallet has no pinned activation for it, so it can't tell whether the Slot is active.`,
-          );
-        }
-        if ((await server.blockHash(activation.height)) !== activation.hash) {
-          throw refusal(`${server.url} doesn't have Slot ${slot}'s activation block ${activation.height} (${activation.hash}).`);
-        }
-      }
-      const rate = feeRate(await server.feeEstimates().catch(() => undefined));
-      const key = await l1.key();
-      const { coins: available, changeIndex } = await coins(server, l1.module, key);
-      const order = {
-        slot,
-        amount,
-        destination: destination.destination,
-        feeRate: rate,
-        treasury: treasury === undefined ? null : { tx: await txHex(server, l1.module, treasury.txid), vout: treasury.vout, unconfirmed: treasury.unconfirmed },
-        changeIndex,
-      };
-      // Only the coins it could pick are fetched: a wallet may hold hundreds. If the module, reading
-      // their real values, finds them short (the server overstated one), it picks from all of them.
-      const build = async (from: ListedCoin[]) => l1.module.buildDeposit({ ...order, coins: await withTxs(server, l1.module, from) }, key);
-      const psbt = await refusing(async () => {
-        const enough = enoughCoins(available, BigInt(amount), rate);
-        try {
-          return await build(enough);
-        } catch (error) {
-          if (enough.length < available.length && error instanceof ChainModuleRefusal && error.code === "insufficientFunds") return build(available);
-          throw error;
-        }
-      });
-      await refusing(async () => l1.module.check(psbt));
-
-      const approval = deps.openSigningApproval({ origin: DEPOSIT_REQUESTER, chain: l1.chain, ...(host === undefined ? {} : { host }) });
-      let approved = false;
-      try {
-        const sent = await approveAndSend();
-        await deps.cache?.set(cacheKey.depositRefused(slot), null);
-        return sent;
-      } catch (error) {
-        // By now the page that asked may be gone (a popup closes when the approval window opens).
-        if (approved) {
-          const reason = error instanceof ProviderRpcError || error instanceof SidechainServerError ? error.message : "Internal wallet error.";
-          await deps.cache?.set(cacheKey.depositRefused(slot), { slot, value: amount, reason, at: deps.now() } satisfies RefusedDeposit);
-        }
-        throw error;
-      }
-
-      async function approveAndSend(): Promise<{ txid: string; server: string }> {
-        let finalized: { tx: string; txid: string };
-        let vout: number;
-        try {
-          if (!(await deps.isUnlocked()) && !(await approval.unlock())) throw rejected();
-          const decoded = await refusing(async () => l1.module.decode(psbt, await l1.key()));
-          if (decoded.kind !== "clear") throw new Error(`The wallet can't fully explain the Deposit it built: ${decoded.reason}`);
-          const credit: DepositCredit = {
-            chain: target.chain,
-            chainName: target.entry.name,
-            address: destination.address,
-            yours: true,
-            confirmations: depositConfirmationsOf(target.network),
-            paidBy: target.network.sidechainServer.api === "flush" ? "chain" : "operator",
-          };
-          const view = depositView(decoded.view, slot, amount, destination.destination, credit);
-          vout = view.outputs.find((o) => o.destination.kind === "deposit")!.index;
-          const prompt: SignPrompt = { origin: DEPOSIT_REQUESTER, chain: l1.chain, requestId: `deposit-${slot}`, decoded: { kind: "clear", view } };
-          if (!(await approval.confirm(prompt))) throw rejected();
-          approved = true;
-          const signed = await refusing(async () => l1.module.sign(psbt, await l1.key()));
-          finalized = await refusing(async () => l1.module.finalize(signed));
-        } finally {
-          approval.close();
-        }
-
-        let txid: string;
-        try {
-          txid = await server.broadcast(finalized.tx);
-        } catch (error) {
-          if (!(error instanceof SidechainServerError)) throw error;
-          throw new SidechainServerError(
-            error.server,
-            `${error.message} Nothing was sent. If another Deposit to Slot ${slot} took its Treasury first, start again to review a new one.`,
-          );
-        }
-        if (txid !== finalized.txid) throw new SidechainServerError(server.url, `${server.url} reported txid ${txid} for transaction ${finalized.txid}.`);
-        // Only after the broadcast, and not for long: a Slot server that hangs mustn't hold up the M5.
-        const credits = creditServer(target);
-        const slotHeight = await Promise.race([
-          credits?.tipHeight().catch(() => undefined),
-          new Promise<undefined>((resolve) => setTimeout(resolve, TIP_WAIT_MS)),
-        ]);
-        await deps.store.put({
-          slot,
-          chainName: target.entry.name,
-          txid,
-          vout,
-          value: amount,
-          address: destination.address,
-          asset: destination.asset,
-          createdAt: deps.now(),
-          ...(destination.scriptPubkey === undefined ? {} : { scriptPubkey: destination.scriptPubkey }),
-          ...(slotHeight === undefined ? {} : { slotHeight }),
-        });
-        return { txid, server: server.url };
-      }
+    start(slot: number, amount: string, host?: string): Promise<{ txid: string; server: string }> {
+      return queue("l1", () => startNow(slot, amount, host));
     },
 
     /** The Slot's last Deposit refused after approval this session, if not closed since. */

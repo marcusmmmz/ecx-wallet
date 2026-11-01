@@ -72,7 +72,8 @@ self.addEventListener("message", (event: MessageEvent<ToWorker>) => {
     case "request": {
       // Separate pages have separate routers, but spend the same IndexedDB-backed wallet.
       // Hold an origin-wide lock for the coins' chain through approval and committed spend
-      // records. Deposits share L1 coins, regardless of their destination Slot.
+      // records. Deposits share L1 coins, regardless of their destination Slot, and the main chain's
+      // Send (no `slot`) spends them too.
       const spending = m.message?.kind === "send.start" || m.message?.kind === "deposit.start" ? m.message : undefined;
       const controller = new AbortController();
       const port = spending?.host
@@ -81,7 +82,7 @@ self.addEventListener("message", (event: MessageEvent<ToWorker>) => {
       const onClosed = () => controller.abort();
       port?.closed.push(onClosed);
       const result = spending
-        ? navigator.locks.request(`ecx-wallet:spend:${spending.kind === "send.start" ? Number(spending.slot) : "l1"}`, { signal: controller.signal }, () => router.route(spending, undefined))
+        ? navigator.locks.request(`ecx-wallet:spend:${spending.kind === "send.start" && spending.slot !== undefined ? Number(spending.slot) : "l1"}`, { signal: controller.signal }, () => router.route(spending, undefined))
           .catch((error) => {
             // Leaving a hosted form while it waits for another tab must cancel its request.
             if (controller.signal.aborted) throw new ProviderRpcError(ErrorCode.UserRejected, "User rejected.");
