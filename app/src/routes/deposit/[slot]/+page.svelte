@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { parseAmount } from "@ecx/wallet";
-  import { hostApprovals, l1Cached, l1Reported, listChains, showReport, startDeposit, type ChainInfo, type ChainReport, type ShownReport } from "$lib/background";
+  import { heldForDeposit, hostApprovals, l1Cached, l1Reported, listChains, showReport, startDeposit, type ChainInfo, type ChainReport, type ShownReport } from "$lib/background";
   import Approval from "$lib/Approval.svelte";
   import Icon from "$lib/Icon.svelte";
   import TopBar from "$lib/TopBar.svelte";
@@ -23,8 +23,18 @@
   let done = $state<{ txid: string; server: string } | undefined>(undefined);
   let error = $state("");
 
-  /** The confirmed sats the main chain's server reports: the only coins a Deposit spends. */
-  const available = (report: ChainReport) => report.balances.find((b) => b.asset === "")?.amount ?? "0";
+  /**
+   * Sats of those confirmed coins a Send or Deposit holds: the server may list them until it sees
+   * the spend, or for 6 blocks after it forgot one. Undefined until read.
+   */
+  let held = $state<string | undefined>(undefined);
+  heldForDeposit().then((h) => (held = h), () => {});
+  /** The confirmed sats the main chain's server reports, less those held: the only coins a Deposit spends. */
+  function available(report: ChainReport): string {
+    const confirmed = BigInt(report.balances.find((b) => b.asset === "")?.amount ?? "0");
+    const left = confirmed - BigInt(held ?? "0");
+    return String(left > 0n ? left : 0n);
+  }
   /** The unconfirmed sats it reports: shown so the user knows why they can't be spent yet. */
   const unconfirmed = (report: ChainReport) => report.unconfirmed.find((u) => u.asset === "")?.amount;
   const readAt = (report: ChainReport) => new Date(report.readAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -61,6 +71,9 @@
     <span class="muted small">Available on the main chain (confirmed)</span>
     {#if shown.report}
       <strong class="amount" data-deposit-available>{sats(available(shown.report))}</strong>
+      {#if held !== undefined && held !== "0"}
+        <span class="muted small" data-deposit-held>{sats(held)} held by a Send or Deposit waiting to confirm</span>
+      {/if}
       {#if unconfirmed(shown.report) !== undefined}
         <span class="muted small" data-deposit-unconfirmed>+{sats(unconfirmed(shown.report)!)} unconfirmed, usable once confirmed</span>
       {/if}

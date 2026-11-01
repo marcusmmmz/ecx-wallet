@@ -135,11 +135,18 @@ for (const browserName of BROWSERS) describe(browserName, () => {
 
   test("a Deposit right after doesn't pick the coin the Send spent", async () => {
     const page = await openWalletPage(session, "#/deposit/24");
-    await page.waitForSelector("[data-deposit-amount]", { timeout: 20_000 });
+    // The server still lists the coin as confirmed: the screen takes it off, and says why.
+    await page.waitForSelector("[data-deposit-held]", { timeout: 20_000 });
+    await waitForFunction(page, () => document.querySelector("[data-deposit-scanning]") === null, { timeout: 20_000 });
+    assert.equal(await page.$eval("[data-deposit-available]", (e) => e.textContent.trim()), "0 ECX");
+    assert.equal(await page.$eval("[data-deposit-held]", (e) => e.textContent.trim()), "0.0025 ECX held by a Send or Deposit waiting to confirm");
     await page.type("[data-deposit-amount]", "0.0005");
     await page.click("[data-deposit-submit]");
     await page.waitForSelector("[data-deposit-done], [data-error]", { timeout: 20_000 });
-    assert.match(await page.$eval("[data-error]", (e) => e.textContent.trim()), /^Not enough confirmed eCash: .* the wallet has 0\.$/);
+    assert.match(
+      await page.$eval("[data-error]", (e) => e.textContent.trim()),
+      /^Not enough confirmed eCash: .* the wallet has 0\. 250000 sats more are held by a Send or Deposit waiting to confirm\.$/,
+    );
     assert.equal(l1Stub.broadcasts().length, 1);
     await page.close();
   });

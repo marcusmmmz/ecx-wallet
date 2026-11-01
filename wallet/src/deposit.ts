@@ -268,16 +268,26 @@ export function createDeposits(deps: DepositDeps) {
   }
 
   /**
-   * The account's confirmed coins not held by a Send or Deposit, with their values as the server
-   * lists them, and the change index: the first unused, else the last.
+   * The account's confirmed coins as the server lists them, split into those a Deposit may spend
+   * and the sats of those a Send or Deposit holds (the server may not have seen it spend them).
    */
+  async function confirmedCoins(l1: EsploraClient, account: { receive: { address: string; index: number }[]; change: { address: string; index: number }[] }) {
+    const [utxos, held] = await Promise.all([accountUtxos(l1, account), heldOutpoints(deps.held, "l1", l1)]);
+    const listed: ListedCoin[] = [];
+    let heldSats = 0n;
+    for (const u of utxos) {
+      if (!u.confirmed || u.asset !== undefined) continue;
+      if (held.has(`${u.txid}:${u.vout}`)) heldSats += BigInt(u.value ?? 0);
+      else listed.push({ txid: u.txid, vout: u.vout, value: u.value ?? 0, chain: u.chain, index: u.index });
+    }
+    return { coins: listed, held: heldSats };
+  }
+
+  /** `confirmedCoins`, and the change index: the first unused, else the last. */
   async function coins(l1: EsploraClient, module: L1Module, key: L1AccountKey) {
     const account = module.deriveAccount(key, { receive: WATCHED_RECEIVE_ADDRESSES, change: WATCHED_CHANGE_ADDRESSES });
-    const [utxos, held, change] = await Promise.all([accountUtxos(l1, account), heldOutpoints(deps.held, "l1", l1), changeIndex(l1, account.change)]);
-    const listed: ListedCoin[] = utxos
-      .filter((u) => u.confirmed && u.asset === undefined && !held.has(`${u.txid}:${u.vout}`))
-      .map((u) => ({ txid: u.txid, vout: u.vout, value: u.value ?? 0, chain: u.chain, index: u.index }));
-    return { coins: listed, changeIndex: change };
+    const [confirmed, change] = await Promise.all([confirmedCoins(l1, account), changeIndex(l1, account.change)]);
+    return { ...confirmed, changeIndex: change };
   }
 
   /** `coins` as the module takes them: each with its whole transaction, fetched QUERIES_AT_ONCE at a time. */
@@ -394,7 +404,7 @@ export function createDeposits(deps: DepositDeps) {
     }
     const rate = feeRate(await server.feeEstimates().catch(() => undefined));
     const key = await l1.key();
-    const [{ coins: available, changeIndex }, tipHeight] = await Promise.all([coins(server, l1.module, key), server.tipHeight()]);
+    const [{ coins: available, held, changeIndex }, tipHeight] = await Promise.all([coins(server, l1.module, key), server.tipHeight()]);
     const order = {
       slot,
       amount,
@@ -414,6 +424,12 @@ export function createDeposits(deps: DepositDeps) {
         if (enough.length < available.length && error instanceof ChainModuleRefusal && error.code === "insufficientFunds") return build(available);
         throw error;
       }
+    }).catch((error) => {
+      // The module counts only what it was given: say why the screen's balance may show more.
+      if (error instanceof ProviderRpcError && held > 0n && /^Not enough confirmed eCash/.test(error.message)) {
+        throw refusal(`${error.message} ${held} sats more are held by a Send or Deposit waiting to confirm.`);
+      }
+      throw error;
     });
     const { psbt } = built;
     await refusing(async () => l1.module.check(psbt));
@@ -502,6 +518,20 @@ export function createDeposits(deps: DepositDeps) {
      */
     start(slot: number, amount: string, host?: string): Promise<{ txid: string; server: string }> {
       return queue("l1", () => startNow(slot, amount, host));
+    },
+
+    /**
+     * Sats of the account's confirmed coins that eCash's server still lists but a Send or Deposit
+     * holds, as a decimal string: the Deposit screen takes them off the reported balance.
+     */
+    async held(): Promise<string> {
+      // Nothing held: no scan (the Deposit screen's own report is already scanning).
+      if (!(await deps.held.list()).some((h) => h.slot === "l1")) return "0";
+      const l1 = await routing.l1();
+      const server = esplora(l1);
+      await server.checkChain();
+      const account = l1.module.deriveAccount(await l1.key(), { receive: WATCHED_RECEIVE_ADDRESSES, change: WATCHED_CHANGE_ADDRESSES });
+      return String((await confirmedCoins(server, account)).held);
     },
 
     /** The Slot's last Deposit refused after approval this session, if not closed since. */

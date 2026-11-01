@@ -268,6 +268,9 @@ export const listDeposits = (slot: number, unattended?: boolean) => send<Deposit
 export const dismissDeposit = (txid: string) => send<null>({ kind: "deposit.dismiss", txid });
 
 /** The Slot's last Deposit that failed after approval this session, or null. */
+/** Sats of the confirmed main-chain coins the server lists that a Send or Deposit holds, unspendable until it confirms. */
+export const heldForDeposit = () => send<string>({ kind: "deposit.held" });
+
 export const refusedDeposit = (slot: number) => send<RefusedDeposit | null>({ kind: "deposit.refused", slot });
 
 /** Forgets the Slot's refused Deposit. */
