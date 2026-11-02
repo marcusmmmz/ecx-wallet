@@ -30,6 +30,11 @@ export const DIST_E2E = {
   chromium: path.join(ROOT, "e2e", "dist", "extension", "chromium"),
   firefox: path.join(ROOT, "e2e", "dist", "extension", "firefox"),
 };
+/** The mainnet e2e build (`pnpm build:e2e:mainnet`): the shipped network, its servers on the same loopback stubs. */
+export const DIST_E2E_MAINNET = {
+  chromium: path.join(ROOT, "e2e", "dist", "mainnet", "extension", "chromium"),
+  firefox: path.join(ROOT, "e2e", "dist", "mainnet", "extension", "firefox"),
+};
 
 /** Browsers the Provider suite runs against: `E2E_BROWSERS=brave,firefox` (the default). */
 export const BROWSERS = (process.env.E2E_BROWSERS ?? "brave,firefox").split(",").filter(Boolean);
@@ -37,11 +42,13 @@ export const BROWSERS = (process.env.E2E_BROWSERS ?? "brave,firefox").split(",")
 /**
  * Launches the named browser (one of BROWSERS) with the matching extension build installed: by
  * default the e2e build, whose Slot 24 server is on loopback (see `serveEsplora`), so no test
- * reaches the public explorer; `{ build: "shipped" }` for the shipped build. build-output.test
- * checks the two differ only in that server.
+ * reaches the public explorer; `{ build: "e2e-mainnet" }` for the mainnet one, on the same stubs;
+ * `{ build: "shipped" }` for the shipped build. build-output.test checks they differ only in their
+ * network and servers.
  */
 export function launchWallet(name, { build = "e2e", ...options } = {}) {
-  const dist = build === "shipped" ? DIST : DIST_E2E;
+  const dist = { shipped: DIST, e2e: DIST_E2E, "e2e-mainnet": DIST_E2E_MAINNET }[build];
+  if (!dist) throw new Error(`Unknown build ${build}`);
   if (name === "brave") return launchBrave({ extensionPath: dist.chromium, ...options });
   if (name === "firefox") return launchFirefox({ extensionPath: dist.firefox, ...options });
   throw new Error(`Unknown browser ${name}`);
