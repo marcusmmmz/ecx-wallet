@@ -2,7 +2,7 @@
 
 A browser wallet for eCash (ECX) and its drivechains (sidechains). One extension holds your keys for eCash, the main chain, and for each sidechain you turn on. It shows your balances and history, sends, deposits coins from eCash into a sidechain, and signs for sidechain websites after you approve.
 
-**Status:** pre-release. The shipped build is for eCash **mainnet**, with one sidechain: Slot 46, Flush (ECX and its tokens; its Slot is active from block 978,331, ADR 0019). A **betanet** build (`ECX_NETWORK=betanet pnpm build`) adds Slot 24, Elements+ (an Elements chain, explicit amounts only), and has Flush as Slot 99 (ADR 0014). The e2e suite runs on betanet.
+**Status:** pre-release. The shipped build is for eCash **mainnet**, with one sidechain: Slot 46, Flush (ECX and its tokens; its Slot is active from block 978,331, ADR 0019). A **betanet** build (`ECX_NETWORK=betanet pnpm build`) adds Slot 24, Elements+ (an Elements chain, explicit amounts only), and has Flush as Slot 99 (ADR 0014). The e2e suite runs on betanet, and what differs on mainnet again on a mainnet build (docs/testing.md).
 
 Design work happens in GitHub issues; the [wayfinder map](https://github.com/marcusmmmz/ecx-wallet/issues/1) indexes every decision. The words used here (Slot, Starter, Chain Module, Grant, Clear Signing…) are defined in [GLOSSARY.md](GLOSSARY.md).
 
@@ -25,6 +25,7 @@ Needs node 22, pnpm, rustup (the toolchain is pinned in `core/rust-toolchain.tom
 pnpm test          # Rust tests, then build everything and run the e2e suite in headless Brave and Firefox
 pnpm build         # build only: core/dist/*.wasm, then extension/dist/{chromium,firefox}
 pnpm build:web     # core WASM, then the standalone web wallet in app/build-web
+pnpm test:mainnet-live   # the shipped build against the public mainnet explorers, read-only (opt-in)
 pnpm typecheck
 ```
 

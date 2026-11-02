@@ -4,7 +4,9 @@
 
 - [Two kinds of test](#two-kinds-of-test)
 - [The e2e build](#the-e2e-build)
+- [The mainnet e2e build](#the-mainnet-e2e-build)
 - [The web e2e build](#the-web-e2e-build)
+- [Live mainnet check](#live-mainnet-check)
 - [Try the e2e build by hand](#try-the-e2e-build-by-hand)
 - [Writing e2e tests](#writing-e2e-tests)
 - [Firefox](#firefox)
@@ -39,6 +41,14 @@ The shipped build is mainnet's and reads public explorers, which tests can't con
 - Tests that load a module directly (`core-modules.test`, `flush.test`…) load the e2e build's, which is betanet's. `core-modules.test` also checks that the shipped modules serve mainnet.
 - Browser tests run on the e2e build (`launchWallet`'s default), so none reaches a public explorer. Only `extension-loads.test` loads the shipped build (`{ build: "shipped" }`), and it opens only onboarding pages.
 
+### The mainnet e2e build
+
+Every fixture is betanet's, but mainnet is what ships. So `pnpm build:e2e:mainnet` (`e2e/scripts/build.mjs --network mainnet`) builds the extension once more, for mainnet, into `e2e/dist/mainnet/`, with eCash's and Flush's mainnet servers pointed at the same stubs and ports as above (its own cargo target dir, `core/target/e2e-mainnet`). Elements+ has no mainnet, so it has no `elements.wasm`. `pnpm test` builds it; `pnpm test:quick mainnet` does too.
+
+- `launchWallet(name, { build: "e2e-mainnet" })` (`DIST_E2E_MAINNET`) launches it.
+- `build-output.test` checks it differs from the shipped build only in its servers.
+- `mainnet.test` runs what differs between networks on it, end to end: the Chains screen lists eCash and Flush as Slot 46 only; Flush's addresses are `flx1…`; a first Deposit to Slot 46 checks its activation block (978,331) and goes out with mainnet's replay nLockTime (499999998) to Slot 46's Treasury (`b7012e51`); Sends on eCash and on Flush are reviewed as `ecash:mainnet` and `ecash:mainnet-s46`; a Sidechain App gets Slot 46's address, and `window.flush` names the network `ecash`; a server on betanet's Flush genesis, or with another block at eCash's mainnet fork height, is refused. Its addresses are derived by the mainnet build's own `vault.wasm`, `l1.wasm` and `flush.wasm`.
+
 ### The web e2e build
 
 `pnpm build:e2e:web` runs after `pnpm build:e2e` and reuses its stub-backed core modules. It builds the web app into `e2e/dist/web`, leaving `app/build-web` for the shipped web build. `ECX_CORE_DIST`, `ECX_CHAIN_ENTRIES` and `ECX_APP_WEB_DIST` select the WASM, the Chain Entries used to derive CSP origins, and the output directory. Slot 24 stays excluded; the web build contains L1 and Flush. The Esplora stubs send no CORS headers, like the real Elements explorer, unless a test passes `cors: true` in their config; the web tests do, since their pages can't use `host_permissions`. Web tests navigate the way in-app links do: assigning `location.hash` would bypass SvelteKit's router and reload the page, ending the Worker and its unlocked session.
@@ -55,6 +65,10 @@ The tests create a vault, lock/unlock it, and reload to check that IndexedDB ret
 `web-provider.test.mjs` drives the web Provider (#85). It imports the wallet on the web origin (`127.0.0.1`), then opens the test app on `webapp.localhost`, a different site, with `discover({ webWallet })`. The first request comes from a button the test app arms (`testApp.arm`) and the test clicks, because `window.open` needs a click. The popup is found with `waitForTarget` on its URL. The test covers connect (approval shows the browser's origin, not the one in params), an unlock in the popup, a rejected wider Grant, `grantChanged` on `disconnect`, the app reloading with the popup open (same window, no unlock), the popup reloading during an approval (4900), and 4900 when the popup closes. A further test drives the demo app (`demo/`, bundled the way its build does, on `demo.localhost`), which imports `client.js` cross-origin from the served web build (so the `/client.js` CORS rule in `_headers` is exercised; `serveWebWallet` applies per-path rules on top of `/*`), with `?wallet=` and `?slot=99`: Connect, approve and unlock in the popup, the address shown, Disconnect. Two tests cover the Apps view (#91). In the first, the wallet frames the demo (served with `frame-ancestors` for the wallet), and Connect is refused, then approved and unlocked in the overlay, with no popup. A mark set in the frame shows it never reloaded. In the second, the demo sends its frame to a plain page that allows framing but loads no client, so the bar forgets the origin and says "Not connected". A page with `frame-ancestors 'none'` gets the same notice. The tests reach the frame with `page.waitForFrame`. `web-host.test.mjs` covers the same boundary without a browser: `serveOpener`'s origin checks, `hello` and the cross-tab Grant relay (with an in-memory `BroadcastChannel`), and the Worker's `appRequest` envelope, its spend locks, and a `slot` that can't be converted.
 
 Each normal flow checks the navigation response's CSP header and collects page errors, console errors and `securitypolicyviolation` events. A separate test deliberately inserts an inline script and checks CSP blocks it, so enforcement is not inferred just from the header. Worker requests to the stubs must also pass the CSP sent on the Worker script. Browser execution is required to verify these checks; syntax and builds alone do not verify navigation timing, console forwarding or browser CSP support.
+
+### Live mainnet check
+
+`pnpm test:mainnet-live` builds the shipped extension and runs `e2e/live/*.test.mjs`, outside `pnpm test`: it needs the network, and what the servers hold changes. It only reads. It checks that eCash's mainnet explorer (`explorer.ecash.ninja`) has the fork block the wallet pins and Slot 46's activation, and Flush's (`explorer.blockfab.org/flush`) the genesis it pins; then, in each browser, it imports "abandon … about" into the shipped build with Flush on, and checks home and both chains' Activity load with no error. Nothing is signed or broadcast. `E2E_BROWSERS` applies as usual.
 
 ## Try the e2e build by hand
 
