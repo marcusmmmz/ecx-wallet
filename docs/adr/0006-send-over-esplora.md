@@ -17,6 +17,8 @@ Every output in `build_transfer`'s order is `{ asset, amount, to: { address } }`
 
 An app with a Grant for `sendTransfer` can have the wallet make a Send: `{ slot, outputs }`, answered with `{ txid }`. It is the same Send, built and held by the same rules, over Esplora and `/v1` alike, with three differences. The approval window names the app's origin. A request while the wallet is locked opens the window to unlock first, then builds, then shows the transfer in the same window; it doesn't fail with 4100 as `getAddresses` does. A failure after approval is the app's answer, not a refused Send in Activity, since the app's page is still open.
 
+**Amended 2026-11-12:** `getAddresses` now unlocks the same way (df37e85), so neither fails with 4100 while the wallet is locked.
+
 - **Outputs only.** The wallet builds the whole transaction. Completing a PSET the app started (swaps) is a different method: it needs foreign inputs without our derivation, a net-flow approval rather than checking the Clear View against an order, and often the app, not the wallet, broadcasting.
 - **Its own Grant.** `signTransaction`'s doesn't cover it: a funded transaction shows the app the wallet's coins and a change address.
 - **Always Clear.** The wallet built it, so a Blind result is a wallet bug, refused even if the Grant opts into Blind Signing. So only output kinds the Decoder explains are accepted: `address` for now; any other `to` is refused.

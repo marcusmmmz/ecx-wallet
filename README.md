@@ -35,7 +35,7 @@ pnpm typecheck
 
 `pnpm build:web` writes a static site to `app/build-web` (or `pnpm --filter @ecx/app build:web` after building core). Serve it over HTTPS. It supplies the CSP and security headers twice: `_headers` for Netlify / Cloudflare Pages, and `vercel.json` for Vercel (`vercel deploy app/build-web`). A Vercel Git build uses the root `vercel.json` (it installs clang and llvm, then runs `pnpm build:web`), and the postbuild hands Vercel the site as Build Output with the same headers. Other hosts must send those headers themselves.
 
-The web wallet supports eCash and Flush, with keys held in a dedicated Worker and encrypted data in IndexedDB. Reloading locks it: the session lives only in memory. Auto-lock uses a timer and checks the deadline when the tab becomes visible, as well as on every use. Approvals stay in the page. A Sidechain App reaches it in two ways (see [The Provider](docs/how-it-works.md#the-provider)). The user can open the app in the wallet's Apps view, with no popup and one unlock for the session. Otherwise `client` can open a web wallet the app names in a popup.
+The web wallet supports eCash and Flush, with keys held in a dedicated Worker and encrypted data in IndexedDB. Reloading locks it: the session lives only in memory. Auto-lock uses a timer and checks the deadline when the tab becomes visible, as well as on every use. Approvals stay in the page. A Sidechain App reaches it in two ways (see [The Provider](docs/how-it-works.md#the-provider)). The user can open the app in the wallet's Apps view, with no popup and one unlock for the session. Otherwise `client` can open a web wallet the app names in a popup. There is no browser side panel. Slot 24 is unavailable because its explorer sends no CORS headers (checked 2026-10-29).
 
 `client` isn't on npm. The web build serves it, bundled, at `/client.js` (CORS open), so a site adds the wallet with one import:
 
@@ -53,7 +53,7 @@ The script runs with the site's own privileges, so a site trusts whoever deploys
 
 ## Demo app
 
-`pnpm demo` builds and serves a demo Sidechain App (`demo/`) at `http://localhost:5180/?wallet=<web wallet URL>`: Connect wallet, the Flush address, Send, Disconnect. `?wallet=` is required: it names the web wallet that serves `client.js`, which the demo loads as any site would. The demo uses a web wallet framing it (the demo server sends `frame-ancestors *`), else the extension if one is installed, else that web wallet in a popup. `&slot=99` uses betanet's Flush Slot (the default is 46, mainnet's). There is no browser side panel. Slot 24 is unavailable because its explorer sends no CORS headers (checked 2026-10-29).
+`pnpm demo` builds and serves a demo Sidechain App (`demo/`) at `http://localhost:5180/?wallet=<web wallet URL>`: Connect wallet, the Flush address, Send, Disconnect. `?wallet=` is required: it names the web wallet that serves `client.js`, which the demo loads as any site would. The demo uses a web wallet framing it (the demo server sends `frame-ancestors *`), else the extension if one is installed, else that web wallet in a popup. `&slot=99` uses betanet's Flush Slot (the default is 46, mainnet's).
 
 ## Release
 

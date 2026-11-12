@@ -93,7 +93,7 @@ The extension build turns the build network's server URLs into `host_permissions
 
 ### Esplora (`wallet/src/esplora.ts`)
 
-- **Identity check:** the wallet first checks `/block-height/H` against the Chain Entry's `identityBlock`. For Elements that's height 0, the genesis. eCash betanet's genesis is Bitcoin's, so it uses its fork block, 967,680 (ADR 0003). A mismatch is a hard error, and so is a server that hasn't reached H.
+- **Identity check:** the wallet first checks `/block-height/H` against the Chain Entry's `identityBlock`. For Elements that's height 0, the genesis. eCash betanet's genesis is Bitcoin's, so it uses its fork block: 973,728 on mainnet (ADR 0019), 967,680 on betanet (ADR 0003). A mismatch is a hard error, and so is a server that hasn't reached H.
 - **Balance:** the sum of the explicit outputs (`/address/:a/utxo`) of the first 20 receive and 20 change addresses, per asset, with confirmed and unconfirmed kept apart. eCash's outputs have no asset: they're its coin (`NATIVE_COIN`), shown in sats.
 - electrs already leaves out outputs its mempool spends. So a Deposit's coin leaves the confirmed balance at once, and its change shows as unconfirmed.
 - Lookups run 20 at once (`QUERIES_AT_ONCE`).
@@ -147,7 +147,7 @@ The API this project defines, for a sidechain with no indexer. Its protocol draf
   - on Flush, a value-0 coin it pays or spends counts as the asset token its creating transaction's marker lists, read by the module's `outputTokens` as the balance reads it (ADR 0013). A trade's row shows the tokens that left, its change netted. A coin the marker lists as a result adds "+ amounts only the node knows not shown" (`results`): what it carries is in the node's state;
   - a Flush trade (kind 21, through any number of pools), funded by the wallet and paying ECX to one of its addresses, gets `trade` (`wallet/src/flush-trades.ts`, ADR 0017, 0018). Its outcome comes from the market index by its txid (`/flush/market/trades/:txid`): filled or missed, and what it paid out. Until the index (`/flush/market/status`) reaches its block it is settling; past it, a 404 means no order, and the transaction shows as itself. Each ECX payout the index reports (what it filled with, a miss's refund, a launch buy's ECX back past the curve's end) is the earliest unclaimed coinbase output to the order's `chn_to` of exactly that amount, folded into the trade's entry: in the trade's own block from `v7_height` (the status's `launch_params`), at or after it before that. Until then the payout is queued. The index's answer is cached for the session by the trade's block (a soft one can be replaced), and in `storage.local` once the trade's block is final (a 404, for the session only), with `v7_height`.
 - **Paging:** History reads up to 3 older pages of an address's confirmed transactions past the first (`HISTORY_PAGES`), with Blockstream's `/txs/chain/:txid` or, on mempool's fork (Flush's explorer), `?after_txid=` (ADR 0012). Servers list 10, 25 or 50 per page, so any page of 10 or more (`FULL_PAGE_TXS`) may have older ones after it; a shorter one is the last. When pages remain past those, the mempool's list is full (50), or the server repeats a page, the screen says older transactions may not be shown, with **Show older**, which reads up to 3 more pages per address past the oldest read (`history.reported` with `older`).
-- **Kept history** (ADR 0020): each address's confirmed transactions, from the newest 10 blocks deep (on Flush, in a final block) back to the oldest read, are kept in `host.persistent` (`KeptHistory`). The next read pages back only until it meets one, then adds the rest from what was kept. If none turns up within 40 pages, or the list ends first, what was kept is dropped and read again. A kept transaction the wallet didn't fund keeps only the outputs paying it (`ShrunkTx`): a batch payout can have thousands.
+- **Kept history** (ADR 0020): each address's confirmed transactions, from the newest 10 blocks deep (on Flush, in a final block) back to the oldest read, are kept in `host.persistent` (`KeptHistory`). The next read pages back only until it meets one, then adds the rest from what was kept. If none turns up within 40 pages, or the list ends first, what was kept is dropped and read again. A kept transaction the wallet didn't fund keeps only the outputs paying it (`ShrunkTx`; on Flush it stays whole, since tokens and trades read other outputs): a batch payout can have thousands.
 - **Trust needs each input's parent.** Over Esplora the wallet assumes a parent missing from the lists is confirmed. It paid a watched address, whose list has every one of its mempool transactions (up to 50), so only an older confirmed one can be missing.
 
 ## Assets
@@ -197,7 +197,7 @@ A ticker of the Chain Entry's, in any case, is refused, with the reason shown. A
 
 **Tracking:** pending Deposits sit in `storage.local` (`deposit:<txid>`) and show under "In progress" on the Activity tabs (`deposit.list`), each with its txid. They go through:
 
-1. "n / N" confirmations, N being the Slot's `depositConfirmations` from its Chain Entry (6 on betanet; BIP300's 100 when absent);
+1. "n / N" confirmations, N being the Slot's `depositConfirmations` from its Chain Entry (2 for Flush, 6 for Elements; BIP300's 100 when absent);
 2. waiting for the operator's `importdrivechaindeposit` (the claim arguments are shown), or on Flush, which pays Deposits itself, for its payout;
 3. "credited", once the Slot's server lists a transaction to the address (`/address/:a/txs`) with an input claiming the Deposit's txid (`is_pegin`), confirmed or not. Past the first page it pages back (`/txs/chain/:last`), 25 confirmed at a time, until a page ends in a transaction mined below the Slot's tip when the Deposit was sent, less 10 blocks for a reorg (`isCredited`). That height is read just after the broadcast, waiting at most 5 seconds, and kept with the Deposit (`slotHeight`); without it, the tracker pages to the end. Heights, not block times: after a gap in a BMM chain's blocks, a block's time may legally be hours in the past. On Flush, nothing names the M5: its credit is a coinbase output after the first paying the address exactly the Deposit's value, in a block above `slotHeight`, that no other Deposit has claimed (`flushCredit`). A Deposit sent without `slotHeight` takes Flush's tip on a later check, while it is still short of its eCash confirmations and so can't have been paid. Until it has one it isn't matched at all: an older payout of the same value (another Deposit's, or one no longer tracked) could pass for its credit. Deposits are matched oldest first, as Flush pays them in eCash order. The matched output is kept with the Deposit, which stays listed as credited while another Deposit of the same value to the same address waits.
 
@@ -235,6 +235,7 @@ What a Sidechain App calls (`wallet/src/provider.ts`). It finds the Provider wit
 | 4001 | The user rejected, or closed the window. |
 | 4100 | No Grant for this method or Slot. |
 | 4200 | Unsupported method or format. |
+| 4900 | The wallet can't be reached: the extension's background or the web wallet's Worker didn't answer, or the popup was blocked, closed or reloaded. |
 | 4901 | The wallet has no Chain Module for the Slot. |
 | -32602 | Invalid params, or a request the wallet won't sign or build. |
 | -32001 | The Sidechain Server failed or refused. |
@@ -271,7 +272,7 @@ A chain's action, built by the wallet (#60, ADR 0016). On Flush, `action` is a `
 
 **`window.flush`**: flush.markets finds a wallet only there, so the in-page script also defines `window.flush` (`isFlush: true`; `name: "ECX Wallet"`; `actions`, the verbs it builds: `swap`, `route`, `buy`, `sell`; and `request({ method, params })` for its two methods), unless the page already has one. Both go through the same relay as the Provider:
 
-- `flush_requestAddress` → `{ network: "ecashbeta", address }`: the given-out address of the Flush Slot on the wallet's network, with the network as a link names it. It's the site's first call, so without a Grant it asks for one (`getAddresses` and `sendTransfer` on that Slot).
+- `flush_requestAddress` → `{ network, address }`: the given-out address of the Flush Slot on the wallet's network, with the network as a link names it (`"ecash"` on mainnet, `"ecashbeta"` on betanet). It's the site's first call, so without a Grant it asks for one (`getAddresses` and `sendTransfer` on that Slot).
 - `flush_submit({ uri })` → `{ txid }`: `sendAction` on that Slot.
 - A rejection reads exactly "User rejected.", which the site takes quietly; any other error's message is shown to the user there.
 
