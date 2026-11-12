@@ -56,6 +56,14 @@ const CATCH_UP_PAGES = 40;
 const KEPT_DEPTH = 10;
 
 /**
+ * How many newly settled transactions kept history may leave out before it's rewritten (#94): a
+ * page's worth, so a read still meets a kept one within a page or so of the newest settled, well
+ * inside `CATCH_UP_PAGES`. Until then a read pages back to the list as written and reads them from
+ * the server again, being newer than it.
+ */
+const KEEP_BATCH = 25;
+
+/**
  * An address's confirmed transactions the history keeps for good, newest first: every one from the
  * newest kept back to the oldest, statuses settled. `end`: the oldest is the address's first.
  */
@@ -103,6 +111,17 @@ function readKept(stored: unknown): { txs: EsploraTx[]; end: boolean } | undefin
   } catch {
     return undefined;
   }
+}
+
+/**
+ * How many transactions `txs` (and `end`) adds on top of what's `kept`, if it's those followed by
+ * all of `kept` as it is; else Infinity (it reaches further back, ends, or replaces it).
+ */
+function newerOnTop(kept: { txs: EsploraTx[]; end: boolean }, txs: EsploraTx[], end: boolean): number {
+  const added = txs.length - kept.txs.length;
+  if (kept.end !== end || added < 0) return Infinity;
+  if (kept.txs.length === 0) return added === 0 ? 0 : Infinity;
+  return txs[added].txid === kept.txs[0].txid && txs[txs.length - 1].txid === kept.txs[kept.txs.length - 1].txid ? added : Infinity;
 }
 
 /** `tx` as kept: shrunk if none of its inputs are the watch's (`ours`), else whole. */
@@ -474,8 +493,10 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
    * oldest run of transactions no reorg should undo, `KEPT_DEPTH` deep or on Flush in a final
    * block. With `met` (`confirmed` holds all that `kept` had), it must hold all of it still: older
    * pages not yet final (Flush) don't trade kept history for less. What a read running alongside
-   * kept further back meanwhile (Show older beside a quiet refresh) is added on. Written only when
-   * it changed. Best effort: a failed write costs only paging next time.
+   * kept further back meanwhile (Show older beside a quiet refresh) is added on, from a read just
+   * before the write. Written only when it changed: at once if it reaches further back, ends, or
+   * replaces `kept`; if it only adds newer ones on top of `kept`, once `KEEP_BATCH` have. Best
+   * effort: a failed write costs only paging next time.
    */
   async function keep(
     key: string,
@@ -493,6 +514,7 @@ export function esploraClient({ url: baseUrl, identityBlock, chainName, cache, f
       let txs = confirmed.slice(from);
       const ids = new Set(txs.map((tx) => tx.txid));
       if (met && kept!.txs.some((tx) => !ids.has(tx.txid))) return;
+      if (kept === undefined ? txs.length === 0 : newerOnTop(kept, txs, end) < KEEP_BATCH) return;
       const now = readKept(await historyStore!.get(key));
       const at = txs.length === 0 ? -1 : (now?.txs.findIndex((tx) => tx.txid === txs[txs.length - 1].txid) ?? -1);
       if (at >= 0) {
