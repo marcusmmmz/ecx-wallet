@@ -296,6 +296,26 @@ for (const browserName of BROWSERS) describe(browserName, () => {
       assert.ok(requests.includes("/fee-estimates"));
     });
 
+    // The server knows the M5, unconfirmed, and still lists the coin it spent, as a lagging index
+    // would: a Deposit built on that coin would double-spend the first. It stays held while the
+    // server knows the M5, however many blocks pass (#86).
+    test("a second Deposit while the first is still unconfirmed doesn't spend the coin the first did", async () => {
+      const m5 = L1.txs.find((t) => parseTx(t.hex).txid === depositTxid);
+      assert.equal(m5?.confirmed, false, "the server lists the first Deposit, unconfirmed");
+      assert.ok(L1.utxos[L1_RECEIVE_0].some((u) => u.txid === FUNDING.txid), "and still lists the coin it spent");
+      const tipHeight = L1.tipHeight;
+      L1.tipHeight += 6;
+      try {
+        const page = await startDeposit(session, "5000");
+        assert.match((await outcome(page)).error, /^Not enough confirmed eCash: .* the wallet has 0\. 250000 sats more are held by a Send or Deposit waiting to confirm\.$/);
+        assert.equal((await session.approvalWindows()).length, 0);
+        await page.close();
+      } finally {
+        L1.tipHeight = tipHeight;
+      }
+      assert.equal(l1Stub.broadcasts().length, 1);
+    });
+
     test("home's Activity tab follows it, showing its txid: confirmations, then the operator's import with the claim, then credited", async () => {
       assert.deepEqual(
         (await readDeposits(session)).map(({ txid, shownTxid, stopTracking, state, status }) => ({ txid, shownTxid, stopTracking, state, status })),

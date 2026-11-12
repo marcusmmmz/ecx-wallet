@@ -168,6 +168,47 @@ for (const browserName of BROWSERS) describe(browserName, () => {
     await page.close();
   });
 
+  test("a Send right after a Deposit doesn't pick the coins the Deposit spent", async () => {
+    // Two more coins: the Deposit takes the larger. The server keeps listing every coin as unspent.
+    const coin = (seed, value) => {
+      const hex = encodeTx({ inputs: [{ txid: seed.repeat(32), vout: 0 }], outputs: [{ value, script: addressScript(L1_RECEIVE_0) }] });
+      return { hex, txid: parseTx(hex).txid, confirmed: true, blockHeight: 970900 };
+    };
+    const big = coin("f1", 300000);
+    const small = coin("f2", 60000);
+    L1.txs.push(big, small);
+    L1.utxos = {
+      [L1_RECEIVE_0]: [FUNDING, big, small].map(({ txid }, i) => ({ txid, vout: 0, value: [250000, 300000, 60000][i], confirmed: true })),
+    };
+    L1.addressTxCounts = {};
+
+    const deposit = await openWalletPage(session, "#/deposit/24");
+    await deposit.waitForSelector("[data-deposit-available]", { timeout: 20_000 });
+    await waitForFunction(deposit, () => document.querySelector("[data-deposit-scanning]") === null, { timeout: 20_000 });
+    await deposit.type("[data-deposit-amount]", "0.002");
+    await deposit.click("[data-deposit-submit]");
+    await answerIn(await approvalIn(deposit, { timeout: 20_000 }), "[data-approve]");
+    await deposit.waitForSelector("[data-deposit-done], [data-error]", { timeout: 20_000 });
+    assert.equal(await deposit.$eval("[data-error]", (e) => e.textContent).catch(() => null), null);
+    await deposit.close();
+    const m5 = parseTx(l1Stub.broadcasts().at(-1));
+    assert.deepEqual(m5.inputs.map((i) => i.txid), [big.txid], "the Deposit spent the larger coin");
+
+    // The Send's coin and the Deposit's are both held: only the small coin is left.
+    const page = await openSend(session);
+    assert.equal(await spendableText(page), "ECX (0.0006 ECX spendable)");
+    await fill(page, "0.0003", PAY_TO);
+    await answerIn(await approvalIn(page, { timeout: 20_000 }), "[data-approve]");
+    await page.waitForSelector("[data-send-done], [data-error]", { timeout: 20_000 });
+    assert.equal(await page.$eval("[data-error]", (e) => e.textContent).catch(() => null), null);
+    await page.close();
+    const send = parseTx(l1Stub.broadcasts().at(-1));
+    assert.deepEqual(send.inputs.map((i) => i.txid), [small.txid], "built from the one coin nothing holds");
+
+    // Everything broadcast confirms (the server still lists the coins): the holds are released for the tests below.
+    for (const t of L1.txs) t.confirmed = true;
+  });
+
   test("none of the above raised extension runtime errors", async () => {
     assert.deepEqual((await session.extensionErrors()).runtimeErrors, []);
   });
