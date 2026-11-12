@@ -2,7 +2,10 @@
   // The Apps view (#91): a Sidechain App opened inside the wallet, in a frame this page is the
   // Provider of. Only apps that send `frame-ancestors` for the wallet's origin load here. The bar
   // above the frame names the app as the browser reports it; approvals, unlocking included, are
-  // drawn over the frame in the wallet's own UI, so the app stays mounted.
+  // drawn over the frame in the wallet's own UI, so the app stays mounted. The app knows where an
+  // approval's buttons will be, so while one is up the frame takes no input (`inert`), focus moves
+  // to the approval, its approving buttons wait a moment (Approval's arming), and the bar, which
+  // the app can't draw on, says it's the wallet's: an approval drawn by the app can't change it.
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { closeOverlayApproval, hostApprovals, serveFrame } from "$platform";
@@ -39,6 +42,8 @@
   let origin = $state<string | undefined>(undefined);
   let silent = $state(false);
   let approval = $state<string | undefined>(undefined);
+  /** Whose request the approval on show is, as its prompt says. */
+  let approvalFor = $state<string | undefined>(undefined);
 
   listChains().then(
     // Every chain's, on or not: an app's first request asks to turn its chain on.
@@ -68,7 +73,12 @@
     goto(`#/apps?url=${encodeURIComponent(url)}`);
   }
 
-  $effect(() => hostApprovals((id) => (approval = id)));
+  $effect(() =>
+    hostApprovals((id) => {
+      approval = id;
+      approvalFor = undefined;
+    }),
+  );
 
   $effect(() => {
     if (!frame) return;
@@ -97,6 +107,7 @@
   <main class="screen" data-apps>
     <TopBar title="Apps" back="#/" />
     <p class="muted small">Open a Sidechain App inside the wallet. It uses this wallet without a popup. Only apps that support opening in the wallet load here.</p>
+    <p class="muted small" data-approval-help>When the app asks the wallet for something, the bar above it turns to <strong>Wallet approval</strong> while you decide. The app can draw anything below the bar, so an approval or password prompt without that bar is the app's, not the wallet's.</p>
     <form class="stack" onsubmit={open}>
       <input bind:value={typed} placeholder="https://app.example" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="App address" data-app-address />
       {#if typedError}<p class="error small">{typedError}</p>{/if}
@@ -114,10 +125,13 @@
 {:else}
   <main class="app-view" data-app-view>
     <!-- The wallet's own bar, always above the frame: the app can't draw over it. -->
-    <header class="app-bar">
+    <header class="app-bar" class:approving={approval !== undefined} data-app-bar-approval={approval !== undefined || undefined}>
       <a class="close" href="#/apps" aria-label="Close the app"><Icon name="close" size={18} /></a>
       <div class="who">
-        {#if origin}
+        {#if approval !== undefined}
+          <strong class="origin" data-app-bar-approval-for>Wallet approval{approvalFor ? ` for ${approvalFor}` : ""}</strong>
+          <span class="small">From the wallet, not the app. Only the wallet can show this bar.</span>
+        {:else if origin}
           <strong class="origin" data-app-origin>{origin}</strong>
           <span class="muted small">App, not the wallet{isLocal(new URL(origin).hostname) ? " · on this computer" : ""}</span>
         {:else}
@@ -133,13 +147,13 @@
     {/if}
     <div class="stage">
       {#key opened}
-        <iframe bind:this={frame} class="app-frame" src={opened} sandbox={SANDBOX} allow="clipboard-write" referrerpolicy="no-referrer" title="Sidechain App" data-app-frame></iframe>
+        <iframe bind:this={frame} class="app-frame" inert={approval !== undefined} src={opened} sandbox={SANDBOX} allow="clipboard-write" referrerpolicy="no-referrer" title="Sidechain App" data-app-frame></iframe>
       {/key}
       {#if approval}
         <div class="overlay" role="dialog" aria-modal="true" aria-label="Wallet approval" data-app-approval>
           {#key approval}
             {@const id = approval}
-            <Approval {id} hosted ondone={() => closeOverlayApproval(id)} />
+            <Approval {id} hosted focus onshow={(o) => (approvalFor = o)} ondone={() => closeOverlayApproval(id)} />
           {/key}
         </div>
       {/if}
@@ -167,6 +181,15 @@
     padding: 8px 12px;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
+  }
+  /* The wallet's approval colour: the bar is the one place the app can't imitate it. */
+  .app-bar.approving {
+    background: var(--accent);
+    border-bottom-color: var(--accent);
+    color: var(--on-accent);
+  }
+  .app-bar.approving .close {
+    color: var(--on-accent);
   }
   .close {
     display: flex;

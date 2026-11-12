@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
-import { BROWSERS, ROOT, WALLET_PASSWORD, launchWallet, openTestApp, serveTestApp, setUpWallet } from "../harness.mjs";
+import { ARMED, BROWSERS, ROOT, WALLET_PASSWORD, launchWallet, openTestApp, serveTestApp, setUpWallet } from "../harness.mjs";
 
 const PSETS = JSON.parse(await readFile(path.join(ROOT, "e2e", "fixtures", "elements-psets.json"), "utf8"));
 const CHAIN = "ecash:betanet-s24";
@@ -181,7 +181,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
     assert.equal(await approval.$("[data-approve]"), null, "nothing to approve before unlocking");
     await approval.type("[data-password]", WALLET_PASSWORD);
     await approval.click("[data-unlock]");
-    await approval.waitForSelector("[data-blind]", { timeout: 20_000 });
+    await approval.waitForSelector(`[data-blind]${ARMED}`, { timeout: 20_000 });
     await approval.click("[data-approve]");
     assert.deepEqual(await signing, { result: PSETS.blind.signed });
   });
