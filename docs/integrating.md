@@ -52,13 +52,18 @@ function extensionWallets(timeoutMs = 200) {
 
 ## Letting web wallets open your site
 
-A web wallet can only show your site if your site lets it be framed. Send:
+A web wallet can only show your site if your site lets it be framed. Name the wallets you support by their origins:
 
 ```http
-Content-Security-Policy: frame-ancestors *
+Content-Security-Policy: frame-ancestors https://wallet.example https://other-wallet.example
 ```
 
-`*` lets any web wallet open your site. It also lets any other site frame it, which matters only if one click on your site can act on a logged-in session (clickjacking). Approvals happen in the wallet, not on your page. To allow only some wallets, name their origins: `frame-ancestors https://wallet.example`. Don't send `X-Frame-Options: DENY` or `SAMEORIGIN`.
+Prefer this to `frame-ancestors *`. Framed, your page treats whatever page frames it as its wallet. With `*`, any site can frame yours and answer as a wallet:
+
+- **A rogue wallet.** It can hand your page addresses of its own choosing, so your page shows the attacker's address as "your address", or credits it on your server. It can also pose as a wallet to phish the user's password or recovery phrase.
+- **Clickjacking.** It can lay your page under its own, so a click meant for it lands on yours. That matters if one click on your site can act on a logged-in session. Approvals happen in the wallet, not on your page.
+
+Whichever you send, show the user which wallet your page is using: `discoverProviders()` names a framing wallet by its origin (`info.name`, `Wallet at <origin>`). Don't send `X-Frame-Options: DENY` or `SAMEORIGIN`.
 
 Inside a wallet's frame, your site is third-party:
 

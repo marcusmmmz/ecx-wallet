@@ -42,7 +42,9 @@ function post(message: ToWorker): void {
           ports.get(m.id)?.messages.forEach((listener) => listener(m.message));
           break;
         case "openApproval":
-          // Only one surface fits in the page; replacing it cancels its previous request.
+          // Only one surface fits in the page; replacing it cancels its previous request. The new
+          // one takes no approving click until it has been in view a moment (Approval's arming),
+          // so swapping one in under the user's click doesn't approve it.
           if (overlay) {
             closeSurface(false);
             approval = { id: m.id, back: "", overlay: true };

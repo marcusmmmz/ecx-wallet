@@ -343,12 +343,12 @@ function walletSession(browser, profile, walletPrefix) {
       return page;
     },
 
-    /** Resolves with the next approval window the wallet opens, once it has rendered. */
+    /** Resolves with the next approval window the wallet opens, once it has rendered and armed (it takes approving clicks: `ARMED`). */
     async waitForApprovalWindow({ timeout = 10_000 } = {}) {
       for (const end = Date.now() + timeout; ; await new Promise((r) => setTimeout(r, 100))) {
         const [page] = await liveApprovals();
         if (page) {
-          await page.waitForSelector("[data-approval-ready]", { timeout });
+          await page.waitForSelector(ARMED, { timeout });
           return page;
         }
         if (Date.now() > end) throw new Error(`No approval window within ${timeout} ms`);
@@ -493,11 +493,19 @@ export async function turnOnChain(page, slot, on = true) {
 }
 
 /**
+ * An approval on show that has been in view long enough to take approving clicks (Approval's
+ * arming: until then Approve, Unlock and the Blind opt-in are disabled, and a click does nothing).
+ * Wait for it, prefixed with a prompt's own marker if need be (`[data-blind]${ARMED}`), whenever
+ * the prompt changes before a click: unlocking shows the request anew.
+ */
+export const ARMED = "[data-approval-ready][data-armed]";
+
+/**
  * The approval a wallet page shows in place of itself (its own Send or Deposit: a window would
- * close the toolbar popup), once rendered. Returns `page`, to use as the approval window was.
+ * close the toolbar popup), once rendered and armed. Returns `page`, to use as the approval window was.
  */
 export async function approvalIn(page, { timeout = 10_000 } = {}) {
-  await page.waitForSelector("[data-approval-ready]", { timeout });
+  await page.waitForSelector(ARMED, { timeout });
   return page;
 }
 
@@ -506,6 +514,7 @@ export async function approvalIn(page, { timeout = 10_000 } = {}) {
  * waits until the page is back to its own screen, so closing it can't cut the answer off.
  */
 export async function answerIn(page, button) {
+  await page.waitForSelector(ARMED, { timeout: 10_000 });
   await page.click(button);
   await waitForFunction(page, () => document.querySelector("[data-approval-ready]") === null, { timeout: 10_000 });
 }

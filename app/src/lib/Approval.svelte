@@ -16,15 +16,42 @@
   import { assetSource, shortAsset } from "$lib/asset";
   import AssetBadge from "$lib/AssetBadge.svelte";
   import Icon from "$lib/Icon.svelte";
+  import { armWhenSeen } from "$lib/arming";
   import { amountText } from "$lib/unit.svelte";
 
-  /** `ondone`: the approval has nothing more to show (answered, or closed by the background). */
-  let { id, ondone, hosted = false }: { id: string; ondone: () => void; hosted?: boolean } = $props();
+  /**
+   * `ondone`: the approval has nothing more to show (answered, or closed by the background).
+   * `onshow`: hears the requester's origin each time a prompt shows (the Apps view's bar names it).
+   * `focus`: take keyboard focus as each prompt shows (over the Apps view, it would otherwise stay
+   * in the app's frame): the password field to unlock, else the button that declines.
+   */
+  let {
+    id,
+    ondone,
+    onshow,
+    hosted = false,
+    focus = false,
+  }: { id: string; ondone: () => void; onshow?: (origin: string) => void; hosted?: boolean; focus?: boolean } = $props();
   let prompt = $state<ApprovalPrompt | null | undefined>(undefined);
   let busy = $state(false);
   let blindOptIn = $state(false);
   let password = $state("");
   let error = $state("");
+  /**
+   * Approving, unlocking and the Blind opt-in take no input until this prompt has been in view a
+   * moment (`arming.ts`, `data-armed`), starting over with each prompt and each time the page is
+   * shown again. Rejecting always works.
+   */
+  let armed = $state(false);
+  $effect(() => {
+    if (prompt === undefined) return;
+    if (prompt !== null) onshow?.(prompt.origin);
+    return armWhenSeen((on) => (armed = on));
+  });
+  /** On the password field and each declining button: takes focus as it shows, if `focus`. */
+  function grabFocus(element: HTMLElement) {
+    if (focus) element.focus();
+  }
 
   function load() {
     prompt = undefined;
@@ -45,6 +72,7 @@
   listChains().then((c) => (chains = c), () => {});
 
   async function decide(approved: boolean) {
+    if (approved && !armed) return;
     busy = true;
     await resolveApproval(id, approved, { blindSigning: approved && blindOptIn });
     // The background also closes a window; closing here too keeps that from depending on a browser quirk.
@@ -53,6 +81,7 @@
 
   async function unlock(e: SubmitEvent) {
     e.preventDefault();
+    if (!armed) return;
     busy = true;
     error = "";
     try {
@@ -168,14 +197,14 @@
     <p class="loading"><span class="spinner"></span>Loading…</p>
   </main>
 {:else if prompt === null}
-  <main class="screen" data-approval-ready data-approval-missing>
+  <main class="screen" data-approval-ready data-armed={armed || undefined} data-approval-missing>
     <div class="card centered">
       <h1>Request no longer pending</h1>
       <p class="muted">This request was already answered or has expired. You can close this window.</p>
     </div>
   </main>
 {:else if prompt.kind === "connect"}
-  <main class="screen" data-approval-ready>
+  <main class="screen" data-approval-ready data-armed={armed || undefined}>
     <div class="title">
       <h1>Grant request</h1>
       <p class="muted small">This site asks for a Grant to use your wallet:</p>
@@ -205,7 +234,7 @@
     <p class="notice"><Icon name="shield" /><span>It will not be able to sign anything without asking you each time.</span></p>
 
     <label class="opt-in" class:on={blindOptIn}>
-      <input type="checkbox" bind:checked={blindOptIn} data-blind-opt-in />
+      <input type="checkbox" bind:checked={blindOptIn} disabled={!armed} data-blind-opt-in />
       <span>
         Also allow <strong>Blind Signing</strong>: asking you to sign requests the wallet can't explain.
         Leave this off unless you trust this site completely.
@@ -213,14 +242,14 @@
     </label>
 
     <div class="decision">
-      <button data-reject disabled={busy} onclick={() => decide(false)}>Reject</button>
-      <button class={blindOptIn ? "danger-button" : "primary"} data-approve disabled={busy} onclick={() => decide(true)}>
+      <button data-reject disabled={busy} {@attach grabFocus} onclick={() => decide(false)}>Reject</button>
+      <button class={blindOptIn ? "danger-button" : "primary"} data-approve disabled={busy || !armed} onclick={() => decide(true)}>
         Approve Grant
       </button>
     </div>
   </main>
 {:else if prompt.kind === "turnOn"}
-  <main class="screen" data-approval-ready data-turn-on>
+  <main class="screen" data-approval-ready data-armed={armed || undefined} data-turn-on>
     <div class="title">
       <h1>Turn on {chainNames(prompt.slots)}?</h1>
       <p class="muted small">This site asks to use a chain you have off:</p>
@@ -231,12 +260,12 @@
       <span>Turning it on shows it in your wallet and lets the wallet read it from its server. You can turn it off again in Chains.</span>
     </p>
     <div class="decision">
-      <button data-reject disabled={busy} onclick={() => decide(false)}>Keep it off</button>
-      <button class="primary" data-approve disabled={busy} onclick={() => decide(true)}>Turn on</button>
+      <button data-reject disabled={busy} {@attach grabFocus} onclick={() => decide(false)}>Keep it off</button>
+      <button class="primary" data-approve disabled={busy || !armed} onclick={() => decide(true)}>Turn on</button>
     </div>
   </main>
 {:else if prompt.kind === "unlock"}
-  <main class="screen" data-approval-ready data-unlock-required>
+  <main class="screen" data-approval-ready data-armed={armed || undefined} data-unlock-required>
     <div class="title">
       <h1>Unlock to review a request</h1>
       <p class="muted small">This site sent a Signing Request. Unlock your wallet to see it. Nothing is signed until you approve it.</p>
@@ -245,9 +274,9 @@
     <form class="card" onsubmit={unlock}>
       <label>
         Password
-        <input type="password" autocomplete="current-password" bind:value={password} data-password />
+        <input type="password" autocomplete="current-password" bind:value={password} {@attach grabFocus} data-password />
       </label>
-      <button class="primary block" type="submit" disabled={busy} data-unlock><Icon name="lock" size={16} /> Unlock</button>
+      <button class="primary block" type="submit" disabled={busy || !armed} data-unlock><Icon name="lock" size={16} /> Unlock</button>
     </form>
     {#if error}<p class="error" role="alert" data-error>{error}</p>{/if}
   </main>
@@ -257,7 +286,7 @@
   {@const b = prompt.balance}
   <!-- The balance in the suggested ticker and precision: what approving would show. -->
   {@const as = { id: a.id, ticker: a.ticker, name: a.name, decimals: a.precision }}
-  <main class="screen" data-approval-ready data-suggest-asset>
+  <main class="screen" data-approval-ready data-armed={armed || undefined} data-suggest-asset>
     <div class="title">
       <h1>Name an asset</h1>
       <p class="muted small">This site suggests a name for an asset, for your wallet to show:</p>
@@ -294,8 +323,8 @@
       </p>
     {/if}
     <div class="decision">
-      <button data-reject disabled={busy} onclick={() => decide(false)}>Reject</button>
-      <button class="primary" data-approve disabled={busy} onclick={() => decide(true)}>Name it {a.ticker}</button>
+      <button data-reject disabled={busy} {@attach grabFocus} onclick={() => decide(false)}>Reject</button>
+      <button class="primary" data-approve disabled={busy || !armed} onclick={() => decide(true)}>Name it {a.ticker}</button>
     </div>
   </main>
 {:else if prompt.kind === "sign" && prompt.decoded.kind === "clear"}
@@ -314,7 +343,7 @@
     : []}
   {@const shownAssets = [...assets, ...contractAssets, ...tradeAssets]}
   {@const issuedLabels = issuedAssetLabels(view)}
-  <main class="screen" data-approval-ready data-clear-view>
+  <main class="screen" data-approval-ready data-armed={armed || undefined} data-clear-view>
     {#if dangerous}
       <section class="danger-box" role="alert">
         <h2><Icon name="warning" /> Dangerous</h2>
@@ -516,15 +545,15 @@
     {/each}
 
     <div class="decision">
-      <button data-reject disabled={busy} onclick={() => decide(false)}>Reject</button>
-      <button class={dangerous ? "danger-button" : "primary"} data-approve disabled={busy} onclick={() => decide(true)}>Sign</button>
+      <button data-reject disabled={busy} {@attach grabFocus} onclick={() => decide(false)}>Reject</button>
+      <button class={dangerous ? "danger-button" : "primary"} data-approve disabled={busy || !armed} onclick={() => decide(true)}>Sign</button>
     </div>
   </main>
 {:else if prompt.kind === "sign" && prompt.decoded.kind === "blind"}
   {@const facts = prompt.decoded.verifiableFacts}
   {@const leaving = facts.totalLeaving.filter((a) => BigInt(a.amount) > 0n)}
   {@const comingIn = facts.totalLeaving.filter((a) => BigInt(a.amount) < 0n).map((a) => ({ ...a, amount: a.amount.slice(1) }))}
-  <main class="screen" data-approval-ready data-blind>
+  <main class="screen" data-approval-ready data-armed={armed || undefined} data-blind>
     <div class="blind-banner" role="alert">
       <h1><Icon name="eye_off" size={24} /> Blind Signing</h1>
       <p>The wallet <strong>can't show you what this request does.</strong> {prompt.decoded.reason}</p>
@@ -578,8 +607,8 @@
     {/each}
 
     <div class="decision">
-      <button data-reject disabled={busy} onclick={() => decide(false)}>Reject</button>
-      <button class="danger-button" data-approve disabled={busy} onclick={() => decide(true)}>Sign blindly</button>
+      <button data-reject disabled={busy} {@attach grabFocus} onclick={() => decide(false)}>Reject</button>
+      <button class="danger-button" data-approve disabled={busy || !armed} onclick={() => decide(true)}>Sign blindly</button>
     </div>
   </main>
 {/if}

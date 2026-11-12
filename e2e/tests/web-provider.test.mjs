@@ -8,7 +8,7 @@ import path from "node:path";
 import * as esbuild from "esbuild";
 import { after, before, describe, test } from "node:test";
 import {
-  ABANDON, BROWSERS, ROOT, WALLET_PASSWORD, approvalIn, importWallet, launchWebWallet, openTestApp,
+  ABANDON, ARMED, BROWSERS, ROOT, WALLET_PASSWORD, approvalIn, importWallet, launchWebWallet, openTestApp,
   serveFlushEsplora, serveL1Esplora, serveTestApp, serveWebWallet, waitForFunction,
 } from "../harness.mjs";
 
@@ -124,7 +124,7 @@ for (const browserName of BROWSERS) describe(`${browserName}: web Provider`, () 
 
       // The popup is its own session, so it starts locked: the request asks to unlock there.
       const addresses = page.evaluate(() => window.testApp.request("getAddresses", { slot: 99 }));
-      await popup.waitForSelector("[data-unlock-required]", { timeout: 20_000 });
+      await popup.waitForSelector(`[data-unlock-required]${ARMED}`, { timeout: 20_000 });
       await popup.type("[data-password]", WALLET_PASSWORD);
       await popup.click("[data-unlock]");
       const answer = await addresses;
@@ -189,7 +189,7 @@ for (const browserName of BROWSERS) describe(`${browserName}: web Provider`, () 
       const popup = await (await session.browser.waitForTarget((t) => t.url().includes("#/provider") || t.url().includes("#/approve/"), { timeout: 10_000 })).page();
       await approvalIn(popup, { timeout: 20_000 });
       await popup.click("[data-approve]");
-      await popup.waitForSelector("[data-unlock-required]", { timeout: 20_000 });
+      await popup.waitForSelector(`[data-unlock-required]${ARMED}`, { timeout: 20_000 });
       await popup.type("[data-password]", WALLET_PASSWORD);
       await popup.click("[data-unlock]");
       await waitForFunction(page, () => document.querySelector("[data-address]")?.textContent !== "", { timeout: 20_000 });
@@ -232,7 +232,7 @@ for (const browserName of BROWSERS) describe(`${browserName}: web Provider`, () 
       await overlaySettled(page);
       await page.click("[data-approve]");
       await page.waitForSelector("[data-app-approval] [data-unlock-required]", { timeout: 20_000 });
-      await waitForFunction(page, risen, { timeout: 10_000 }, "[data-app-approval] [data-unlock]");
+      await waitForFunction(page, risen, { timeout: 10_000 }, `[data-app-approval] ${ARMED} [data-unlock]`);
       await page.type("[data-password]", WALLET_PASSWORD);
       await page.click("[data-unlock]");
       await waitForFunction(app, () => document.querySelector("[data-address]")?.textContent !== "", { timeout: 20_000 });
@@ -278,16 +278,86 @@ for (const browserName of BROWSERS) describe(`${browserName}: web Provider`, () 
       const signing = framed.evaluate((r) => window.testApp.request("signTransaction", r), request);
       // This page's session starts locked: signing asks to unlock first.
       await page.waitForSelector("[data-app-approval] [data-unlock-required]", { timeout: 20_000 });
-      await waitForFunction(page, risen, { timeout: 10_000 }, "[data-app-approval] [data-unlock]");
+      await waitForFunction(page, risen, { timeout: 10_000 }, `[data-app-approval] ${ARMED} [data-unlock]`);
       await page.type("[data-password]", WALLET_PASSWORD);
       await page.click("[data-unlock]");
       await page.waitForSelector("[data-app-approval] [data-blind]", { timeout: 20_000 });
-      await waitForFunction(page, risen, { timeout: 10_000 }, "[data-app-approval] [data-approve]");
+      await waitForFunction(page, risen, { timeout: 10_000 }, `[data-app-approval] ${ARMED} [data-approve]`);
       await page.click("[data-app-approval] [data-approve]");
       const signed = await signing;
       assert.equal(signed.error, undefined, JSON.stringify(signed.error));
       // finalize takes only valid signatures on every input.
       assert.equal(flush.finalize(signed.result).txid, FLUSH_PSBTS.reserve.txid);
+      assert.deepEqual(errors, []);
+    } finally {
+      await session.close();
+    }
+  });
+
+  test("over the Apps view an approval takes no approving click at first, the frame no input, and the bar says it's the wallet's; one swapped in starts over", async () => {
+    const session = await launchWebWallet(browserName);
+    try {
+      await importOnWebOrigin(session);
+      const page = await session.browser.newPage();
+      const errors = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      await page.goto(`${web.url}#/apps?url=${encodeURIComponent(app.url(HOST))}`);
+      const framed = await frameOf(page, app.origin(HOST));
+      await waitForFunction(framed, () => window.testApp !== undefined, { timeout: 10_000 });
+      await waitForFunction(page, () => document.querySelector("[data-app-origin]")?.textContent, { timeout: 10_000 });
+      const shown = (methods) => waitForFunction(page, (methods) => {
+        const ready = document.querySelector("[data-app-approval] [data-approval-ready]");
+        const listed = [...(ready?.querySelectorAll("[data-method]") ?? [])].map((e) => e.textContent.trim());
+        if (listed.join() !== methods.join()) return false;
+        return {
+          armed: ready.hasAttribute("data-armed"),
+          approve: ready.querySelector("[data-approve]").disabled,
+          optIn: ready.querySelector("[data-blind-opt-in]").disabled,
+          reject: ready.querySelector("[data-reject]").disabled,
+          focused: document.activeElement?.hasAttribute("data-reject") ?? false,
+          inert: document.querySelector("[data-app-frame]").inert,
+          bar: document.querySelector("[data-app-bar-approval-for]")?.textContent.trim() ?? null,
+        };
+      }, { timeout: 20_000, interval: 20 }, methods);
+
+      // An app picks when its approval appears, and where its buttons are: a click it times
+      // onto Approve lands on a disabled button, and typing goes to the wallet, not the frame.
+      const first = framed.evaluate(() => window.testApp.request("connect", { slots: [99], methods: ["getAddresses"] }));
+      let firstSettled = false;
+      first.then(() => (firstSettled = true), () => {});
+      assert.deepEqual(await shown(["getAddresses"]), {
+        armed: false, approve: true, optIn: true, reject: false, focused: true, inert: true, bar: `Wallet approval for ${app.origin(HOST)}`,
+      });
+      await page.click("[data-app-approval] [data-approve]");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.equal(firstSettled, false, "a click before it's armed approves nothing");
+      assert.ok(await page.$("[data-app-approval] [data-approval-ready]"), "still shown");
+
+      // A request sent while one is up replaces it (the first is refused), and starts over unarmed.
+      const methods = ["getAddresses", "sendTransfer"];
+      const second = framed.evaluate((methods) => window.testApp.request("connect", { slots: [99], methods }), methods);
+      const swapped = await shown(methods);
+      assert.equal(swapped.armed, false, "a swapped-in approval isn't armed");
+      assert.equal(swapped.approve, true);
+      assert.equal((await first).error?.code, 4001);
+
+      // Once it has been in view a moment, it takes the click.
+      await overlaySettled(page);
+      await page.click("[data-app-approval] [data-approve]");
+      assert.deepEqual(await second, { result: { slots: [99], methods } });
+      await waitForFunction(page, () => document.querySelector("[data-app-approval]") === null, { timeout: 10_000 });
+      assert.equal(await page.$eval("[data-app-frame]", (e) => e.inert), false, "the frame takes input again");
+      assert.equal(await page.$("[data-app-bar-approval]"), null);
+      assert.equal(await page.$eval("[data-app-origin]", (e) => e.textContent), app.origin(HOST));
+
+      // Unlocking takes focus to the password field, so the password typed goes to the wallet.
+      const addresses = framed.evaluate(() => window.testApp.request("getAddresses", { slot: 99 }));
+      await page.waitForSelector(`[data-app-approval] [data-unlock-required]${ARMED}`, { timeout: 20_000 });
+      assert.equal(await page.evaluate(() => document.activeElement?.hasAttribute("data-password") ?? false), true);
+      await page.keyboard.type(WALLET_PASSWORD);
+      await page.keyboard.press("Enter");
+      const answer = await addresses;
+      assert.equal(answer.error, undefined, JSON.stringify(answer.error));
       assert.deepEqual(errors, []);
     } finally {
       await session.close();

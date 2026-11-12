@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 import { parseElementsTx } from "@ecx/stub-server/elements-tx";
-import { activitySettled, answerIn, approvalIn, BROWSERS, homeSettled, launchWallet, openTestApp, openWalletPage, relock, serveEsplora, serveL1Esplora, serveTestApp, setUpWallet, WALLET_PASSWORD, waitForFunction } from "../harness.mjs";
+import { activitySettled, answerIn, approvalIn, ARMED, BROWSERS, homeSettled, launchWallet, openTestApp, openWalletPage, relock, serveEsplora, serveL1Esplora, serveTestApp, setUpWallet, WALLET_PASSWORD, waitForFunction } from "../harness.mjs";
 
 const GENESIS = "a7754ce0debc40baddbd8c47e79d19209685f22c63edaaf8b69cf54116374d7f";
 const RECEIVE_0 = "elements1qew44aehkjstjm56ng2rjrz57vwxh5g9su6dlpm";
@@ -376,7 +376,7 @@ for (const browserName of BROWSERS) describe(browserName, () => {
       await approval.waitForSelector("[data-unlock-required]");
       await approval.type("[data-password]", WALLET_PASSWORD);
       await approval.click("[data-unlock]");
-      await approval.waitForSelector("[data-output]", { timeout: 20_000 });
+      await approval.waitForSelector(`${ARMED} [data-output]`, { timeout: 20_000 });
       const review = await approval.evaluate(() => ({
         origin: document.querySelector("[data-origin]").textContent.trim(),
         destinations: [...document.querySelectorAll("[data-output] [data-destination]")].map((e) => e.textContent.trim()),

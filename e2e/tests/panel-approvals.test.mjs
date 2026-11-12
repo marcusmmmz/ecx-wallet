@@ -2,7 +2,7 @@
 // not in a window of their own. Brave only: Firefox's sidebar can't be opened from a test.
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
-import { BROWSERS, launchWallet, openTestApp, openWalletPage, serveTestApp, setUpWallet } from "../harness.mjs";
+import { ARMED, BROWSERS, launchWallet, openTestApp, openWalletPage, serveTestApp, setUpWallet } from "../harness.mjs";
 
 const CONNECT = { slots: [24], methods: ["getAddresses"] };
 
@@ -45,10 +45,15 @@ describe("brave", { skip: !BROWSERS.includes("brave") }, () => {
   test("a site in the panel's window is approved in the panel, its origin shown, and no window opens", async () => {
     const site = await openTestApp(session, app, "dex.localhost");
     const connecting = connect(site);
-    // It takes no click until it has been in view a moment: one meant for the screen can't land on it.
+    // It takes no approving click until it has been in view a moment: one meant for the screen
+    // can't land on it. Rejecting works from the start.
     await panel.waitForSelector("[data-panel-approval] [data-approval-ready]", { timeout: 10_000 });
-    assert.equal(await panel.$eval("[data-panel-approval]", (e) => e.inert), true, "not armed at first");
-    await panel.waitForSelector("[data-panel-approval][data-armed] [data-approval-ready]", { timeout: 10_000 });
+    assert.deepEqual(
+      await panel.$eval("[data-panel-approval] [data-approval-ready]", (e) => [e.hasAttribute("data-armed"), e.querySelector("[data-approve]").disabled, e.querySelector("[data-reject]").disabled]),
+      [false, true, false],
+      "not armed at first",
+    );
+    await panel.waitForSelector(`[data-panel-approval] ${ARMED}`, { timeout: 10_000 });
     assert.equal(await panel.$eval("[data-panel-approval] [data-origin]", (e) => e.textContent.trim()), app.origin("dex.localhost"));
     assert.equal((await session.approvalWindows()).length, 0, "no approval window");
     await panel.click("[data-panel-approval] [data-approve]");
@@ -73,7 +78,7 @@ describe("brave", { skip: !BROWSERS.includes("brave") }, () => {
   test("closing the panel mid-approval rejects it, as closing its window would", async () => {
     const site = await openTestApp(session, app, "third.localhost");
     const connecting = connect(site);
-    await panel.waitForSelector("[data-panel-approval][data-armed] [data-approval-ready]", { timeout: 10_000 });
+    await panel.waitForSelector(`[data-panel-approval] ${ARMED}`, { timeout: 10_000 });
     await panel.close();
     assert.equal((await connecting).error?.code, 4001);
     assert.equal((await session.approvalWindows()).length, 0);
