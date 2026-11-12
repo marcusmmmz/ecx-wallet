@@ -37,4 +37,4 @@ Cross-entry rules are checked by the wallet's tests: every `parent` names a root
 
 - Elements' genesis appears twice (in `identityBlock` and in `params`), and a test keeps the two equal.
 - **Open if nested drivechains appear:** Starters are `m/44'/0'/<slot>'` from the Master Mnemonic, keyed by the Slot alone. Slot 3 under eCash and Slot 3 under Slot 24 would get the same Starter, which breaks the one-Starter-per-chain isolation (#7). A non-root, non-child chain needs a derivation of its own, still BitWindow-compatible for the children of the root. The CAIP-2 IDs would also nest (`ecash:betanet-s24-s3`).
-- The mainnet network (#32) needs its own fork-block hash once mainnet exists.
+- The mainnet network (#32) needs its own fork-block hash once mainnet exists. **Amended 2026-11-12:** done in ADR 0019.

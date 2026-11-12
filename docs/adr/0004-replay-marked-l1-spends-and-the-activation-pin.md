@@ -49,4 +49,4 @@ Deposit adds these to ADR 0002's table. Both electrs forks serve them.
 
 - An L1 app that needs another `nLockTime` (a timelock) can't sign through `l1.wasm` in v0. Such a spend has no replay protection under this scheme anyway; revisit when one is needed.
 - Every Slot that is active but has no Treasury needs its activation checked and pinned before the wallet deposits to it.
-- Mainnet (#32) needs its own `replayLockTime` and, per Slot, its own activation.
+- Mainnet (#32) needs its own `replayLockTime` and, per Slot, its own activation. **Amended 2026-11-12:** done in ADR 0019.

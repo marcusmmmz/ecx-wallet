@@ -22,3 +22,5 @@ The wallet now proves those inputs and outputs are its own from the script alone
 - A DEX-built PSET with no entries can be signed only by this wallet. A standard signer (a hardware wallet, another software wallet) finds its keys through `bip32_derivation` and would skip the input. An app that supports other wallets gets the key origin from them.
 - If `getAddresses` gives out more addresses, `APP_RECEIVE_ADDRESSES` grows in both places, and those addresses can be spent without entries too.
 - L1's `sign` is unchanged (its addresses gain `publicKey` only): it may still return a PSBT with nothing signed (#40).
+- **Amended 2026-11-12:** #40 changed L1's `sign` too: it refuses a PSBT with no input of the wallet's (`nothingToSign`).
+- **Amended 2026-11-12:** Flush follows this ADR (ADR 0011), so `APP_RECEIVE_ADDRESSES` has a third copy, in `core/flush/src/lib.rs`, and all three must match.
