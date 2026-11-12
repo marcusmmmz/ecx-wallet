@@ -119,8 +119,6 @@ body {
   position: relative;
   isolation: isolate;
   margin: 0;
-  /* The action popup sizes itself to the page; this keeps it from collapsing to its content. */
-  min-width: 360px;
   background: var(--bg);
   color: var(--text);
   font: 15px/1.5 var(--font);
@@ -165,7 +163,8 @@ body::after {
 }
 
 /* The toolbar popup is as tall as the browser lets it be (600px), not just its content, and one
-   width whatever the screen shows: it sizes itself to the page, so it would change from tab to tab. */
+   width whatever the screen shows: it sizes itself to the page, so it would change from tab to tab,
+   or collapse to its content. Elsewhere the page takes the screen's width, down to a phone's. */
 html[data-view="popup"] body {
   width: 400px;
   min-height: 600px;
