@@ -139,7 +139,7 @@ The API this project defines, for a sidechain with no indexer. Its protocol draf
 
 **How:**
 
-- History is read only when a tab is first opened: `history.reported` per chain, in parallel. This session's last one (`history.cached`) shows while it refreshes. A chain that fails says so with Retry; the others still show.
+- History is read right after an unlock, by the background for every chain that's on (`readHistoriesAfterUnlock`, not counted as activity for the auto-lock), and when a tab is first opened: `history.reported` per chain, in parallel. This session's last one (`history.cached`) shows while it refreshes, so after an unlock Activity opens on what the background read. A shown tab reads again on `Chains.watch`'s schedule. A chain that fails says so with Retry; the others still show.
 - **Over Esplora** (`SidechainServer.history`), the wallet reads `/address/:a/txs` for its 40 watched addresses, merges them by txid and works the rest out itself:
   - "Asset issuance" (or "Asset reissuance") when an input of the wallet's issues an asset (Esplora's `issuance` on Elements), ahead of "Fee, to yourself";
   - "Fee, to yourself" when every output is the wallet's;

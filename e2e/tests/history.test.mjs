@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, test } from "node:test";
 import { addressScript, encodeTx, parseTx } from "@ecx/stub-server/bitcoin-tx";
-import { BROWSERS, homeSettled, importWallet, launchWallet, openWalletPage, serveEsplora, serveL1Esplora, setUpWallet, waitForFunction } from "../harness.mjs";
+import { BROWSERS, homeSettled, importWallet, launchWallet, openWalletPage, relock, serveEsplora, serveL1Esplora, setUpWallet, waitForFunction } from "../harness.mjs";
 
 const { HISTORY_PAGES } = await importWallet();
 
@@ -517,6 +517,17 @@ for (const browserName of BROWSERS) describe(browserName, () => {
     } finally {
       delete ESPLORA.addressTxs;
     }
+  });
+
+  test("after an unlock, the background reads the history before Activity is opened", async () => {
+    L1.txs = [tx("d0", [{ value: 41000, script: addressScript(L1_RECEIVE_0) }])];
+    const since = l1Stub.requests().length;
+    // Locks and unlocks from home, whose Activity tab stays closed.
+    await relock(session);
+    const deadline = Date.now() + 10_000;
+    const read = () => l1Stub.requests().slice(since).some((path) => path.startsWith(`/address/${L1_RECEIVE_0}/txs`));
+    while (!read() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100));
+    assert.ok(read(), "eCash's history was read with no Activity tab open");
   });
 
   test("none of the above raised extension runtime errors", async () => {

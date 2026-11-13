@@ -506,6 +506,19 @@ export function createRouter<Sender>(host: RouterHost<Sender>) {
     cache: sessionCache,
   });
 
+  /**
+   * Reads every chain's history that's on, by itself (not activity, for the auto-lock), so Activity
+   * has it when first opened after an unlock. Failures are left for Activity to show when it reads.
+   */
+  function readHistoriesAfterUnlock() {
+    void vault.unattended(() =>
+      Promise.all([
+        pullPath.l1History().catch(() => {}),
+        ...SUPPORTED_SLOTS.map(async (slot) => ((await chainsOn.isOn(slot)) ? pullPath.history(slot).catch(() => {}) : undefined)),
+      ]),
+    );
+  }
+
   /** A client for a network's default server, which speaks Esplora (Flush's included). */
   const esplora = (entry: ChainEntry, network: NetworkEntry) => esploraClient(esploraConfig(entry, network, sessionCache), (...args) => fetch(...args));
 
@@ -571,6 +584,7 @@ export function createRouter<Sender>(host: RouterHost<Sender>) {
         if (approval === undefined) return null;
         await vault.unlock(String(message.password ?? ""));
         approval.settle({ approved: true });
+        readHistoriesAfterUnlock();
         return null;
       }
       case "grants.list":
@@ -777,6 +791,7 @@ export function createRouter<Sender>(host: RouterHost<Sender>) {
         return vault.status();
       case "vault.unlock":
         await vault.unlock(String(message.password ?? ""));
+        readHistoriesAfterUnlock();
         return vault.status();
       case "vault.lock":
         await vault.lock();
