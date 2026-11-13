@@ -1,0 +1,41 @@
+# The checks that need no browser, on every PR and push to main: types, the Rust core's tests, and the
+# shipped build. The e2e suite drives Brave and Firefox and stays local (`pnpm test`, docs/testing.md).
+name: Check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # libsecp256k1's C code needs a clang with the WebAssembly backend and llvm-ar (core/README.md).
+      - name: Install clang and llvm-ar
+        run: sudo apt-get update && sudo apt-get install -y clang llvm
+
+      # Installs the toolchain core/rust-toolchain.toml pins.
+      - name: Install Rust
+        working-directory: core
+        run: rustup toolchain install
+
+      # Node first: pnpm 11 (packageManager) needs node >= 22.13, newer than the runner's own.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm --filter @ecx/core test
+      - run: pnpm build

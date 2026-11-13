@@ -37,8 +37,9 @@ run("pnpm", ["build:e2e"], { cwd: root });
 // The web tests serve the web build, which reuses build:e2e's stub-backed core.
 if (names.includes("web-wallet") || names.includes("web-provider")) run("pnpm", ["build:e2e:web"], { cwd: root });
 // The flags and $ECX_NETWORK match @ecx/e2e's `test` script: --test-concurrency=1, or the pull-path tests hang.
+// run-tests.mjs waits for any other e2e run on this machine (the stub ports are fixed).
 run(
   process.execPath,
-  ["--test", "--test-concurrency=1", "--test-timeout=120000", ...names.map((name) => `tests/${name}.test.mjs`)],
+  [path.join(e2e, "scripts", "run-tests.mjs"), "--test-concurrency=1", "--test-timeout=120000", ...names.map((name) => `tests/${name}.test.mjs`)],
   { cwd: e2e, env: { ...process.env, E2E_BROWSERS: "brave", ECX_NETWORK: E2E_NETWORK } },
 );
