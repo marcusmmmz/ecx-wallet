@@ -261,13 +261,20 @@ for (const browserName of BROWSERS) describe(`${browserName}: web Provider`, () 
       const framed = await frameOf(page, app.origin(HOST));
       await waitForFunction(framed, () => window.testApp !== undefined, { timeout: 10_000 });
 
-      const methods = ["getAddresses", "signTransaction"];
-      const connecting = framed.evaluate((methods) => window.testApp.request("connect", { slots: [99], methods }), methods);
+      // As flush.markets connects: for its trades, then again for a launch. The second adds to the Grant.
+      const connect = (methods) => framed.evaluate((methods) => window.testApp.request("connect", { slots: [99], methods }), methods);
+      const trading = connect(["getAddresses", "sendTransfer"]);
       await overlaySettled(page);
-      assert.equal(await page.$eval("[data-app-approval] [data-blind-opt-in]", (e) => e.checked), false, "Blind Signing is off by default");
+      await page.click("[data-app-approval] [data-approve]");
+      assert.deepEqual(await trading, { result: { slots: [99], methods: ["getAddresses", "sendTransfer"] } });
+      await waitForFunction(page, () => document.querySelector("[data-app-approval]") === null, { timeout: 10_000 });
+      const launching = connect(["getAddresses", "signTransaction"]);
+      await overlaySettled(page);
+      // A taller approval than the first: the opt-in sits under the Reject / Approve bar until scrolled to.
+      assert.equal(await page.$eval("[data-app-approval] [data-blind-opt-in]", (e) => (e.scrollIntoView({ block: "center" }), e.checked)), false, "Blind Signing is off by default");
       await page.click("[data-app-approval] [data-blind-opt-in]");
       await page.click("[data-app-approval] [data-approve]");
-      assert.deepEqual(await connecting, { result: { slots: [99], methods, blindSigning: true } });
+      assert.deepEqual(await launching, { result: { slots: [99], methods: ["getAddresses", "sendTransfer", "signTransaction"], blindSigning: true } });
 
       // Step 1 of a launch, as flush.markets' server builds it from the address alone.
       const request = {
