@@ -196,7 +196,7 @@ pub fn decode_with_evidence(payload: &str, starter: &str, evidence: &str) -> Res
         .checked_sub(outputs_total)
         .ok_or_else(|| refuse(RefusalCode::Malformed, "The outputs add up to more than the inputs."))?;
 
-    let facts = verifiable_facts(&psbt, &keys, &kinds, fee);
+    let facts = verifiable_facts(&psbt, &keys, &kinds, fee, &flow);
     if !facts.unknown_fields.is_empty() {
         let reason = "The request contains fields the Flush Decoder doesn't understand.";
         return Ok(Decoded::Blind { reason: reason.into(), verifiable_facts: facts });
@@ -235,9 +235,12 @@ pub fn decode_with_evidence(payload: &str, starter: &str, evidence: &str) -> Res
     }
 }
 
-fn verifiable_facts(psbt: &Psbt, keys: &AccountKeys, kinds: &[InputKind], fee: u64) -> VerifiableFacts {
+/// What `psbt` provably does to the wallet. A token coin is value 0: what it carries comes from
+/// `flow`, so asset tokens are counted per asset, and a token the facts can't count is flagged.
+fn verifiable_facts(psbt: &Psbt, keys: &AccountKeys, kinds: &[InputKind], fee: u64, flow: &TokenFlow) -> VerifiableFacts {
     let mut owned_inputs = vec![];
     let mut leaving: i128 = 0;
+    let mut tokens_leaving: std::collections::BTreeMap<String, i128> = Default::default();
     let mut unknown_fields = vec![];
     let mut dangerous_flags = vec![];
 
@@ -248,8 +251,21 @@ fn verifiable_facts(psbt: &Psbt, keys: &AccountKeys, kinds: &[InputKind], fee: u
         let value = spent(psbt, i).value.to_sat();
         match kind {
             InputKind::Yours { .. } => {
-                owned_inputs.push(OwnedInput { index: i, asset: String::new(), amount: value.to_string() });
                 leaving += value as i128;
+                match flow.inputs[i].as_ref().map(|listed| &listed.token) {
+                    None => owned_inputs.push(OwnedInput { index: i, asset: String::new(), amount: value.to_string() }),
+                    Some(Some(t)) if t.kind == TokenKind::Asset => {
+                        owned_inputs.push(OwnedInput { index: i, asset: t.id.clone(), amount: t.amount.to_string() });
+                        *tokens_leaving.entry(t.id.clone()).or_default() += t.amount as i128;
+                    }
+                    Some(token) => {
+                        owned_inputs.push(OwnedInput { index: i, asset: String::new(), amount: value.to_string() });
+                        dangerous_flags.push(match token {
+                            Some(t) => format!("input {i} spends a {} token of {}, which isn't counted in what leaves your wallet", t.kind.name(), t.id),
+                            None => format!("input {i} spends a token the wallet can't tell (a result, which only the node's state knows), so it isn't counted in what leaves your wallet"),
+                        });
+                    }
+                }
             }
             InputKind::UnprovenClaim => dangerous_flags.push(format!(
                 "input {i} claims one of this wallet's keys, but its key or script doesn't re-derive; it will not be signed"
@@ -266,6 +282,9 @@ fn verifiable_facts(psbt: &Psbt, keys: &AccountKeys, kinds: &[InputKind], fee: u
     for (i, (txout, output)) in psbt.unsigned_tx.output.iter().zip(&psbt.outputs).enumerate() {
         if output_yours(keys, output, txout) {
             leaving -= txout.value.to_sat() as i128;
+            if let Some(t) = flow.output(i).and_then(|listed| listed.token.as_ref()).filter(|t| t.kind == TokenKind::Asset) {
+                *tokens_leaving.entry(t.id.clone()).or_default() -= t.amount as i128;
+            }
         }
         unknown_fields.extend(output.unknown.keys().map(|k| format!("output {i}: unknown field type 0x{:02x}", k.type_value)));
         unknown_fields.extend(output.proprietary.keys().map(|k| format!("output {i}: proprietary field {}", String::from_utf8_lossy(&k.prefix))));
@@ -273,7 +292,9 @@ fn verifiable_facts(psbt: &Psbt, keys: &AccountKeys, kinds: &[InputKind], fee: u
 
     VerifiableFacts {
         owned_inputs,
-        total_leaving: vec![AssetAmount::sats(leaving)],
+        total_leaving: std::iter::once(AssetAmount::sats(leaving))
+            .chain(tokens_leaving.into_iter().filter(|(_, amount)| *amount != 0).map(|(asset, amount)| AssetAmount { asset, amount: amount.to_string() }))
+            .collect(),
         fee: vec![AssetAmount::sats(fee)],
         unknown_fields,
         dangerous_flags,

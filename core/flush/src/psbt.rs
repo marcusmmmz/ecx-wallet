@@ -53,9 +53,9 @@ pub(crate) fn refuse(code: RefusalCode, message: impl Into<String>) -> Refusal {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetAmount {
-    /// Always "": the Decoder only counts ECX, the native coin (the wallet's `NATIVE_COIN`).
+    /// "" for ECX, the native coin (the wallet's `NATIVE_COIN`), else an asset id (display order).
     pub asset: String,
-    /// Sats, as a decimal string.
+    /// Sats, or the asset's base units, as a decimal string.
     pub amount: String,
 }
 
@@ -69,9 +69,9 @@ impl AssetAmount {
 #[serde(rename_all = "camelCase")]
 pub struct OwnedInput {
     pub index: usize,
-    /// Always "".
+    /// "" for ECX, else the asset id of the asset token it spends (its value is then 0).
     pub asset: String,
-    /// Sats, as a decimal string.
+    /// Sats, or the asset's base units, as a decimal string.
     pub amount: String,
 }
 

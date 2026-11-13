@@ -577,16 +577,16 @@
         <dt>Your inputs it will sign</dt>
         <dd>
           {#each facts.ownedInputs as input (input.index)}
-            <div data-owned-input>Input {input.index}: {amount(input)}</div>
+            <div data-owned-input>Input {input.index}: {amount(input)}<AssetBadge entry={assets.find((n) => n.id === input.asset)} size={12} /></div>
           {:else}<div>None</div>{/each}
         </dd>
         <dt>Total leaving your wallet</dt>
         <dd>
-          {#each leaving as a (a.asset)}<div data-total-leaving>{amount(a)}</div>{:else}<div>Nothing</div>{/each}
+          {#each leaving as a (a.asset)}<div data-total-leaving>{amount(a)}<AssetBadge entry={assets.find((n) => n.id === a.asset)} size={12} /></div>{:else}<div>Nothing</div>{/each}
         </dd>
         {#if comingIn.length > 0}
           <dt>Coming into your wallet</dt>
-          <dd>{#each comingIn as a (a.asset)}<div data-coming-in>{amount(a)}</div>{/each}</dd>
+          <dd>{#each comingIn as a (a.asset)}<div data-coming-in>{amount(a)}<AssetBadge entry={assets.find((n) => n.id === a.asset)} size={12} /></div>{/each}</dd>
         {/if}
         <dt>Fee</dt>
         <dd>{#each facts.fee as a (a.asset)}<div data-fee>{amount(a)}</div>{:else}<div>None stated</div>{/each}</dd>
