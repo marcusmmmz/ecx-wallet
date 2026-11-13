@@ -49,6 +49,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     execFileSync("node", ["scripts/build.mjs"], { cwd: path.join(root, dir), stdio: "inherit", env: { ...process.env, ECX_NETWORK: E2E_NETWORK, ...env } });
   const coreDist = path.join(out, "core");
   // Its own cargo target dir, so the shipped and e2e builds don't keep rebuilding each other.
-  run("core", { ...coreEnv, ECX_CORE_DIST: coreDist, CARGO_TARGET_DIR: path.join(root, "core", "target", "e2e") });
+  // $ECX_E2E_TARGET_DIR moves it, e.g. so a git worktree reuses the main checkout's instead of
+  // building every module cold.
+  const targetDir = process.env.ECX_E2E_TARGET_DIR || path.join(root, "core", "target", "e2e");
+  run("core", { ...coreEnv, ECX_CORE_DIST: coreDist, CARGO_TARGET_DIR: targetDir });
   run("extension", { ECX_CORE_DIST: coreDist, ECX_CHAIN_ENTRIES: entries.join(","), ECX_EXTENSION_DIST: path.join(out, "extension") });
 }
