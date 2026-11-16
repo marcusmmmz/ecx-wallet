@@ -35,7 +35,7 @@ function run(command, args, options = {}) {
 run("pnpm", ["build"], { cwd: root });
 run("pnpm", ["build:e2e"], { cwd: root });
 // The web tests serve the web build, which reuses build:e2e's stub-backed core.
-if (names.includes("web-wallet") || names.includes("web-provider")) run("pnpm", ["build:e2e:web"], { cwd: root });
+if (["web-wallet", "web-provider", "phone-width"].some((name) => names.includes(name))) run("pnpm", ["build:e2e:web"], { cwd: root });
 // The flags and $ECX_NETWORK match @ecx/e2e's `test` script: --test-concurrency=1, or the pull-path tests hang.
 // run-tests.mjs waits for any other e2e run on this machine (the stub ports are fixed).
 run(

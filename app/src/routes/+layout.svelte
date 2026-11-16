@@ -79,6 +79,8 @@
     display: flex;
     flex-direction: column;
     height: 100vh;
+    /* On a phone, 100vh reaches behind the browser's URL bar; 100dvh is what shows. */
+    height: 100dvh;
   }
   /* The toolbar popup is as tall as the browser lets it be (600px). */
   :global(html[data-view="popup"]) .frame {

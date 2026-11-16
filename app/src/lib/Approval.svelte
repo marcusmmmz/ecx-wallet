@@ -375,10 +375,10 @@
           </ul>
         {/if}
         <div data-trade-pay>
-          Pay <span class="nowrap"><strong>{side(t.assetIn, t.amountIn, checked?.assetIn)}</strong><AssetBadge entry={assets.find((n) => n.id === t.assetIn)} size={12} /></span>
+          Pay <span class="trade-amount"><strong>{side(t.assetIn, t.amountIn, checked?.assetIn)}</strong><AssetBadge entry={assets.find((n) => n.id === t.assetIn)} size={12} /></span>
         </div>
         <div data-trade-receive>
-          Receive at least <span class="nowrap"><strong>{side(t.assetOut, t.minOut, checked?.assetOut)}</strong><AssetBadge entry={assets.find((n) => n.id === t.assetOut)} size={12} /></span>
+          Receive at least <span class="trade-amount"><strong>{side(t.assetOut, t.minOut, checked?.assetOut)}</strong><AssetBadge entry={assets.find((n) => n.id === t.assetOut)} size={12} /></span>
         </div>
         {#if t.pools.length > 1}
           <div class="small" data-trade-route>
@@ -615,6 +615,11 @@
 
 <style>
   .full-id {
+    overflow-wrap: anywhere;
+  }
+  /* An amount being approved is never cut off: it wraps at its spaces, and inside the number only
+     when the number alone is wider than the card. */
+  .trade-amount {
     overflow-wrap: anywhere;
   }
   .title {

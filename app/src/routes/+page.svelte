@@ -287,7 +287,7 @@
     border: 1px solid var(--border);
     border-radius: 4px;
     color: var(--muted);
-    font-size: 0.6rem;
+    font-size: 0.7rem;
     font-weight: 600;
     letter-spacing: 0.12em;
     line-height: 1.4;
