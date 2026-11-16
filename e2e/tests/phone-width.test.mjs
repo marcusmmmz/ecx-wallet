@@ -112,6 +112,11 @@ function layout(page, smallest) {
       width: innerWidth,
       height: innerHeight,
       scrollWidth: document.documentElement.scrollWidth,
+      // Inner scroll containers (the frame's .scroll is overflow-y: auto, so its x scrolls too): one
+      // wider than itself scrolls sideways while the document stays the screen's width.
+      sideways: [...document.body.querySelectorAll("*")]
+        .filter((e) => ["auto", "scroll"].includes(getComputedStyle(e).overflowX) && e.scrollWidth > e.clientWidth + 1)
+        .map((e) => ({ element: `${e.tagName.toLowerCase()}.${[...e.classList].join(".")}`, scrollWidth: e.scrollWidth, clientWidth: e.clientWidth })),
       bar: box(document.querySelector("nav.bottom-bar")),
       frame: box(document.querySelector(".frame")),
       small,
@@ -129,6 +134,7 @@ async function assertFits(page, what, screen = PHONE, { bar = true } = {}) {
   const shown = await layout(page, SMALLEST_TEXT_PX);
   const facts = JSON.stringify({ ...shown, small: undefined });
   assert.ok(shown.width <= screen.width && shown.scrollWidth <= shown.width, `${what} doesn't fit ${screen.width}px: ${facts}`);
+  assert.deepEqual(shown.sideways, [], `${what} has no inner scroll container wider than itself: ${facts}`);
   assert.equal(shown.frame?.height, screen.height, `${what}'s frame is the screen's height: ${facts}`);
   if (bar) {
     assert.ok(shown.bar, `${what} has its bottom bar`);
@@ -193,6 +199,15 @@ describe("brave", { skip: !BROWSERS.includes("brave") }, () => {
     await homeSettled(popup);
     const shown = await assertFits(popup, "the popup", POPUP);
     assert.equal(shown.view, "popup");
+    // A toolbar popup sizes itself to its page, and this tab is already 400px wide: squeezed to
+    // nothing, as a popup with no width of its own would be, the body must still be 400px.
+    const squeezed = await popup.evaluate(() => {
+      document.documentElement.style.width = "0px";
+      const width = document.body.getBoundingClientRect().width;
+      document.documentElement.style.width = "";
+      return width;
+    });
+    assert.equal(squeezed, 400, "the popup's body fixes its own width");
     await popup.close();
   });
 
