@@ -243,9 +243,9 @@ fn verifiable_facts(psbt: &Psbt, keys: &AccountKeys, kinds: &[InputKind], fee: u
     let mut tokens_leaving: std::collections::BTreeMap<String, i128> = Default::default();
     let mut unknown_fields = vec![];
     let mut dangerous_flags = vec![];
-    // A result's amount, as the evidence names it, is proven only where a transfer must carry it on
-    // exactly (`token_flow_with`); under any other kind the index could understate it.
-    let transfer = flow.marker.as_ref().is_some_and(|(_, m)| m.kind == 0);
+    // A result's amount, as the evidence names it, is the market index's word: its order proves only
+    // a floor, and conservation (a transfer's, or the node's) holds only each asset's total across
+    // every owner's inputs, so one owner's result can be understated against another's.
 
     unknown_fields.extend(psbt.unknown.keys().map(|k| format!("global: unknown field type 0x{:02x}", k.type_value)));
     unknown_fields.extend(psbt.proprietary.keys().map(|k| format!("global: proprietary field {}", String::from_utf8_lossy(&k.prefix))));
@@ -257,7 +257,7 @@ fn verifiable_facts(psbt: &Psbt, keys: &AccountKeys, kinds: &[InputKind], fee: u
                 leaving += value as i128;
                 match flow.inputs[i].as_ref().map(|listed| &listed.token) {
                     None => owned_inputs.push(OwnedInput { index: i, asset: String::new(), amount: value.to_string() }),
-                    Some(Some(t)) if t.kind == TokenKind::Asset && (transfer || !flow.named[i]) => {
+                    Some(Some(t)) if t.kind == TokenKind::Asset && !flow.named[i] => {
                         owned_inputs.push(OwnedInput { index: i, asset: t.id.clone(), amount: t.amount.to_string() });
                         *tokens_leaving.entry(t.id.clone()).or_default() += t.amount as i128;
                     }

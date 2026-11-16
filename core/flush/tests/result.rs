@@ -140,30 +140,34 @@ fn a_result_with_no_claim_is_never_spent() {
 }
 
 #[test]
-fn blind_facts_count_a_named_result_only_where_a_transfer_holds_the_index_to_its_word() {
+fn blind_facts_never_count_a_named_result_since_only_its_floor_is_proven() {
     let buy = buy();
     let order = send(FORK, 30_000, vec![ecx_coin(4, 100_000), result_coin(&buy, 0, FORK, 44_482)]);
     let mut psbt = Psbt::from_str(&build_transfer(&order, STARTER).unwrap().pset).unwrap();
     // A field the Decoder doesn't know makes it Blind, leaving only the facts.
     psbt.unknown.insert(bitcoin::psbt::raw::Key { type_value: 0x99, key: vec![] }, vec![1]);
-    // The index's word, understated: still above the order's floor, so it fits.
-    let understated = evidence(&buy, 0, FORK, 44_100);
-    let facts = |psbt: &Psbt| match decoded(psbt, &understated) {
+    let facts = |psbt: &Psbt, evidence: &Value| match decoded(psbt, evidence) {
         Decoded::Blind { verifiable_facts, .. } => verifiable_facts,
         clear => panic!("expected Blind, got {clear:?}"),
     };
     let fork_leaving = |f: &ecx_flush::VerifiableFacts| f.total_leaving.iter().find(|a| a.asset == FORK).map(|a| a.amount.clone());
+    let flagged = |f: &ecx_flush::VerifiableFacts| f.dangerous_flags.iter().any(|f| f.contains("input") && f.contains("only the market index says"));
 
-    // A transfer must carry on exactly what its inputs bring: with the index's word understated, it
-    // doesn't, and the Decoder refuses it as the node would.
+    // A transfer: even with the index's word right, it counts only what its marker lists coming back.
+    let right = evidence(&buy, 0, FORK, 44_482);
+    let as_transfer = facts(&psbt, &right);
+    assert_eq!(fork_leaving(&as_transfer).as_deref(), Some("-14482"));
+    assert!(flagged(&as_transfer), "{:?}", as_transfer.dangerous_flags);
+    // Understated alone, the transfer doesn't carry on what it says it spends: refused, as the node would.
+    let understated = evidence(&buy, 0, FORK, 44_100);
     let refusal = decode_with_evidence(&psbt.to_string(), STARTER, &understated.to_string()).unwrap_err();
     assert_eq!(refusal.code, RefusalCode::Malformed);
 
-    // Under a trade, nothing holds the result to the index's word: 44,482 go in and 14,482 come back,
-    // which would read as 29,618 leaving. It isn't counted, and says so.
+    // Under a trade nothing holds the result to the index's word: 44,482 go in and 14,482 come back,
+    // which counted would read as 29,618 leaving.
     let swap = ecx_flush::bast::swap_pools_marker(FORK, &[&"00".repeat(32)], 30_000, 1, &[], &[(0, None), (1, Some((FORK, 14_482)))]).unwrap();
     psbt.unsigned_tx.output[2].script_pubkey = ScriptBuf::from_bytes(swap);
-    let as_trade = facts(&psbt);
+    let as_trade = facts(&psbt, &understated);
     assert_eq!(fork_leaving(&as_trade).as_deref(), Some("-14482"), "only what comes back, which its marker lists");
-    assert!(as_trade.dangerous_flags.iter().any(|f| f.contains("input") && f.contains("only the market index says")), "{:?}", as_trade.dangerous_flags);
+    assert!(flagged(&as_trade), "{:?}", as_trade.dangerous_flags);
 }

@@ -190,8 +190,7 @@ pub(crate) struct TokenFlow {
     /// for an output no marker lists.
     pub inputs: Vec<Option<bast::Listed>>,
     /// Per input: whether its token is a result's, as the request's evidence names it. Only its
-    /// floor is checked against the order (`result_token`); the amount is the market index's word,
-    /// held to account only by a transfer, which must carry on exactly what its inputs bring.
+    /// floor is checked against the order (`result_token`); the amount is the market index's word.
     pub named: Vec<bool>,
 }
 
