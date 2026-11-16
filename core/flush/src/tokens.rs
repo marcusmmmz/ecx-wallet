@@ -189,6 +189,10 @@ pub(crate) struct TokenFlow {
     /// Per input: the token its spent output carries (`Listed::token` None for a result), or None
     /// for an output no marker lists.
     pub inputs: Vec<Option<bast::Listed>>,
+    /// Per input: whether its token is a result's, as the request's evidence names it. Only its
+    /// floor is checked against the order (`result_token`); the amount is the market index's word,
+    /// held to account only by a transfer, which must carry on exactly what its inputs bring.
+    pub named: Vec<bool>,
 }
 
 impl TokenFlow {
@@ -214,19 +218,23 @@ pub(crate) fn token_flow_with(psbt: &bitcoin::psbt::Psbt, results: &[ResultEvide
     let tx = &psbt.unsigned_tx;
     let marker = marker(tx)?;
     let mut inputs = vec![];
+    let mut named = vec![];
     for (i, txin) in tx.input.iter().enumerate() {
         let previous = psbt.inputs[i].non_witness_utxo.as_ref().expect("validated");
         let outpoint = txin.previous_output;
         let mut listed = listed_on(previous, outpoint.vout)?;
         let said = results.iter().find(|r| r.vout == outpoint.vout && r.txid.eq_ignore_ascii_case(&outpoint.txid.to_string()));
+        let mut is_named = false;
         if let (Some(l @ bast::Listed { token: None, .. }), Some(said)) = (listed.as_mut(), said) {
             let token = result_token(previous, outpoint.vout, &said.claim())?
                 .map_err(|why| refuse(RefusalCode::InvalidEvidence, format!("Input {i} is a trade's result, but the evidence doesn't fit it: {why}.")))?;
             l.token = Some(token);
+            is_named = true;
         }
         inputs.push(listed);
+        named.push(is_named);
     }
-    let flow = TokenFlow { marker, inputs };
+    let flow = TokenFlow { marker, inputs, named };
     let Some((index, marker)) = &flow.marker else {
         if let Some(i) = flow.inputs.iter().position(Option::is_some) {
             return Err(malformed(format!("Input {i} spends a token's output, but the request has no BAST marker to carry it on: Flush would refuse it.")));
