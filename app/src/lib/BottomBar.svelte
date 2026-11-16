@@ -123,6 +123,34 @@
     position: relative;
     display: flex;
   }
+  /* Wide (layout.svelte.ts): the same bar as a rail down the left, Settings at its foot. */
+  :global(html[data-layout="wide"]) .bottom-bar {
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 4px;
+    width: 236px;
+    max-width: none;
+    margin: 0;
+    padding: 22px 14px 18px;
+    border-top: none;
+    border-right: 1px solid var(--glass-border);
+  }
+  :global(html[data-layout="wide"]) .bar-item {
+    flex: none;
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 12px;
+    min-height: 46px;
+    padding: 0 14px;
+    font-size: 0.92rem;
+  }
+  :global(html[data-layout="wide"]) .bar-item[data-nav="settings"] {
+    margin-top: auto;
+  }
+  :global(html[data-layout="wide"]) .count {
+    position: static;
+    margin-left: 6px;
+  }
   .count {
     position: absolute;
     top: -6px;

@@ -8,6 +8,7 @@
   import { chainMark, Chains, onTheWay } from "$lib/chains.svelte";
   import ActivityFeed from "$lib/ActivityFeed.svelte";
   import Icon from "$lib/Icon.svelte";
+  import { layout } from "$lib/layout.svelte";
   import LockCountdown from "$lib/LockCountdown.svelte";
   import Mark from "$lib/Mark.svelte";
   import { nav } from "$lib/nav.svelte";
@@ -179,7 +180,9 @@
 
 
     <!-- Both panels stay in the page, the hidden one hidden: each chain's state is read once. -->
-    <div class="panel" role="tabpanel" hidden={nav.tab !== "assets"}>
+    <!-- Wide, both show at once, side by side. -->
+    <div class="panel" role="tabpanel" hidden={!layout.wide && nav.tab !== "assets"}>
+      <h2 class="wide-only">Assets</h2>
       {#each list as c (c.info.id)}
         {@const subtotal = c.shown.report?.balances.find((b) => b.asset === c.info.assets.find((a) => a.ecx)?.id)}
         <section
@@ -220,9 +223,10 @@
       {/if}
     </div>
 
-    <div class="panel" role="tabpanel" hidden={nav.tab !== "activity"}>
+    <div class="panel side" role="tabpanel" hidden={!layout.wide && nav.tab !== "activity"} data-side-activity>
+      <h2 class="wide-only">Activity</h2>
       {#if chains}
-        <ActivityFeed {chains} views={list} spenders={chains.all ?? []} active={nav.tab === "activity"} chips />
+        <ActivityFeed {chains} views={list} spenders={chains.all ?? []} active={layout.wide || nav.tab === "activity"} chips />
       {/if}
     </div>
   {/if}
@@ -435,6 +439,54 @@
   }
   .panel[hidden] {
     display: none;
+  }
+  .wide-only {
+    display: none;
+  }
+  /* Wide (layout.svelte.ts): a dashboard. The balance, the actions and the assets down the left,
+     Activity in a panel of its own on the right, which stays in view while the left scrolls. */
+  :global(html[data-layout="wide"]) main[data-vault-state="unlocked"] {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: 32px;
+    row-gap: 20px;
+    align-items: start;
+    max-width: 1180px;
+  }
+  :global(html[data-layout="wide"]) main[data-vault-state="unlocked"] > :global(*) {
+    grid-column: 1;
+  }
+  :global(html[data-layout="wide"]) main[data-vault-state="unlocked"] > .wallet-head {
+    grid-column: 1 / -1;
+  }
+  :global(html[data-layout="wide"]) main[data-vault-state="unlocked"] > .side {
+    grid-column: 2;
+    grid-row: 2 / span 12;
+    position: sticky;
+    top: 84px;
+    max-height: calc(100vh - 112px);
+    overflow-y: auto;
+    margin-top: 0;
+    padding: 18px;
+    border: 1px solid var(--glass-border);
+    border-radius: 18px;
+    background: var(--glass);
+    box-shadow: var(--shadow), var(--highlight);
+  }
+  :global(html[data-layout="wide"]) .wide-only {
+    display: block;
+    margin: 0;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  :global(html[data-layout="wide"]) .hero {
+    padding: 18px 0 6px;
+  }
+  :global(html[data-layout="wide"]) .big {
+    font-size: 3rem;
   }
   .chain {
     display: flex;

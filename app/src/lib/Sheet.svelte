@@ -7,9 +7,10 @@
 
   // Shown from the page's body, not where it's declared: a glass card (backdrop-filter) or a rising
   // section (transform) would otherwise hold it, and it would open at the card instead of over the
-  // screen in view.
+  // screen in view. Beside a docked app the screen is the wallet's column (AppDock's
+  // `data-sheet-host`), so it's shown from there, over the wallet and not the app.
   function toBody(node: HTMLElement) {
-    document.body.append(node);
+    (document.querySelector("[data-sheet-host]") ?? document.body).append(node);
     return { destroy: () => node.remove() };
   }
 </script>
@@ -60,6 +61,14 @@
     box-shadow: inset 0 1px 0 var(--glass-edge), 0 -18px 50px -20px rgb(0 0 0 / 45%);
     transform-origin: 50% 100%;
     animation: sheet-up 0.36s var(--ease-spring) both;
+  }
+  /* In the wallet's column beside a docked app: held by the column, not the window. */
+  :global([data-sheet-host]) > .scrim,
+  :global([data-sheet-host]) > .sheet {
+    position: absolute;
+  }
+  :global([data-sheet-host]) > .sheet {
+    max-height: 85%;
   }
   /* The grip along its top edge. */
   .sheet::before {

@@ -235,6 +235,17 @@ dd {
   gap: 16px;
 }
 
+/* Wide (the web wallet on a desktop-sized window, no app docked: layout.svelte.ts): room to breathe. */
+html[data-layout="wide"] .screen {
+  max-width: 640px;
+  padding: 28px 32px 40px;
+  gap: 20px;
+}
+html[data-layout="wide"] .sticky-head {
+  margin: -28px -32px 0;
+  padding: 14px 32px;
+}
+
 /* Each screen's sections rise into place one after another. */
 .screen > * {
   animation: rise 0.5s var(--ease-out) both;

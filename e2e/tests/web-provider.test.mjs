@@ -74,6 +74,12 @@ async function frameOf(page, origin) {
   return page.waitForFrame((frame) => frame.url().startsWith(origin), { timeout: 10_000 });
 }
 
+/** A link's app isn't a featured one here: the wallet names it and opens it on the user's say. */
+async function confirmApp(page) {
+  await page.waitForSelector("[data-app-confirm]", { timeout: 15_000 });
+  await page.click("[data-app-confirm]");
+}
+
 for (const browserName of BROWSERS) describe(`${browserName}: web Provider`, () => {
   let web;
   let app;
@@ -212,6 +218,7 @@ for (const browserName of BROWSERS) describe(`${browserName}: web Provider`, () 
       const errors = [];
       page.on("pageerror", (error) => errors.push(error.message));
       await page.goto(`${web.url}#/apps?url=${encodeURIComponent(demo.url({ wallet: web.url, slot: 99 }))}`);
+      await confirmApp(page);
       const app = await frameOf(page, demo.origin);
       await waitForFunction(page, () => document.querySelector("[data-app-origin]")?.textContent, { timeout: 10_000 });
       assert.equal(await page.$eval("[data-app-origin]", (e) => e.textContent), demo.origin);
@@ -233,8 +240,9 @@ for (const browserName of BROWSERS) describe(`${browserName}: web Provider`, () 
       await page.click("[data-approve]");
       await page.waitForSelector("[data-app-approval] [data-unlock-required]", { timeout: 20_000 });
       await waitForFunction(page, risen, { timeout: 10_000 }, `[data-app-approval] ${ARMED} [data-unlock]`);
-      await page.type("[data-password]", WALLET_PASSWORD);
-      await page.click("[data-unlock]");
+      // The wallet's own lock screen is beside the app too: the approval's field is the one asked for.
+      await page.type("[data-app-approval] [data-password]", WALLET_PASSWORD);
+      await page.click("[data-app-approval] [data-unlock]");
       await waitForFunction(app, () => document.querySelector("[data-address]")?.textContent !== "", { timeout: 20_000 });
       assert.equal(await app.$eval("[data-address]", (e) => e.textContent), ADDRESS);
       assert.equal(await app.evaluate(() => window.mounted ?? null), true);
@@ -258,6 +266,7 @@ for (const browserName of BROWSERS) describe(`${browserName}: web Provider`, () 
       const errors = [];
       page.on("pageerror", (error) => errors.push(error.message));
       await page.goto(`${web.url}#/apps?url=${encodeURIComponent(app.url(HOST))}`);
+      await confirmApp(page);
       const framed = await frameOf(page, app.origin(HOST));
       await waitForFunction(framed, () => window.testApp !== undefined, { timeout: 10_000 });
 
@@ -286,8 +295,9 @@ for (const browserName of BROWSERS) describe(`${browserName}: web Provider`, () 
       // This page's session starts locked: signing asks to unlock first.
       await page.waitForSelector("[data-app-approval] [data-unlock-required]", { timeout: 20_000 });
       await waitForFunction(page, risen, { timeout: 10_000 }, `[data-app-approval] ${ARMED} [data-unlock]`);
-      await page.type("[data-password]", WALLET_PASSWORD);
-      await page.click("[data-unlock]");
+      // The wallet's own lock screen is beside the app too: the approval's field is the one asked for.
+      await page.type("[data-app-approval] [data-password]", WALLET_PASSWORD);
+      await page.click("[data-app-approval] [data-unlock]");
       await page.waitForSelector("[data-app-approval] [data-blind]", { timeout: 20_000 });
       await waitForFunction(page, risen, { timeout: 10_000 }, `[data-app-approval] ${ARMED} [data-approve]`);
       await page.click("[data-app-approval] [data-approve]");
@@ -309,6 +319,7 @@ for (const browserName of BROWSERS) describe(`${browserName}: web Provider`, () 
       const errors = [];
       page.on("pageerror", (error) => errors.push(error.message));
       await page.goto(`${web.url}#/apps?url=${encodeURIComponent(app.url(HOST))}`);
+      await confirmApp(page);
       const framed = await frameOf(page, app.origin(HOST));
       await waitForFunction(framed, () => window.testApp !== undefined, { timeout: 10_000 });
       await waitForFunction(page, () => document.querySelector("[data-app-origin]")?.textContent, { timeout: 10_000 });
@@ -371,6 +382,225 @@ for (const browserName of BROWSERS) describe(`${browserName}: web Provider`, () 
     }
   });
 
+  test("an opened app docks on the left with the wallet on the right: the wallet moves between screens with the app mounted, and closes it", async () => {
+    const demo = await serveDemo(new URL(web.url).origin);
+    const session = await launchWebWallet(browserName);
+    try {
+      await importOnWebOrigin(session);
+      const page = await session.browser.newPage();
+      await page.setViewport({ width: 1200, height: 800 });
+      const errors = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      await page.goto(`${web.url}#/apps?url=${encodeURIComponent(demo.url({ wallet: web.url, slot: 99 }))}`);
+      await confirmApp(page);
+      const app = await frameOf(page, demo.origin);
+      await waitForFunction(page, () => document.querySelector("[data-app-origin]")?.textContent, { timeout: 10_000 });
+      await app.evaluate(() => (window.mounted = true));
+      // The wallet shows home beside the app, at the extension's width.
+      await waitForFunction(page, () => location.hash === "#/", { timeout: 10_000 });
+      const boxes = await page.evaluate(() => {
+        const box = (s) => document.querySelector(s).getBoundingClientRect().toJSON();
+        return { frame: box("[data-app-frame]"), wallet: box("[data-wallet-side]") };
+      });
+      assert.ok(boxes.frame.right <= boxes.wallet.left, "the app on the left, the wallet on the right");
+      assert.equal(Math.round(boxes.wallet.width), 400, "the extension popup's width");
+      assert.ok(boxes.frame.width >= 790);
+
+      // Unlocked in its column, the wallet goes to another screen and back; the app never reloads.
+      await page.waitForSelector("[data-wallet-side] [data-password]", { timeout: 10_000 });
+      await page.type("[data-wallet-side] [data-password]", WALLET_PASSWORD);
+      await page.click("[data-wallet-side] [data-unlock]");
+      await page.waitForSelector('[data-wallet-side] [data-nav="chains"]', { timeout: 20_000 });
+      await page.click('[data-wallet-side] [data-nav="chains"]');
+      await waitForFunction(page, () => location.hash === "#/chains", { timeout: 10_000 });
+      await page.click('[data-wallet-side] [data-nav="assets"]');
+      await waitForFunction(page, () => location.hash.startsWith("#/?tab=assets") || location.hash === "#/", { timeout: 10_000 });
+      assert.equal(await app.evaluate(() => window.mounted ?? null), true);
+
+      // A sheet the wallet opens stays in its column: over the wallet, not the app or the window's middle.
+      await page.waitForSelector("[data-wallet-side] [data-receive-action]", { timeout: 20_000 });
+      await page.click("[data-wallet-side] [data-receive-action]");
+      await page.waitForSelector("[data-wallet-side] [data-receive-sheet]", { timeout: 10_000 });
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      const held = await page.evaluate(() => {
+        const box = (s) => document.querySelector(s).getBoundingClientRect().toJSON();
+        return { column: box("[data-wallet-side]"), sheet: box("[data-receive-sheet]"), scrim: box("[data-wallet-side] .scrim") };
+      });
+      assert.ok(held.sheet.left >= held.column.left && held.sheet.right <= held.column.right + 1, "the sheet is inside the wallet's column");
+      assert.ok(held.scrim.left >= held.column.left, "its scrim dims the wallet, not the app");
+      await page.click("[data-receive-sheet] button[aria-label='Close']");
+      await waitForFunction(page, () => document.querySelector("[data-receive-sheet]") === null, { timeout: 10_000 });
+
+      // A reload of the tab opens it again.
+      await page.reload();
+      await frameOf(page, demo.origin);
+
+      // Closing it from the wallet's column leaves the wallet alone, full width.
+      await page.click("[data-app-close]");
+      await waitForFunction(page, () => document.querySelector("[data-app-frame]") === null, { timeout: 10_000 });
+      assert.equal(await page.$("[data-wallet-side]"), null);
+      await page.reload();
+      await page.waitForSelector("[data-wallet-ready], [data-password]", { timeout: 10_000 });
+      assert.equal(await page.$("[data-app-frame]"), null, "closed for good");
+      assert.deepEqual(errors, []);
+    } finally {
+      await session.close();
+      await demo.close();
+    }
+  });
+
+  test("on a desktop-sized window the wallet is laid out wide, with a rail and Activity beside the assets, until an app is docked", async () => {
+    const demo = await serveDemo(new URL(web.url).origin);
+    const session = await launchWebWallet(browserName);
+    try {
+      await importOnWebOrigin(session);
+      const page = await session.browser.newPage();
+      await page.setViewport({ width: 1440, height: 900 });
+      const errors = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      await page.goto(web.url);
+      await page.waitForSelector("[data-password]", { timeout: 10_000 });
+      await page.type("[data-password]", WALLET_PASSWORD);
+      await page.click("[data-unlock]");
+      await page.waitForSelector('[data-vault-state="unlocked"]', { timeout: 20_000 });
+      const layoutOf = () => page.evaluate(() => document.documentElement.dataset.layout ?? null);
+      await waitForFunction(page, () => document.documentElement.dataset.layout === "wide", { timeout: 10_000 });
+
+      // The bar is a rail down the left; Assets and Activity show at once, side by side.
+      await page.waitForSelector("[data-account]", { timeout: 20_000 });
+      const boxes = await page.evaluate(() => {
+        const box = (s) => document.querySelector(s).getBoundingClientRect().toJSON();
+        return { rail: box('nav[aria-label="Wallet"]'), assets: box("[data-account]"), activity: box("[data-side-activity]") };
+      });
+      assert.equal(boxes.rail.left, 0);
+      assert.ok(boxes.rail.height >= 890, "the rail runs the window's height");
+      assert.ok(boxes.rail.right <= boxes.assets.left, "the rail is left of the screen");
+      assert.ok(boxes.assets.right <= boxes.activity.left, "Activity is beside the assets, not behind a tab");
+      assert.ok(boxes.activity.height > 0);
+      // Activity is read without its tab being picked.
+      await page.waitForSelector("[data-side-activity] [data-history-entry], [data-side-activity] [data-history-empty]", { timeout: 20_000 });
+
+      // Docking an app folds the wallet into its compact column; closing it brings the wide layout back.
+      await page.evaluate((href) => {
+        const link = Object.assign(document.createElement("a"), { href });
+        document.body.append(link);
+        link.click();
+        link.remove();
+      }, `#/apps?url=${encodeURIComponent(demo.url({ wallet: web.url, slot: 99 }))}`);
+      await confirmApp(page);
+      await frameOf(page, demo.origin);
+      await waitForFunction(page, () => document.documentElement.dataset.layout === undefined, { timeout: 10_000 });
+      assert.equal(Math.round(await page.$eval("[data-wallet-side]", (e) => e.getBoundingClientRect().width)), 400);
+      assert.equal(await page.$eval('nav[aria-label="Wallet"]', (e) => e.getBoundingClientRect().width <= 400), true, "the bar is back along the bottom of the column");
+      await page.click("[data-app-close]");
+      await waitForFunction(page, () => document.documentElement.dataset.layout === "wide", { timeout: 10_000 });
+
+      // A narrow window never gets it.
+      await page.setViewport({ width: 900, height: 900 });
+      await waitForFunction(page, () => document.documentElement.dataset.layout === undefined, { timeout: 10_000 });
+      assert.equal(await layoutOf(), null);
+      assert.deepEqual(errors, []);
+    } finally {
+      await session.close();
+      await demo.close();
+    }
+  });
+
+  test("a link's app that isn't featured is named and opens only on the user's say", async () => {
+    const demo = await serveDemo(new URL(web.url).origin);
+    const session = await launchWebWallet(browserName);
+    try {
+      await importOnWebOrigin(session);
+      const page = await session.browser.newPage();
+      await page.setViewport({ width: 1200, height: 800 });
+      const link = `${web.url}#/apps?url=${encodeURIComponent(demo.url({ wallet: web.url, slot: 99 }))}`;
+      await page.goto(link);
+      await page.waitForSelector("[data-app-ask]", { timeout: 15_000 });
+      assert.equal(await page.$eval("[data-app-ask-origin]", (e) => e.textContent), demo.origin);
+      // Nothing is framed or kept until then.
+      assert.equal(await page.$("[data-app-frame]"), null);
+      assert.equal(await page.evaluate(() => sessionStorage.getItem("ecx-docked-app")), null);
+      // Declined, it's the Apps view; a reload doesn't open it.
+      await page.click("[data-app-decline]");
+      await page.waitForSelector("[data-apps]", { timeout: 10_000 });
+      await page.reload();
+      await page.waitForSelector("[data-apps]", { timeout: 10_000 });
+      assert.equal(await page.$("[data-app-frame]"), null);
+      // Asked again and agreed to, it docks.
+      await page.goto(link);
+      await confirmApp(page);
+      await frameOf(page, demo.origin);
+      assert.equal(await page.evaluate(() => sessionStorage.getItem("ecx-docked-app") !== null), true);
+    } finally {
+      await session.close();
+      await demo.close();
+    }
+  });
+
+  test("on a narrow screen the docked app and the wallet take turns, and an approval brings the wallet up", async () => {
+    const demo = await serveDemo(new URL(web.url).origin);
+    const session = await launchWebWallet(browserName);
+    try {
+      await importOnWebOrigin(session);
+      const page = await session.browser.newPage();
+      await page.setViewport({ width: 400, height: 800 });
+      await page.goto(`${web.url}#/apps?url=${encodeURIComponent(demo.url({ wallet: web.url, slot: 99 }))}`);
+      await confirmApp(page);
+      const app = await frameOf(page, demo.origin);
+      await waitForFunction(app, () => document.querySelector("[data-connect]")?.disabled === false, { timeout: 10_000 });
+      await app.evaluate(() => (window.mounted = true));
+      // Whether the wallet is what's on screen where the app is.
+      const covered = () => page.evaluate(() => {
+        const f = document.querySelector("[data-app-frame]").getBoundingClientRect();
+        return document.elementFromPoint(f.left + f.width / 2, f.top + f.height / 2).closest("[data-wallet-side]") !== null;
+      });
+      assert.equal(await covered(), false);
+      assert.equal(await page.$eval("[data-app-close]", (e) => e.getBoundingClientRect().height > 0), true, "the wallet's bar stays, with its close button");
+
+      await page.click("[data-app-toggle]");
+      assert.equal(await covered(), true, "the wallet over the app");
+      await page.click("[data-app-toggle]");
+      assert.equal(await covered(), false);
+
+      // The browser takes clicks into a cross-origin frame again once it has painted without the
+      // wallet over it: a person can't click sooner.
+      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+      await app.click("[data-connect]");
+      await overlaySettled(page);
+      assert.equal(await covered(), true, "the approval brings the wallet up");
+      await page.click("[data-app-approval] [data-reject]");
+      await waitForFunction(page, () => document.querySelector("[data-app-approval]") === null, { timeout: 10_000 });
+      assert.equal(await covered(), false, "and the app comes back after");
+      assert.equal(await app.evaluate(() => window.mounted ?? null), true);
+    } finally {
+      await session.close();
+      await demo.close();
+    }
+  });
+
+  test("a link to the Apps view with anything but a web page, or the wallet's own, opens nothing", async () => {
+    const session = await launchWebWallet(browserName);
+    try {
+      const page = await session.browser.newPage();
+      const errors = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      await page.goto(web.url);
+      // The router only follows a change of hash once the app has started.
+      await page.waitForSelector("[data-wallet-ready]", { timeout: 10_000 });
+      for (const url of ["javascript:window.parent.hit=1", "data:text/html,<p>hi", `${web.url}#/settings`]) {
+        await page.goto(`${web.url}#/apps?url=${encodeURIComponent(url)}`);
+        await page.waitForSelector("[data-apps] .error", { timeout: 10_000 });
+        assert.equal(await page.$eval("[data-apps] .error", (e) => e.textContent), "That isn't a web page the wallet can open.", url);
+        assert.equal(await page.$("[data-app-frame]"), null, url);
+      }
+      assert.equal(await page.evaluate(() => window.hit ?? null), null);
+      assert.equal(await page.evaluate(() => sessionStorage.getItem("ecx-docked-app")), null);
+      assert.deepEqual(errors, []);
+    } finally {
+      await session.close();
+    }
+  });
+
   test("the Apps view forgets the app's origin when its frame goes to another page, and says when a page doesn't connect", async () => {
     const demo = await serveDemo(new URL(web.url).origin);
     const [opted, refusing] = await Promise.all([servePlainPage(new URL(web.url).origin), servePlainPage("'none'")]);
@@ -378,6 +608,7 @@ for (const browserName of BROWSERS) describe(`${browserName}: web Provider`, () 
     try {
       const page = await session.browser.newPage();
       await page.goto(`${web.url}#/apps?url=${encodeURIComponent(demo.url({ wallet: web.url, slot: 99 }))}`);
+      await confirmApp(page);
       const app = await frameOf(page, demo.origin);
       await waitForFunction(page, () => document.querySelector("[data-app-origin]")?.textContent, { timeout: 10_000 });
       // The app sends its frame to a page that allows the wallet to frame it but says nothing.
@@ -388,6 +619,7 @@ for (const browserName of BROWSERS) describe(`${browserName}: web Provider`, () 
 
       // A page that refuses every frame never loads there.
       await page.goto(`${web.url}#/apps?url=${encodeURIComponent(refusing.url)}`);
+      await confirmApp(page);
       await page.waitForSelector("[data-app-silent]", { timeout: 10_000 });
       assert.equal(await page.$("[data-app-origin]"), null);
     } finally {

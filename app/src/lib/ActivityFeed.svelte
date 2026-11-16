@@ -11,8 +11,9 @@
   import { amountText } from "$lib/unit.svelte";
 
   /**
-   * The Activity tab: Deposits in progress, then `views`' transactions merged, by day. Reads them
-   * the first time it's `active`. With `chips`, the user can narrow it to one chain.
+   * The Activity tab: Deposits in progress, then `views`' transactions merged, by day. Reads each
+   * chain's the first time it's `active` with that chain among them: wide, it's active from the
+   * start, before the chains are listed. With `chips`, the user can narrow it to one chain.
    */
   let {
     chains,
@@ -22,12 +23,13 @@
     chips = false,
   }: { chains: Chains; views: ChainView[]; spenders: ChainView[]; active: boolean; chips?: boolean } = $props();
 
-  let read = false;
+  const read = new Set<ChainId>();
   $effect(() => {
-    if (active && !read) {
-      read = true;
-      chains.readHistory(views.map((v) => v.info.id));
-    }
+    if (!active) return;
+    const unread = views.map((v) => v.info.id).filter((id) => !read.has(id));
+    if (unread.length === 0) return;
+    for (const id of unread) read.add(id);
+    chains.readHistory(unread);
   });
 
   /** The chain the chips narrow the transactions to; Deposits in progress show under every chip. */
