@@ -12,6 +12,7 @@ use bitcoin::script::PushBytesBuf;
 use bitcoin::transaction::Version;
 use bitcoin::{Amount, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness};
 use common::{paying, script, FOREIGN, STARTER};
+use ecx_flush::bast;
 use ecx_flush::{check, decode, derive_account, finalize, sign, Decoded, Destination, RefusalCode};
 
 /// An input spending `prev`'s output 0, with `derivation` as its `bip32_derivation`.
@@ -183,4 +184,54 @@ fn finalize_needs_a_valid_signature_on_every_input() {
     let mut tampered = Psbt::from_str(&sign(&plain(&[ours(1, 100_000, 0, true)]).to_string(), STARTER).unwrap()).unwrap();
     tampered.unsigned_tx.output[0].value = Amount::from_sat(60_000);
     assert!(finalize(&tampered.to_string()).unwrap_err().message.contains("signature isn't valid"));
+}
+
+/// An asset id, display order.
+const TOKEN: &str = "6bb2ae6e23e626cd2fba1f8845d8bbc047aeb9a8f4690ee9a21b5d04584dfb03";
+
+fn marker_out(bytes: Vec<u8>) -> TxOut {
+    pay(ScriptBuf::from_bytes(bytes), 0)
+}
+
+/// The Starter's value-0 coin on receive 0 (the given-out address), that `marker` lists as output 0.
+fn ours_token(seed: u8, marker: Vec<u8>) -> Spend {
+    let marker = ScriptBuf::from_bytes(marker);
+    Spend { prev: paying(seed, &[(&script(STARTER, 0, 0), 0), (&marker, 0)]), derivation: None }
+}
+
+#[test]
+fn blind_facts_count_the_tokens_leaving_the_wallet() {
+    // 1000 of TOKEN: 700 to someone else, 300 back; a stake bond makes it Blind.
+    let psbt = request(
+        &[ours_token(1, bast::transfer_marker(&[(0, TOKEN, 1_000)]).unwrap()), ours(2, 100_000, 0, true)],
+        vec![
+            pay(script(FOREIGN, 0, 1), 0),
+            pay(script(STARTER, 0, 0), 0),
+            marker_out(bast::transfer_marker(&[(0, TOKEN, 700), (1, TOKEN, 300)]).unwrap()),
+            pay(script(STARTER, 0, 0), 90_000),
+            op_return(b"\xDBSTK"),
+        ],
+        0,
+        Sequence::ENABLE_RBF_NO_LOCKTIME,
+    );
+    let Decoded::Blind { verifiable_facts: facts, .. } = decode(&psbt.to_string(), STARTER).unwrap() else { panic!("a stake bond is Blind") };
+    let leaving: Vec<_> = facts.total_leaving.iter().map(|a| (a.asset.as_str(), a.amount.as_str())).collect();
+    assert_eq!(leaving, [("", "10000"), (TOKEN, "700")]);
+    let owned: Vec<_> = facts.owned_inputs.iter().map(|i| (i.index, i.asset.as_str(), i.amount.as_str())).collect();
+    assert_eq!(owned, [(0, TOKEN, "1000"), (1, "", "100000")]);
+    assert!(facts.dangerous_flags.is_empty(), "{:?}", facts.dangerous_flags);
+}
+
+#[test]
+fn blind_facts_flag_an_owned_input_whose_token_they_cant_tell() {
+    // A coin a trade made: a result, whose token only the node's state knows.
+    let made_by_trade = bast::swap_pools_marker(&"00".repeat(32), &[TOKEN], 10_000, 1, &[], &[(0, None)]).unwrap();
+    let psbt = request(
+        &[ours_token(1, made_by_trade), ours(2, 100_000, 0, true)],
+        vec![pay(script(FOREIGN, 0, 1), 0), marker_out(bast::transfer_marker(&[(0, TOKEN, 5)]).unwrap()), pay(script(STARTER, 0, 0), 90_000)],
+        0,
+        Sequence::ENABLE_RBF_NO_LOCKTIME,
+    );
+    let Decoded::Blind { verifiable_facts: facts, .. } = decode(&psbt.to_string(), STARTER).unwrap() else { panic!("spending a result is Blind") };
+    assert!(facts.dangerous_flags.iter().any(|f| f.contains("input 0") && f.contains("token")), "{:?}", facts.dangerous_flags);
 }
