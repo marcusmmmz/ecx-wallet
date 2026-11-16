@@ -158,13 +158,15 @@ fn blind_facts_never_count_a_named_result_since_only_its_floor_is_proven() {
     let as_transfer = facts(&psbt, &right);
     assert_eq!(fork_leaving(&as_transfer).as_deref(), Some("-14482"));
     assert!(flagged(&as_transfer), "{:?}", as_transfer.dangerous_flags);
-    // Understated alone, the transfer doesn't carry on what it says it spends: refused, as the node would.
+    // Understated alone, the marker carries on more than the evidence says the inputs bring: the
+    // Decoder refuses it (the node, which never sees the evidence, would judge the real amount).
     let understated = evidence(&buy, 0, FORK, 44_100);
     let refusal = decode_with_evidence(&psbt.to_string(), STARTER, &understated.to_string()).unwrap_err();
     assert_eq!(refusal.code, RefusalCode::Malformed);
 
-    // Under a trade nothing holds the result to the index's word: 44,482 go in and 14,482 come back,
-    // which counted would read as 29,618 leaving.
+    // Under a trade nothing holds the result to the index's word. Not a valid trade (made-up pool,
+    // and Blind before any trade check): it shows only that the facts leave the result out, counting
+    // just the 14,482 its marker lists coming back, and flag it.
     let swap = ecx_flush::bast::swap_pools_marker(FORK, &[&"00".repeat(32)], 30_000, 1, &[], &[(0, None), (1, Some((FORK, 14_482)))]).unwrap();
     psbt.unsigned_tx.output[2].script_pubkey = ScriptBuf::from_bytes(swap);
     let as_trade = facts(&psbt, &understated);
